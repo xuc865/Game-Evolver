@@ -38,7 +38,7 @@ class CommandBackend:
             process = subprocess.Popen(
                 command,
                 cwd=self.config.cwd,
-                env={**os.environ, **self.config.env},
+                env={**self.config.env, **os.environ},
                 stdout=log,
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
@@ -59,12 +59,25 @@ def _terminate_process_group(process: subprocess.Popen) -> None:
     try:
         os.killpg(process.pid, signal.SIGTERM)
         process.wait(timeout=15)
+    except PermissionError:
+        # The process may already have escaped/reparented or be owned by a
+        # different session during operator-triggered restarts.  Treat cleanup
+        # best-effort rather than turning a deliberate stop into an admission
+        # infrastructure failure.
+        try:
+            process.terminate()
+            process.wait(timeout=5)
+        except (ProcessLookupError, subprocess.TimeoutExpired, PermissionError):
+            pass
     except (ProcessLookupError, subprocess.TimeoutExpired):
         try:
             os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
+        except (ProcessLookupError, PermissionError):
             pass
-        process.wait()
+        try:
+            process.wait(timeout=5)
+        except (subprocess.TimeoutExpired, PermissionError):
+            pass
 
 
 def _redact(value: str) -> str:

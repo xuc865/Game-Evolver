@@ -48,6 +48,12 @@ def main(argv: list[str] | None = None) -> int:
                         help="Override GAMECRAFT_BENCH_JUDGE for this run.")
     parser.add_argument("--judge-model", default=None,
                         help="Override GAMECRAFT_BENCH_JUDGE_MODEL for this run.")
+    parser.add_argument(
+        "--judge-input-mode", choices=("vision", "text"),
+        default=cfg.JUDGE_INPUT_MODE,
+        help="Judge evidence mode. 'text' disables frame/image inputs and uses "
+             "source, trace, build and runtime logs (default: env or vision).",
+    )
     parser.add_argument("--fps", type=int, default=30,
                         help="Replay framerate (default: 30).")
     parser.add_argument("--width",  type=int, default=1280)
@@ -81,6 +87,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"[verifier] output    = {args.output}", flush=True)
     print(f"[verifier] judge     = {type(judge).__name__}(model={judge.model!r})",
           flush=True)
+    print(f"[verifier] input     = {args.judge_input_mode}", flush=True)
     print(f"[verifier] godot_bin = {cfg.GODOT_BIN}", flush=True)
 
     result = score_project(
@@ -94,12 +101,18 @@ def main(argv: list[str] | None = None) -> int:
         frame_interval_seconds=args.frame_interval_seconds,
         max_demo_seconds=args.max_demo_seconds,
         max_demos=args.max_demos,
+        judge_input_mode=args.judge_input_mode,
     )
 
     _print_summary(result)
     _write_reward(args.output, result)
     _write_ctrf(args.output, result)
 
+    # 2 is reserved for verifier infrastructure failures. A valid low-quality
+    # game remains exit 1 so callers can retain its score without admitting an
+    # infra-failed zero into evolution comparisons.
+    if result.infrastructure_errors:
+        return 2
     return 0 if result.reward >= args.pass_threshold else 1
 
 
@@ -109,6 +122,7 @@ def _print_summary(result: ScoreResult) -> None:
     print(f"[verifier] build_ok      = {result.build_ok}", flush=True)
     print(f"[verifier] num_demos     = {len(result.demos)}", flush=True)
     print(f"[verifier] num_errors    = {len(result.errors)}", flush=True)
+    print(f"[verifier] infra_ok      = {not result.infrastructure_errors}", flush=True)
     if result.errors:
         for e in result.errors:
             print(f"[verifier]   ! {e}", flush=True)
@@ -170,7 +184,9 @@ def _write_ctrf(output_dir: Path, result: ScoreResult) -> None:
                     "name": result.judge_name,
                     "model": result.judge_model,
                 },
+                "judge_input_mode": result.judge_input_mode,
                 "errors": result.errors,
+                "infrastructure_errors": result.infrastructure_errors,
             },
         }
     }

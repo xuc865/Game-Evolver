@@ -20,14 +20,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # ── validate required environment variables ──
-if [[ -z "${CODEX_API_BASE:-}" ]]; then
-  echo "ERROR: CODEX_API_BASE is required" >&2
-  exit 1
-fi
-if [[ -z "${CODEX_MODEL:-}" ]]; then
-  echo "ERROR: CODEX_MODEL is required" >&2
-  exit 1
-fi
+# shellcheck disable=SC1091
+source "$ROOT_DIR/scripts/provider_env.sh"
+game_loop_validate_agent_env
 
 # ── extract --ve parameter from CODEX_MODEL if present ──
 # Format: "ModelName --ve some_value" — we strip the --ve part for the actual model name

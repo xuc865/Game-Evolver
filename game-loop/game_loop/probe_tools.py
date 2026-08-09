@@ -18,14 +18,21 @@ def _emit(payload: dict) -> None:
     print(json.dumps(payload, ensure_ascii=False))
 
 
-def _resolve_godot_bin(explicit: str | None) -> str | None:
+def resolve_godot_executable(explicit: str | None = None) -> str | None:
+    """Return an executable Godot binary path for local probes and agents."""
     if explicit:
         path = Path(explicit).expanduser()
         if path.is_file():
-            return str(path)
-    env = os.environ.get("GODOT_BIN", "").strip()
-    if env and Path(env).expanduser().is_file():
-        return str(Path(env).expanduser())
+            return str(path.resolve())
+    for env_name in ("GODOT_EXEC_PATH", "GODOT_BIN"):
+        env = os.environ.get(env_name, "").strip()
+        if env and Path(env).expanduser().is_file():
+            return str(Path(env).expanduser().resolve())
+    install_root = Path(__file__).resolve().parents[1] / ".tools" / "godot"
+    if install_root.is_dir():
+        for candidate in sorted(install_root.glob("Godot_v*-stable*")):
+            if candidate.is_file():
+                return str(candidate.resolve())
     for candidate in (
         "/Applications/Godot.app/Contents/MacOS/Godot",
         "/usr/local/bin/godot",
@@ -33,8 +40,11 @@ def _resolve_godot_bin(explicit: str | None) -> str | None:
     ):
         if Path(candidate).is_file():
             return candidate
-    found = shutil.which("godot")
-    return found
+    return shutil.which("godot")
+
+
+def _resolve_godot_bin(explicit: str | None) -> str | None:
+    return resolve_godot_executable(explicit)
 
 
 def _artifact_root(path: Path) -> Path:

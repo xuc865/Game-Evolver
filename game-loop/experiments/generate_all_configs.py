@@ -25,7 +25,6 @@ MODELS = {
     "glm5.2": {"CODEX_API_BASE": "http://29.116.237.5:8080/v1", "CODEX_MODEL": "GLM-5.2-W4AFP8-node6"},
     "deepseek_v4": {"CODEX_API_BASE": "https://api.deepseek.com", "CODEX_MODEL": "deepseek-v4-flash"},
 }
-API_KEY = "sk-placeholder"
 
 EVOLUTION_3x1 = {
     "max_generations": 3,
@@ -52,7 +51,17 @@ BENCH_ROOTS = {
 }
 
 BACKEND_CMDS = {
-    "gcbench": ["bash", "scripts/run_chat_agent_direct.sh"],
+    "gcbench": [
+        "bash",
+        "scripts/run_gcbench_l4_backend.sh",
+        "{candidate_workspace}",
+        "{instruction_file}",
+        "{artifact_path}",
+        "{output_manifest}",
+        "{task_id}",
+        "{gcbench_root}",
+        "{breakdown_path}",
+    ],
     "gdbench": ["bash", "scripts/run_chat_agent_direct.sh"],
     "swebench": ["python3", "-m", "game_loop.benchmarks.swebench_bridge"],
     "nl2repo": ["python3", "-m", "game_loop.benchmarks.nl2repo_bridge"],
@@ -114,7 +123,10 @@ def make_config(
     ablation: bool = False,
     ablation_level: str | None = None,
 ) -> dict:
-    env = {"CODEX_API_KEY": API_KEY}
+    # Runtime secrets belong to the launcher environment.  Keeping a placeholder
+    # here can mask a real value and used to make keyless internal providers look
+    # like stub runs.
+    env: dict[str, str] = {}
     if model_key and model_key in MODELS:
         env.update(MODELS[model_key])
 

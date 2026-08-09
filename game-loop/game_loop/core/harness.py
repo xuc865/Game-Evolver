@@ -6,6 +6,7 @@ from statistics import median
 from typing import Any, Protocol, Sequence
 
 from game_loop.config import (
+    HarnessElementConfig,
     HarnessEvolutionConfig,
     HarnessModuleConfig,
     HarnessToolInterfaceConfig,
@@ -164,6 +165,83 @@ class HarnessToolInterface:
 
 
 @dataclass(frozen=True)
+class HarnessActiveElement:
+    """One activated catalog item inside a harness category (skill/MCP/tool/...)."""
+
+    element_id: str
+    category: str
+    description: str
+    spec: dict[str, Any] = field(default_factory=dict)
+    spec_hash: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        spec_hash = self.spec_hash or self.compute_spec_hash()
+        return {
+            "element_id": self.element_id,
+            "category": self.category,
+            "description": self.description,
+            "spec": dict(self.spec),
+            "spec_hash": spec_hash,
+        }
+
+    def compute_spec_hash(self) -> str:
+        return self.compute_spec_hash_from_payload(
+            {
+                "element_id": self.element_id,
+                "category": self.category,
+                "description": self.description,
+                "spec": dict(self.spec),
+            }
+        )
+
+    @classmethod
+    def from_config(cls, config: HarnessElementConfig) -> "HarnessActiveElement":
+        payload = {
+            "element_id": config.element_id,
+            "category": config.category,
+            "description": config.description,
+            "spec": dict(config.spec),
+        }
+        return cls(
+            element_id=config.element_id,
+            category=config.category,
+            description=config.description,
+            spec=dict(config.spec),
+            spec_hash=cls.compute_spec_hash_from_payload(payload),
+        )
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "HarnessActiveElement":
+        result = cls(
+            element_id=str(value["element_id"]),
+            category=str(value["category"]),
+            description=str(value.get("description", "")),
+            spec={str(k): v for k, v in dict(value.get("spec", {})).items()},
+            spec_hash=str(value.get("spec_hash", "")),
+        )
+        expected = result.compute_spec_hash()
+        if result.spec_hash and result.spec_hash != expected:
+            raise ValueError(f"harness element {result.element_id} spec_hash mismatch")
+        return cls(
+            element_id=result.element_id,
+            category=result.category,
+            description=result.description,
+            spec=result.spec,
+            spec_hash=expected,
+        )
+
+    @staticmethod
+    def compute_spec_hash_from_payload(payload: dict[str, Any]) -> str:
+        body = {
+            "element_id": payload["element_id"],
+            "category": payload["category"],
+            "description": payload.get("description", ""),
+            "spec": payload.get("spec", {}),
+        }
+        return sha256_json(body)
+
+
+@dataclass(frozen=True)
 class HarnessProfile:
     """A content-addressed Agent/engine harness used unchanged for one benchmark episode."""
 
@@ -171,6 +249,7 @@ class HarnessProfile:
     parent_harness_id: str | None
     active_modules: tuple[str, ...]
     active_tool_interfaces: tuple[HarnessToolInterface, ...]
+    active_elements: tuple[HarnessActiveElement, ...]
     context_compiler: ContextCompilerPolicy
     recovery_policy: RecoveryPolicy
     validation_policy: ValidationPolicy
@@ -184,6 +263,7 @@ class HarnessProfile:
         value["active_tool_interfaces"] = [
             item.to_dict() for item in self.active_tool_interfaces
         ]
+        value["active_elements"] = [item.to_dict() for item in self.active_elements]
         value["context_compiler"] = self.context_compiler.to_dict()
         value["recovery_policy"] = self.recovery_policy.to_dict()
         value["validation_policy"] = self.validation_policy.to_dict()
@@ -198,6 +278,10 @@ class HarnessProfile:
             active_tool_interfaces=tuple(
                 HarnessToolInterface.from_dict(dict(item))
                 for item in value.get("active_tool_interfaces", [])
+            ),
+            active_elements=tuple(
+                HarnessActiveElement.from_dict(dict(item))
+                for item in value.get("active_elements", [])
             ),
             context_compiler=ContextCompilerPolicy.from_dict(
                 value.get("context_compiler")
@@ -265,6 +349,7 @@ class HarnessEpochResult:
     parent_outcomes: tuple[HarnessEpisodeOutcome, ...]
     candidate_outcomes: tuple[HarnessEpisodeOutcome, ...]
     created_at: str
+    rubric_validation: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
@@ -290,7 +375,7 @@ class HarnessReplayRunner(Protocol):
 class HarnessEvolutionEngine:
     """Stores and proposes harnesses; it never promotes from a single game attempt."""
 
-    policy_version = "two-timescale-executable-harness-v3"
+    policy_version = "two-timescale-executable-harness-v4"
 
     def __init__(
         self,
@@ -304,10 +389,15 @@ class HarnessEvolutionEngine:
         self.config = config
         self.allow_mutation = allow_mutation
         self.modules = {module.module_id: module for module in config.modules}
+        self.module_categories = {
+            module.module_id: module.category for module in config.modules
+        }
         self.tool_interfaces = {
             interface.interface_id: HarnessToolInterface.from_config(interface)
             for interface in config.tool_interfaces
         }
+        self.elements = {element.element_id: element for element in config.element_catalog}
+        self._load_extended_element_catalog()
 
     def initialize(self, initial_profile: HarnessProfile | None = None) -> HarnessProfile:
         self.profiles.mkdir(parents=True, exist_ok=True)
@@ -315,6 +405,7 @@ class HarnessEvolutionEngine:
             parent_id=None,
             modules=self.config.seed_modules,
             tool_interfaces=self._seed_tool_interfaces(),
+            active_elements=self._seed_elements(),
             context_compiler=ContextCompilerPolicy(),
             recovery_policy=RecoveryPolicy(),
             validation_policy=ValidationPolicy(),
@@ -380,10 +471,38 @@ class HarnessEvolutionEngine:
             return parent
         active = list(parent.active_modules)
         active_tool_interfaces = list(parent.active_tool_interfaces)
+        active_elements = list(parent.active_elements)
         context_compiler = parent.context_compiler
         recovery_policy = parent.recovery_policy
         validation_policy = parent.validation_policy
-        if self._targets_tool_interface(gradient):
+        from game_loop.core.harness_element_stats import (
+            HarnessElementStatsStore,
+            mutate_category_elements,
+            resolve_target_category,
+        )
+
+        target_category = resolve_target_category(gradient.target_tags)
+        if (
+            target_category
+            and self.config.element_catalog
+            and self.config.enable_usage_driven_mutation
+        ):
+            stats = HarnessElementStatsStore.load(self.root / "element_stats.json")
+            mutation = mutate_category_elements(
+                active=active_elements,
+                category=target_category,
+                catalog=self.elements,
+                stats=stats,
+                limits=self.config.max_active_elements,
+                gradient_tags=gradient.target_tags,
+                policy=self.config.element_mutation_policy,
+            )
+            if mutation is not None:
+                active_elements = mutation.active
+                for addition in mutation.catalog_additions:
+                    self.register_element(addition)
+                stats.save(self.root / "element_stats.json")
+        elif self._targets_tool_interface(gradient):
             active_tool_interfaces = self._mutate_tool_interfaces(
                 active_tool_interfaces, gradient
             )
@@ -399,6 +518,7 @@ class HarnessEvolutionEngine:
             parent_id=parent_id,
             modules=tuple(active),
             tool_interfaces=tuple(active_tool_interfaces),
+            active_elements=tuple(active_elements),
             context_compiler=context_compiler,
             recovery_policy=recovery_policy,
             validation_policy=validation_policy,
@@ -431,12 +551,34 @@ class HarnessEvolutionEngine:
                 active[active.index(removal.module_id)] = addition.module_id
         return active
 
+    def record_element_stats(self, *, profile: HarnessProfile, result: HarnessEpochResult) -> None:
+        if not self.config.enable_usage_driven_mutation or not profile.active_elements:
+            return
+        from game_loop.core.harness_element_stats import HarnessElementStatsStore
+
+        stats = HarnessElementStatsStore.load(self.root / "element_stats.json")
+        stats.record_epoch(profile=profile, result=result)
+        stats.save(self.root / "element_stats.json")
+
     def render(self, profile: HarnessProfile) -> str:
-        if not profile.active_modules and not profile.active_tool_interfaces:
+        if (
+            not profile.active_modules
+            and not profile.active_tool_interfaces
+            and not profile.active_elements
+        ):
             return ""
         lines = ["Agent harness profile (fixed for this complete evolution episode):"]
         for module_id in profile.active_modules:
-            lines.append(f"- [{module_id}] {self.modules[module_id].instruction}")
+            lines.append(f"- [module:{module_id}] {self.modules[module_id].instruction}")
+        if profile.active_elements:
+            lines.append("Active managed elements by category:")
+            for element in sorted(
+                profile.active_elements,
+                key=lambda item: (item.category, item.element_id),
+            ):
+                lines.append(
+                    f"- [{element.category}:{element.element_id}] {element.description}"
+                )
         if profile.active_tool_interfaces:
             lines.append("Harness-owned tool interfaces available in this episode:")
             for interface in profile.active_tool_interfaces:
@@ -460,6 +602,7 @@ class HarnessEvolutionEngine:
         candidate: HarnessProfile,
         parent_outcomes: Sequence[HarnessEpisodeOutcome],
         candidate_outcomes: Sequence[HarnessEpisodeOutcome],
+        rubric_validation: dict[str, Any] | None = None,
     ) -> HarnessEpochResult:
         parents = {item.case_id: item for item in parent_outcomes}
         candidates = {item.case_id: item for item in candidate_outcomes}
@@ -516,6 +659,8 @@ class HarnessEvolutionEngine:
             reasons.append("paired median improvement is below the promotion threshold")
         if deltas and min(deltas) < -self.config.max_case_regression:
             reasons.append("at least one replay case exceeds the regression limit")
+        if rubric_validation is not None and not rubric_validation.get("accepted", True):
+            reasons.extend(str(item) for item in rubric_validation.get("reasons", []))
         accepted = not reasons
         return HarnessEpochResult(
             epoch=epoch,
@@ -529,6 +674,7 @@ class HarnessEvolutionEngine:
             parent_outcomes=tuple(parent_outcomes),
             candidate_outcomes=tuple(candidate_outcomes),
             created_at=utc_now(),
+            rubric_validation=rubric_validation,
         )
 
     def record_epoch(self, result: HarnessEpochResult) -> None:
@@ -542,6 +688,11 @@ class HarnessEvolutionEngine:
                 "updated_at": utc_now(),
                 "promoted_by_epoch": result.epoch,
             })
+        try:
+            candidate = self.get(result.candidate_harness_id)
+            self.record_element_stats(profile=candidate, result=result)
+        except (ValueError, KeyError):
+            pass
 
     def _module_score(
         self,
@@ -562,6 +713,7 @@ class HarnessEvolutionEngine:
         parent_id: str | None,
         modules: Sequence[str],
         tool_interfaces: Sequence[HarnessToolInterface],
+        active_elements: Sequence[HarnessActiveElement] = (),
         context_compiler: ContextCompilerPolicy,
         recovery_policy: RecoveryPolicy,
         validation_policy: ValidationPolicy,
@@ -572,10 +724,14 @@ class HarnessEvolutionEngine:
         active_tool_interfaces = tuple(
             sorted(tool_interfaces, key=lambda item: item.interface_id)
         )
+        elements = tuple(
+            sorted(active_elements, key=lambda item: (item.category, item.element_id))
+        )
         identity = self._profile_identity(
             parent_id,
             active,
             active_tool_interfaces,
+            elements,
             context_compiler,
             recovery_policy,
             validation_policy,
@@ -586,6 +742,7 @@ class HarnessEvolutionEngine:
             parent_harness_id=parent_id,
             active_modules=active,
             active_tool_interfaces=active_tool_interfaces,
+            active_elements=elements,
             context_compiler=context_compiler,
             recovery_policy=recovery_policy,
             validation_policy=validation_policy,
@@ -598,15 +755,31 @@ class HarnessEvolutionEngine:
         unknown = sorted(set(profile.active_modules) - set(self.modules))
         if unknown:
             raise ValueError(f"harness profile references unknown modules: {unknown}")
+        unknown_elements = sorted(
+            {item.element_id for item in profile.active_elements} - set(self.elements)
+        )
+        if unknown_elements:
+            raise ValueError(
+                f"harness profile references unknown elements: {unknown_elements}"
+            )
         if len(profile.active_modules) > self.config.max_active_modules:
             raise ValueError("harness profile exceeds max_active_modules")
         if len(profile.active_tool_interfaces) > self.config.max_active_tool_interfaces:
             raise ValueError("harness profile exceeds max_active_tool_interfaces")
+        counts: dict[str, int] = {}
+        for element in profile.active_elements:
+            counts[element.category] = counts.get(element.category, 0) + 1
+            limit = self.config.max_active_elements.get(element.category)
+            if limit and counts[element.category] > limit:
+                raise ValueError(
+                    f"harness profile exceeds max_active_elements for {element.category}"
+                )
         self._validate_tool_interfaces(profile.active_tool_interfaces)
         expected_id = "harness-" + sha256_json(self._profile_identity(
             profile.parent_harness_id,
             profile.active_modules,
             profile.active_tool_interfaces,
+            profile.active_elements,
             profile.context_compiler,
             profile.recovery_policy,
             profile.validation_policy,
@@ -620,6 +793,7 @@ class HarnessEvolutionEngine:
         parent_id: str | None,
         modules: Sequence[str],
         tool_interfaces: Sequence[HarnessToolInterface],
+        active_elements: Sequence[HarnessActiveElement],
         context_compiler: ContextCompilerPolicy,
         recovery_policy: RecoveryPolicy,
         validation_policy: ValidationPolicy,
@@ -633,6 +807,12 @@ class HarnessEvolutionEngine:
                 item.to_dict()
                 for item in sorted(tool_interfaces, key=lambda value: value.interface_id)
             ],
+            "active_elements": [
+                item.to_dict()
+                for item in sorted(
+                    active_elements, key=lambda value: (value.category, value.element_id)
+                )
+            ],
             "context_compiler": context_compiler.to_dict(),
             "recovery_policy": recovery_policy.to_dict(),
             "validation_policy": validation_policy.to_dict(),
@@ -644,6 +824,55 @@ class HarnessEvolutionEngine:
             self.tool_interfaces[interface_id]
             for interface_id in self.config.seed_tool_interfaces
         )
+
+    def _seed_elements(self) -> tuple[HarnessActiveElement, ...]:
+        seeded: list[HarnessActiveElement] = []
+        for category, element_ids in self.config.seed_elements.items():
+            for element_id in element_ids:
+                seeded.append(HarnessActiveElement.from_config(self.elements[element_id]))
+        return tuple(sorted(seeded, key=lambda item: (item.category, item.element_id)))
+
+    def _extended_catalog_path(self) -> Path:
+        return self.root / "element_catalog_extensions.json"
+
+    def _load_extended_element_catalog(self) -> None:
+        path = self._extended_catalog_path()
+        if not path.is_file():
+            return
+        from game_loop.config import HarnessElementConfig
+
+        raw = read_json(path)
+        for item in raw.get("items", []):
+            spec = HarnessElementConfig.from_dict(dict(item))
+            self.elements[spec.element_id] = spec
+
+    def register_element(self, spec) -> None:
+        from game_loop.config import HarnessElementConfig
+
+        if not isinstance(spec, HarnessElementConfig):
+            raise TypeError("register_element expects HarnessElementConfig")
+        if spec.element_id in self.elements:
+            return
+        self.elements[spec.element_id] = spec
+        path = self._extended_catalog_path()
+        payload = {"schema_version": "harness-element-extensions.v1", "items": []}
+        if path.is_file():
+            payload = read_json(path)
+        items = list(payload.get("items", []))
+        items.append(
+            {
+                "id": spec.element_id,
+                "category": spec.category,
+                "description": spec.description,
+                "spec": dict(spec.spec),
+                "tags": list(spec.tags),
+            }
+        )
+        atomic_write_json(path, {
+            "schema_version": "harness-element-extensions.v1",
+            "updated_at": utc_now(),
+            "items": items,
+        })
 
     def _targets_tool_interface(self, gradient: HarnessSemanticGradient) -> bool:
         tags = {tag.casefold() for tag in gradient.target_tags}
@@ -850,7 +1079,14 @@ def load_episode_outcome(
         raise ValueError("run does not prove that its harness was frozen within the episode")
     evaluation = dict(state.get("champion_evaluation", {}))
     status = str(state.get("status", ""))
-    infrastructure_ok = status != "paused_infrastructure"
+    evaluator = evaluation.get("evaluator", {})
+    evaluator_infrastructure_failure = (
+        isinstance(evaluator, dict)
+        and bool(evaluator.get("infrastructure_failure", False))
+    )
+    infrastructure_ok = (
+        status != "paused_infrastructure" and not evaluator_infrastructure_failure
+    )
     budgets = dict(manifest.get("budgets", {}))
     return HarnessEpisodeOutcome(
         case_id=case_id,

@@ -69,6 +69,21 @@ benchmark evaluators with equal allocated budgets. Infrastructure-failed pairs a
 quality evidence. The deterministic test oracle in `tests/test_agentx_nested.py` is explicitly an
 offline protocol smoke only; it is not evidence of model or benchmark performance.
 
+## Rubric-gated admission
+
+After paired replay, each harness mutation is validated on randomly sampled tasks
+(default: 3 for inner, 2 for outer) using deep in-game probes plus an LLM judge:
+
+- **hard rubrics (0/1):** candidate must be greater than or equal to parent on every hard rubric;
+- **soft rubrics (0..1):** candidate soft weighted total must be greater than or equal to parent.
+
+Rejected harnesses append structured lessons to `rejection_experience.jsonl` and are
+injected into the next inner/outer gradient proposer context.
+
+Inner and outer harness catalogs are split via `experiments/agentx/inner_harness_*.json`
+and `experiments/agentx/outer_harness.json`. Task sampling uses
+`experiments/agentx/task_pool_smoke.json` for smoke runs.
+
 ## Smoke and verification
 
 ```bash

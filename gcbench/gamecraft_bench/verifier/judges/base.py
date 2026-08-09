@@ -34,9 +34,14 @@ class RequirementSpec:
 class JudgeRequest:
     """One scoring request: all requirements for a single demo."""
     demo_id: str
-    video_path: Path
+    video_path: Path | None
     frame_paths: list[Path]
     requirements: list[RequirementSpec]
+    # Text-only judges receive a bounded, deterministic evidence bundle made
+    # from the trace, project source, build output and replay/runtime logs.
+    # Multimodal backends may ignore it.
+    evidence_text: str = ""
+    input_mode: str = "vision"
 
 
 @dataclass(frozen=True)

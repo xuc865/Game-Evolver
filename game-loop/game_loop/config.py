@@ -292,6 +292,7 @@ class HarnessModuleConfig:
     module_id: str
     instruction: str
     tags: tuple[str, ...] = ()
+    category: str = "workflow"
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "HarnessModuleConfig":
@@ -306,11 +307,110 @@ class HarnessModuleConfig:
         raw_tags = value.get("tags", [])
         if not isinstance(raw_tags, list) or not all(isinstance(item, str) for item in raw_tags):
             raise ValueError(f"L4 harness module {module_id}: tags must be a string list")
+        category = str(value.get("category", "workflow")).strip().lower()
+        if category not in {
+            "skill",
+            "mcp",
+            "tool",
+            "context",
+            "protocol",
+            "workflow",
+            "gameplay",
+            "observability",
+            "repair",
+            "strategy",
+        }:
+            raise ValueError(f"L4 harness module {module_id}: unsupported category {category!r}")
         return cls(
             module_id=module_id,
             instruction=instruction,
             tags=tuple(sorted({item.strip() for item in raw_tags if item.strip()})),
+            category=category,
         )
+
+
+@dataclass(frozen=True)
+class HarnessElementConfig:
+    """One concrete managed item inside a harness category (skill/MCP/tool/...)."""
+
+    element_id: str
+    category: str
+    description: str
+    spec: dict[str, Any] = field(default_factory=dict)
+    tags: tuple[str, ...] = ()
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "HarnessElementConfig":
+        element_id = str(value.get("id", "")).strip()
+        if not element_id:
+            raise ValueError("harness element id is required")
+        category = str(value.get("category", "")).strip().lower()
+        if category not in {
+            "skill",
+            "mcp",
+            "tool",
+            "context",
+            "protocol",
+            "workflow",
+        }:
+            raise ValueError(f"harness element {element_id}: unsupported category {category!r}")
+        description = str(value.get("description", "")).strip()
+        if not description:
+            raise ValueError(f"harness element {element_id}: description is required")
+        raw_spec = value.get("spec", {})
+        if not isinstance(raw_spec, dict):
+            raise ValueError(f"harness element {element_id}: spec must be an object")
+        raw_tags = value.get("tags", [])
+        if not isinstance(raw_tags, list) or not all(isinstance(item, str) for item in raw_tags):
+            raise ValueError(f"harness element {element_id}: tags must be a string list")
+        return cls(
+            element_id=element_id,
+            category=category,
+            description=description,
+            spec=dict(raw_spec),
+            tags=tuple(sorted({item.strip() for item in raw_tags if item.strip()})),
+        )
+
+
+def _parse_element_catalog(raw: list | None) -> tuple[HarnessElementConfig, ...]:
+    if not raw:
+        return ()
+    if not isinstance(raw, list) or not all(isinstance(item, dict) for item in raw):
+        raise ValueError("harness_evolution.element_catalog must be an object list")
+    return tuple(HarnessElementConfig.from_dict(dict(item)) for item in raw)
+
+
+def _parse_seed_elements(raw: dict | None) -> dict[str, tuple[str, ...]]:
+    if not raw:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError("harness_evolution.seed_elements must be an object")
+    result: dict[str, tuple[str, ...]] = {}
+    for category, ids in raw.items():
+        name = str(category).strip().lower()
+        if not isinstance(ids, list) or not all(isinstance(item, str) for item in ids):
+            raise ValueError(f"seed_elements[{name}] must be a string list")
+        result[name] = tuple(dict.fromkeys(str(item) for item in ids))
+    return result
+
+
+def _parse_max_active_elements(raw: dict | None) -> dict[str, int]:
+    defaults = {
+        "skill": 4,
+        "mcp": 2,
+        "tool": 3,
+        "context": 3,
+        "protocol": 2,
+        "workflow": 3,
+    }
+    if not raw:
+        return defaults
+    if not isinstance(raw, dict):
+        raise ValueError("harness_evolution.max_active_elements must be an object")
+    merged = dict(defaults)
+    for key, value in raw.items():
+        merged[str(key).strip().lower()] = int(value)
+    return merged
 
 
 @dataclass(frozen=True)
@@ -427,6 +527,124 @@ def _parse_allowed_niches(value: list) -> tuple[str, ...]:
 
 
 @dataclass(frozen=True)
+class HarnessRubricCriterion:
+    """One hard (0/1) or soft (0..1) admission rubric for harness validation."""
+
+    rubric_id: str
+    kind: str
+    description: str
+    weight: float = 1.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "rubric_id": self.rubric_id,
+            "kind": self.kind,
+            "description": self.description,
+            "weight": self.weight,
+        }
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "HarnessRubricCriterion":
+        kind = str(value.get("kind", "")).strip().lower()
+        if kind not in {"hard", "soft"}:
+            raise ValueError("harness rubric kind must be 'hard' or 'soft'")
+        weight = float(value.get("weight", 1.0))
+        if kind == "hard" and weight != 1.0:
+            raise ValueError("hard rubrics must use weight 1.0")
+        if kind == "soft" and not 0.0 < weight:
+            raise ValueError("soft rubric weight must be > 0")
+        return cls(
+            rubric_id=str(value["rubric_id"]).strip(),
+            kind=kind,
+            description=str(value.get("description", "")).strip(),
+            weight=weight,
+        )
+
+
+DEFAULT_HARD_RUBRICS: tuple[HarnessRubricCriterion, ...] = (
+    HarnessRubricCriterion(
+        "launches_without_crash",
+        "hard",
+        "Game launches and runs without immediate crash or fatal runtime error.",
+    ),
+    HarnessRubricCriterion(
+        "respects_task_constraints",
+        "hard",
+        "Delivered game respects public task constraints and does not break legality gates.",
+    ),
+    HarnessRubricCriterion(
+        "produces_runnable_artifact",
+        "hard",
+        "Candidate workspace contains a runnable game artifact verified by deep probes.",
+    ),
+    HarnessRubricCriterion(
+        "no_hidden_test_leakage",
+        "hard",
+        "No benchmark hidden tests, rubrics, or infrastructure files were copied into workspace.",
+    ),
+)
+
+DEFAULT_SOFT_RUBRICS: tuple[HarnessRubricCriterion, ...] = (
+    HarnessRubricCriterion(
+        "gameplay_responsiveness",
+        "soft",
+        "Controls, pacing, and interaction feel responsive during actual play.",
+        weight=0.25,
+    ),
+    HarnessRubricCriterion(
+        "feature_completeness",
+        "soft",
+        "Core requested mechanics and win/lose/progress loops are present.",
+        weight=0.25,
+    ),
+    HarnessRubricCriterion(
+        "visual_clarity",
+        "soft",
+        "Visual presentation is readable and supports understanding gameplay state.",
+        weight=0.20,
+    ),
+    HarnessRubricCriterion(
+        "feedback_and_progress",
+        "soft",
+        "Player receives clear feedback and can perceive progress.",
+        weight=0.15,
+    ),
+    HarnessRubricCriterion(
+        "overall_play_experience",
+        "soft",
+        "Holistic play experience is coherent and engaging.",
+        weight=0.15,
+    ),
+)
+
+
+def _parse_rubric_criteria(
+    raw: list | None,
+    *,
+    default: tuple[HarnessRubricCriterion, ...],
+    label: str,
+) -> tuple[HarnessRubricCriterion, ...]:
+    if raw is None:
+        return default
+    if not isinstance(raw, list) or not all(isinstance(item, dict) for item in raw):
+        raise ValueError(f"harness_evolution.{label} must be an object list")
+    return tuple(HarnessRubricCriterion.from_dict(dict(item)) for item in raw)
+
+
+def _parse_element_mutation_policy(raw: dict | None) -> dict[str, Any]:
+    from game_loop.core.harness_element_stats import DEFAULT_ELEMENT_MUTATION_POLICY
+
+    merged = dict(DEFAULT_ELEMENT_MUTATION_POLICY)
+    if not raw:
+        return merged
+    if not isinstance(raw, dict):
+        raise ValueError("harness_evolution.element_mutation_policy must be an object")
+    for key, value in raw.items():
+        merged[str(key)] = value
+    return merged
+
+
+@dataclass(frozen=True)
 class HarnessEvolutionConfig:
     """Frozen outer-loop search and admission policy for Agent harnesses."""
 
@@ -441,6 +659,23 @@ class HarnessEvolutionConfig:
     promotion_delta_min: float = 0.0
     max_case_regression: float = 0.08
     allowed_niches: tuple[str, ...] = ()
+    loop_role: str = "inner"
+    rubric_validation_sample_size: int = 2
+    rubric_provider: str = "deepseek"
+    rubric_judge_timeout_seconds: int = 120
+    require_rubric_validation: bool = True
+    dynamic_rubric_generation: bool = True
+    enable_usage_driven_mutation: bool = True
+    element_catalog: tuple[HarnessElementConfig, ...] = ()
+    seed_elements: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    max_active_elements: dict[str, int] = field(
+        default_factory=lambda: _parse_max_active_elements(None)
+    )
+    element_mutation_policy: dict[str, Any] = field(
+        default_factory=lambda: _parse_element_mutation_policy(None)
+    )
+    hard_rubrics: tuple[HarnessRubricCriterion, ...] = DEFAULT_HARD_RUBRICS
+    soft_rubrics: tuple[HarnessRubricCriterion, ...] = DEFAULT_SOFT_RUBRICS
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "HarnessEvolutionConfig":
@@ -484,6 +719,18 @@ class HarnessEvolutionConfig:
             raise ValueError(
                 f"L4 seed harness references unknown tool interfaces: {unknown_interfaces}"
             )
+        loop_role = str(value.get("loop_role", "inner")).strip().lower()
+        if loop_role not in {"inner", "outer"}:
+            raise ValueError("harness_evolution.loop_role must be 'inner' or 'outer'")
+        element_catalog = _parse_element_catalog(value.get("element_catalog"))
+        seed_elements = _parse_seed_elements(value.get("seed_elements"))
+        max_active_elements = _parse_max_active_elements(value.get("max_active_elements"))
+        element_mutation_policy = _parse_element_mutation_policy(
+            value.get("element_mutation_policy")
+        )
+        element_ids = [item.element_id for item in element_catalog]
+        if element_catalog and len(set(element_ids)) != len(element_ids):
+            raise ValueError("harness element ids must be unique")
         result = cls(
             modules=modules,
             tool_interfaces=tool_interfaces,
@@ -496,6 +743,34 @@ class HarnessEvolutionConfig:
             promotion_delta_min=float(value.get("promotion_delta_min", 0.0)),
             max_case_regression=float(value.get("max_case_regression", 0.08)),
             allowed_niches=_parse_allowed_niches(value.get("allowed_niches", [])),
+            loop_role=loop_role,
+            rubric_validation_sample_size=int(
+                value.get(
+                    "rubric_validation_sample_size",
+                    value.get("replay_min_cases", 2),
+                )
+            ),
+            rubric_provider=str(value.get("rubric_provider", "deepseek")).strip().lower(),
+            rubric_judge_timeout_seconds=int(value.get("rubric_judge_timeout_seconds", 120)),
+            require_rubric_validation=bool(value.get("require_rubric_validation", True)),
+            dynamic_rubric_generation=bool(value.get("dynamic_rubric_generation", True)),
+            enable_usage_driven_mutation=bool(
+                value.get("enable_usage_driven_mutation", loop_role == "inner")
+            ),
+            element_catalog=element_catalog,
+            seed_elements=seed_elements,
+            max_active_elements=max_active_elements,
+            element_mutation_policy=element_mutation_policy,
+            hard_rubrics=_parse_rubric_criteria(
+                value.get("hard_rubrics"),
+                default=DEFAULT_HARD_RUBRICS,
+                label="hard_rubrics",
+            ),
+            soft_rubrics=_parse_rubric_criteria(
+                value.get("soft_rubrics"),
+                default=DEFAULT_SOFT_RUBRICS,
+                label="soft_rubrics",
+            ),
         )
         if not 1 <= result.max_active_modules <= len(modules):
             raise ValueError("L4 max_active_modules must be within the module catalog")
@@ -520,6 +795,31 @@ class HarnessEvolutionConfig:
             raise ValueError("L4 replay_min_cases must be >= 1")
         if result.max_case_regression < 0:
             raise ValueError("L4 max_case_regression must be >= 0")
+        if result.rubric_validation_sample_size < 1:
+            raise ValueError("L4 rubric_validation_sample_size must be >= 1")
+        if result.rubric_judge_timeout_seconds < 5:
+            raise ValueError("L4 rubric_judge_timeout_seconds must be >= 5")
+        if result.require_rubric_validation and result.replay_min_cases < result.rubric_validation_sample_size:
+            raise ValueError(
+                "L4 replay_min_cases must be >= rubric_validation_sample_size"
+            )
+        hard_ids = [item.rubric_id for item in result.hard_rubrics]
+        if len(set(hard_ids)) != len(hard_ids):
+            raise ValueError("L4 hard_rubrics must have unique rubric_id values")
+        soft_ids = [item.rubric_id for item in result.soft_rubrics]
+        if len(set(soft_ids)) != len(soft_ids):
+            raise ValueError("L4 soft_rubrics must have unique rubric_id values")
+        for category, ids in result.seed_elements.items():
+            unknown_elements = sorted(set(ids) - set(element_ids))
+            if unknown_elements:
+                raise ValueError(
+                    f"seed_elements[{category}] references unknown elements: {unknown_elements}"
+                )
+            limit = result.max_active_elements.get(category, 0)
+            if limit and len(ids) > limit:
+                raise ValueError(
+                    f"seed_elements[{category}] exceeds max_active_elements ({limit})"
+                )
         return result
 
 

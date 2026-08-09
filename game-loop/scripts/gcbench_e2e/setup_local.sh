@@ -43,6 +43,7 @@ if [ -n "$PY312" ]; then
   fi
   "$VENV/bin/python" -m pip install --upgrade pip wheel >/dev/null
   if "$VENV/bin/python" -m pip install -e "$GAMECRAFT_ROOT" 'harbor==0.7.1' >/dev/null 2>&1; then
+    "$VENV/bin/python" -m pip install 'openai>=1.55.0' >/dev/null 2>&1 || true
     "$VENV/bin/python" -c "import gamecraft_bench.verifier, harbor"
     MODE="local"
   else

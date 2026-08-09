@@ -28,7 +28,7 @@ from . import _common
 from .base import JudgeError, JudgeRequest, JudgeResponse, MultimodalJudge
 
 _MAX_FRAMES = 40
-_MAX_TOKENS = 2048
+_MAX_TOKENS = 4096
 
 
 def _parse_sse_to_text(raw: str) -> str:
@@ -92,12 +92,25 @@ class OpenAIJudge(MultimodalJudge):
         except KeyError as e:
             raise JudgeError(str(e)) from e
 
-        if not request.frame_paths:
+        input_mode = request.input_mode.strip().lower()
+        if input_mode not in {"vision", "text"}:
+            raise JudgeError(
+                "GAMECRAFT_BENCH_JUDGE_INPUT_MODE must be 'vision' or 'text', "
+                f"got {input_mode!r}"
+            )
+        if input_mode == "vision" and not request.frame_paths:
             raise JudgeError(
                 f"no sampled frames available for demo {request.demo_id!r}"
             )
 
-        client_kwargs: dict[str, object] = {"api_key": api_key}
+        client_kwargs: dict[str, object] = {
+            "api_key": api_key,
+            # Bound gateway stalls so evaluator outages become explicit infra
+            # failures instead of pinning an evolution worker for tens of
+            # minutes. score_project owns the deliberate retry policy.
+            "timeout": 120.0,
+            "max_retries": 0,
+        }
         base_url = (
             _common.get_env("GAMECRAFT_BENCH_JUDGE_OPENAI_BASE_URL")
             or os.environ.get("OPENAI_BASE_URL")
@@ -109,34 +122,52 @@ class OpenAIJudge(MultimodalJudge):
             client_kwargs["default_headers"] = extra
         client = OpenAI(**client_kwargs)
 
-        frames = _select_frames(request.frame_paths)
-        content: list[dict] = [
-            {"type": "text",
-             "text": (
-                 f"The next {len(frames)} images are PNG frames sampled in "
-                 "temporal order from one playthrough of a Godot 2D game."
-             )},
-        ]
-        for idx, fp in enumerate(frames, start=1):
-            content.append({
-                "type": "image_url",
-                "image_url": {"url": _data_uri(fp)},
-            })
-            content.append({"type": "text", "text": f"(frame {idx}/{len(frames)})"})
-        content.append({
-            "type": "text",
-            "text": _common.build_user_prompt(request.requirements),
-        })
-
-        try:
-            resp = client.chat.completions.create(
-                model=self.model,
-                max_tokens=_MAX_TOKENS,
-                messages=[
-                    {"role": "system", "content": _common.SYSTEM_INSTRUCTION},
-                    {"role": "user", "content": content},
-                ],
+        if input_mode == "text":
+            system_instruction = _common.TEXT_SYSTEM_INSTRUCTION
+            # A plain string (not multimodal content parts) is intentionally
+            # used so OpenAI-compatible text-only endpoints never see image_url.
+            content: str | list[dict] = _common.build_text_user_prompt(
+                request.requirements, request.evidence_text
             )
+        else:
+            system_instruction = _common.SYSTEM_INSTRUCTION
+            frames = _select_frames(request.frame_paths)
+            content = [
+                {"type": "text",
+                 "text": (
+                     f"The next {len(frames)} images are PNG frames sampled in "
+                     "temporal order from one playthrough of a Godot 2D game."
+                 )},
+            ]
+            for idx, fp in enumerate(frames, start=1):
+                content.append({
+                    "type": "image_url",
+                    "image_url": {"url": _data_uri(fp)},
+                })
+                content.append({"type": "text", "text": f"(frame {idx}/{len(frames)})"})
+            content.append({
+                "type": "text",
+                "text": _common.build_user_prompt(request.requirements),
+            })
+
+        request_kwargs: dict[str, object] = {
+            "model": self.model,
+            "max_tokens": _MAX_TOKENS,
+            # Paired harness admission must not inject avoidable judge sampling
+            # noise between parent and candidate evidence.
+            "temperature": 0,
+            "messages": [
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": content},
+            ],
+        }
+        if input_mode == "text" and "deepseek" in self.model.lower():
+            # This deployment otherwise spends the whole output budget in
+            # reasoning_content and can return an empty content string.  The
+            # text judge needs strict JSON, not hidden chain-of-thought.
+            request_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+        try:
+            resp = client.chat.completions.create(**request_kwargs)
         except Exception as e:
             raise JudgeError(f"OpenAI API call failed: {e}") from e
 

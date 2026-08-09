@@ -22,7 +22,8 @@ class AgentXRuntimeTests(unittest.TestCase):
             proposer_harness=_profile("outer"),
             target_harness=_profile("inner"),
         )
-        self.assertIn("evidence_first", gradient.target_tags)
+        self.assertIn("skill", gradient.target_tags)
+        self.assertIn("usage_driven", gradient.target_tags)
 
     def test_outer_gradient_reacts_to_rejected_inner_epoch(self):
         proposer = InnerOutcomeOuterGradientProposer()

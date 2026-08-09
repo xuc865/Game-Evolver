@@ -24,28 +24,76 @@ test -f "$GAMECRAFT_ROOT/tasks/$TASK/tests/rubric.json" || {
   echo "unknown task or missing official rubric: $TASK" >&2; exit 2;
 }
 test -n "$OUTPUT" || { echo "--output is required" >&2; exit 2; }
-mkdir -p "$OUTPUT"
 
+command -v docker >/dev/null 2>&1 || {
+  echo "docker is required when local replay tools (Xvfb) are unavailable" >&2
+  exit 2
+}
+
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/export_judge_env.sh"
+
+mkdir -p "$OUTPUT"
 ARTIFACT="$(cd "$ARTIFACT" && pwd)"
 OUTPUT="$(cd "$OUTPUT" && pwd)"
 RUBRIC="$(cd "$GAMECRAFT_ROOT/tasks/$TASK/tests" && pwd)/rubric.json"
+CONTAINER_OUTPUT="/tmp/gcbench_verifier_out"
+rm -f "$OUTPUT/breakdown.json" "$OUTPUT/reward.txt" "$OUTPUT/judge_log.json" "$OUTPUT/ctrf.json"
 
-docker run --rm --platform linux/amd64 \
-  -e GAMECRAFT_BENCH_JUDGE=stub \
-  -e GAMECRAFT_BENCH_JUDGE_MODEL=1.0 \
-  -e GAMECRAFT_BENCH_GODOT_BIN=/usr/local/bin/godot \
-  -v "$ARTIFACT:/workspace/game" \
-  -v "$RUBRIC:/tests/rubric.json:ro" \
-  -v "$OUTPUT:/logs/verifier" \
-  "$IMAGE" \
-  python -m gamecraft_bench.verifier \
-    --project /workspace/game \
-    --rubric /tests/rubric.json \
-    --output /logs/verifier \
-    --judge stub \
-    --judge-model 1.0
+JUDGE="${GAMECRAFT_BENCH_JUDGE:-openai}"
+JUDGE_MODEL="${GAMECRAFT_BENCH_JUDGE_MODEL:-}"
+JUDGE_INPUT_MODE="${GAMECRAFT_BENCH_JUDGE_INPUT_MODE:-vision}"
+DOCKER_ENV=(
+  -e "GAMECRAFT_BENCH_JUDGE=$JUDGE"
+  -e "GAMECRAFT_BENCH_JUDGE_INPUT_MODE=$JUDGE_INPUT_MODE"
+  -e "GAMECRAFT_BENCH_GODOT_BIN=/usr/local/bin/godot"
+)
+if [ -n "$JUDGE_MODEL" ]; then
+  DOCKER_ENV+=(-e "GAMECRAFT_BENCH_JUDGE_MODEL=$JUDGE_MODEL")
+fi
+if [ -n "${OPENAI_API_KEY:-}" ]; then
+  DOCKER_ENV+=(-e "OPENAI_API_KEY=$OPENAI_API_KEY")
+fi
+if [ -n "${OPENAI_BASE_URL:-}" ]; then
+  DOCKER_ENV+=(-e "OPENAI_BASE_URL=$OPENAI_BASE_URL")
+fi
+if [ -n "${GAMECRAFT_BENCH_JUDGE_OPENAI_API_KEY:-}" ]; then
+  DOCKER_ENV+=(-e "GAMECRAFT_BENCH_JUDGE_OPENAI_API_KEY=$GAMECRAFT_BENCH_JUDGE_OPENAI_API_KEY")
+fi
+if [ -n "${GAMECRAFT_BENCH_JUDGE_OPENAI_BASE_URL:-}" ]; then
+  DOCKER_ENV+=(-e "GAMECRAFT_BENCH_JUDGE_OPENAI_BASE_URL=$GAMECRAFT_BENCH_JUDGE_OPENAI_BASE_URL")
+fi
+
+JUDGE_ARGS=(--judge "$JUDGE" --judge-input-mode "$JUDGE_INPUT_MODE")
+if [ -n "$JUDGE_MODEL" ]; then
+  JUDGE_ARGS+=(--judge-model "$JUDGE_MODEL")
+fi
+
+CID="$(
+  docker create --platform linux/amd64 \
+    "${DOCKER_ENV[@]}" \
+    -v "$ARTIFACT:/workspace/game" \
+    -v "$RUBRIC:/tests/rubric.json:ro" \
+    -v "$GAMECRAFT_ROOT/gamecraft_bench:/opt/gamecraft-bench/gamecraft_bench:ro" \
+    "$IMAGE" \
+    python -m gamecraft_bench.verifier \
+      --project /workspace/game \
+      --rubric /tests/rubric.json \
+      --output "$CONTAINER_OUTPUT" \
+      "${JUDGE_ARGS[@]}"
+)"
+
+set +e
+docker start -a "$CID"
+verifier_rc=$?
+set -e
+docker cp "$CID:$CONTAINER_OUTPUT/." "$OUTPUT/" || {
+  echo "docker verifier failed to export artifacts (rc=$verifier_rc)" >&2
+  docker rm "$CID" >/dev/null || true
+  exit 2
+}
+docker rm "$CID" >/dev/null
 
 test -s "$OUTPUT/breakdown.json"
 test -s "$OUTPUT/reward.txt"
-find "$OUTPUT/demos" -name '*.mp4' -type f -size +0c | grep -q .
-
+exit "$verifier_rc"

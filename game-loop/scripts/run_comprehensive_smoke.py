@@ -234,6 +234,7 @@ def phase_benchmark_e2e(report: SmokeReport, *, provider: str, quick: bool) -> N
     env = {}
     if token := os.environ.get("DEEPSEEK_API_KEY"):
         env["DEEPSEEK_API_KEY"] = token
+    env.setdefault("GAMECRAFT_BENCH_JUDGE", "stub")
     runtime_json = json.dumps(_runtime_profile(provider))
     out_root = ROOT / ".smoke" / "comprehensive-e2e" / provider
     out_root.mkdir(parents=True, exist_ok=True)

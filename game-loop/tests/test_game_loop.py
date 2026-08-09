@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import json
 import copy
+import os
 import sys
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from game_loop.artifacts import ArtifactStore
 from game_loop.benchmarks.base import BenchmarkAdapter
@@ -1647,6 +1648,9 @@ class GameLoopTests(unittest.TestCase):
     def test_gcbench_renders_l4_harness_into_native_extra_instruction(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
+            gcbench = root / "gcbench"
+            (gcbench / "tools").mkdir(parents=True)
+            (gcbench / "tools" / "godot_command_line.md").write_text("# godot", encoding="utf-8")
             task = root / "task"
             task.mkdir()
             parent = root / "parent"
@@ -1655,21 +1659,465 @@ class GameLoopTests(unittest.TestCase):
             candidate = root / "candidate"
             candidate.mkdir()
             from game_loop.core.models import AttemptContext
-            prepared = GameCraftBenchAdapter({}).prepare(
-                task_source=task,
-                parent_artifact=parent,
-                feedback={
-                    "agent_harness": {
-                        "rendered_instruction": "Agent harness profile\n- verify changed path",
+            with patch.dict(os.environ, {"GODOT_EXEC_PATH": sys.executable}, clear=False):
+                prepared = GameCraftBenchAdapter({"root": str(gcbench)}).prepare(
+                    task_source=task,
+                    parent_artifact=parent,
+                    feedback={
+                        "agent_harness": {
+                            "rendered_instruction": "Agent harness profile\n- verify changed path",
+                        },
                     },
-                },
-                candidate_dir=candidate,
-                context=AttemptContext("run", 1, 1),
-            )
+                    candidate_dir=candidate,
+                    context=AttemptContext("run", 1, 1),
+                )
             rendered = Path(prepared.command_context["extra_instruction"]).read_text()
             self.assertIn("Agent harness profile", rendered)
             self.assertIn("verify changed path", rendered)
             self.assertIn("rubric and shared assets are immutable", rendered)
+            self.assertIn("Local runtime", rendered)
+            self.assertTrue((candidate / "task_overlay" / "workspace" / "tools" / "godot").is_file())
+            self.assertEqual(prepared.command_context["task_id"], "task")
+            self.assertIn("breakdown_path", prepared.command_context)
+            self.assertIn("gcbench_root", prepared.command_context)
+
+    def test_gcbench_l4_backend_command_placeholders(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            task = root / "puzzle-sokoban-dungeon"
+            task.mkdir()
+            (task / "instruction.md").write_text("Build sokoban.", encoding="utf-8")
+            parent = root / "parent"
+            parent.mkdir()
+            (parent / "project.godot").write_text("[application]\n")
+            (parent / "demo_outputs").mkdir()
+            (parent / "demo_outputs" / "01.json").write_text("{}", encoding="utf-8")
+            candidate = root / "candidate"
+            candidate.mkdir()
+            from game_loop.backends.command import CommandBackend
+            from game_loop.config import BackendConfig
+            from game_loop.core.models import AttemptContext
+
+            gcbench = root / "gcbench"
+            (gcbench / "tools").mkdir(parents=True)
+            (gcbench / "tools" / "godot_command_line.md").write_text("# godot", encoding="utf-8")
+            with patch.dict(os.environ, {"GODOT_EXEC_PATH": sys.executable}, clear=False):
+                prepared = GameCraftBenchAdapter({"root": str(gcbench)}).prepare(
+                    task_source=task,
+                    parent_artifact=parent,
+                    feedback={},
+                    candidate_dir=candidate,
+                    context=AttemptContext("run", 1, 1),
+                )
+            backend = CommandBackend(
+                BackendConfig(
+                    command=(
+                        "bash",
+                        "scripts/run_gcbench_l4_backend.sh",
+                        "{candidate_workspace}",
+                        "{instruction_file}",
+                        "{artifact_path}",
+                        "{output_manifest}",
+                        "{task_id}",
+                        "{gcbench_root}",
+                        "{breakdown_path}",
+                    ),
+                    cwd=Path("."),
+                    timeout_seconds=60,
+                    env={},
+                )
+            )
+            command = [
+                part.format_map(prepared.command_context)
+                for part in backend.config.command
+            ]
+            self.assertEqual(command[6], str(task.name))
+            self.assertTrue(command[5].endswith("gcbench_execution.json"))
+
+    def test_chat_agent_blocks_root_find(self):
+        from game_loop.chat_agent import LocalChatAgent
+
+        with patch.dict(
+            os.environ,
+            {
+                "CODEX_API_BASE": "http://example.test/v1",
+                "CODEX_MODEL": "test-model",
+            },
+            clear=False,
+        ):
+            agent = LocalChatAgent()
+            self.assertIsNotNone(agent._blocked_command_reason("find / -name godot"))
+            self.assertIsNone(agent._blocked_command_reason("tools/godot --version"))
+
+    def test_chat_agent_continues_after_truncated_response(self):
+        from game_loop.chat_agent import LocalChatAgent
+
+        agent = LocalChatAgent.__new__(LocalChatAgent)
+        agent.system_prompt = "test system"
+        responses = iter([
+            {
+                "choices": [{
+                    "message": {"role": "assistant", "content": "partial implementation"},
+                    "finish_reason": "length",
+                }]
+            },
+            {
+                "choices": [{
+                    "message": {"role": "assistant", "content": "done"},
+                    "finish_reason": "stop",
+                }]
+            },
+        ])
+        agent._call_api = lambda messages, tools: next(responses)
+
+        with tempfile.TemporaryDirectory() as raw:
+            result = agent.run("build it", Path(raw), tools=[], max_turns=3)
+
+        self.assertEqual(result["turns"], 2)
+        self.assertEqual(result["final_text"], "done")
+        continuation = [
+            item for item in result["messages"]
+            if item.get("role") == "user" and "truncated" in item.get("content", "")
+        ]
+        self.assertEqual(len(continuation), 1)
+
+    def test_chat_agent_retries_socket_timeout(self):
+        import socket
+        from game_loop.chat_agent import LocalChatAgent
+
+        agent = LocalChatAgent.__new__(LocalChatAgent)
+        agent.api_base = "http://example.test/v1"
+        agent.model = "test-model"
+        agent.api_key = ""
+        agent.thinking_mode = ""
+        response = Mock()
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        response.read.return_value = b'{"choices":[{"message":{"content":"ok"}}]}'
+
+        with patch(
+            "game_loop.chat_agent.urllib.request.urlopen",
+            side_effect=[socket.timeout("slow upstream"), response],
+        ) as urlopen, patch("game_loop.chat_agent.time.sleep"):
+            payload = agent._call_api([{"role": "user", "content": "ping"}])
+
+        self.assertEqual(urlopen.call_count, 2)
+        self.assertEqual(payload["choices"][0]["message"]["content"], "ok")
+
+    def test_qwen_and_glm_chat_agent_disable_hidden_thinking(self):
+        from game_loop.chat_agent import LocalChatAgent
+
+        for model in ("Qwen3.6-27B", "GLM-5.2-W4AFP8-node6"):
+            with self.subTest(model=model):
+                agent = LocalChatAgent.__new__(LocalChatAgent)
+                agent.api_base = "http://example.test/v1"
+                agent.model = model
+                agent.api_key = ""
+                agent.thinking_mode = ""
+                response = Mock()
+                response.__enter__ = Mock(return_value=response)
+                response.__exit__ = Mock(return_value=False)
+                response.read.return_value = b'{"choices":[{"message":{"content":"ok"}}]}'
+                with patch(
+                    "game_loop.chat_agent.urllib.request.urlopen",
+                    return_value=response,
+                ) as urlopen:
+                    agent._call_api([{"role": "user", "content": "ping"}])
+                request = urlopen.call_args.args[0]
+                body = json.loads(request.data.decode("utf-8"))
+                self.assertEqual(body["chat_template_kwargs"], {"enable_thinking": False})
+
+    def test_chat_agent_retry_budget_and_timeout_are_runtime_configurable(self):
+        import urllib.error
+        from game_loop.chat_agent import LocalChatAgent
+
+        agent = LocalChatAgent.__new__(LocalChatAgent)
+        agent.api_base = "http://example.test/v1"
+        agent.model = "test-model"
+        agent.api_key = ""
+        agent.thinking_mode = ""
+        error = urllib.error.HTTPError(
+            "http://example.test/v1/chat/completions", 502, "bad gateway", {}, None
+        )
+        with patch.dict(
+            os.environ,
+            {
+                "GAME_LOOP_CHAT_API_MAX_RETRIES": "2",
+                "GAME_LOOP_CHAT_API_TIMEOUT_SECONDS": "42",
+            },
+            clear=False,
+        ), patch(
+            "game_loop.chat_agent.urllib.request.urlopen",
+            side_effect=[error, error],
+        ) as urlopen, patch("game_loop.chat_agent.time.sleep"):
+            with self.assertRaisesRegex(RuntimeError, "API error 502"):
+                agent._call_api([{"role": "user", "content": "ping"}])
+        self.assertEqual(urlopen.call_count, 2)
+        self.assertEqual(urlopen.call_args.kwargs["timeout"], 42)
+
+    def test_chat_agent_normalizes_truncated_tool_arguments_before_replay(self):
+        from game_loop.chat_agent import LocalChatAgent
+
+        malformed = {
+            "role": "assistant",
+            "tool_calls": [{
+                "id": "call-1",
+                "type": "function",
+                "function": {
+                    "name": "write_file",
+                    "arguments": '{"path":"game/Main.gd","content":"unterminated',
+                },
+            }],
+        }
+        normalized = LocalChatAgent._normalize_assistant_message(malformed)
+        arguments = normalized["tool_calls"][0]["function"]["arguments"]
+        parsed = json.loads(arguments)
+        self.assertIn("_tool_argument_error", parsed)
+        self.assertLessEqual(len(parsed["_raw_arguments_prefix"]), 500)
+
+        agent = LocalChatAgent.__new__(LocalChatAgent)
+        with tempfile.TemporaryDirectory() as raw:
+            result = agent._execute_tool(normalized["tool_calls"][0], Path(raw), [])
+        payload = json.loads(result["content"])
+        self.assertFalse(payload["ok"])
+        self.assertIn("Retry this tool call", payload["instruction"])
+
+    def test_chat_agent_refuses_early_stop_until_gcbench_demos_exist(self):
+        from game_loop.chat_agent import LocalChatAgent
+
+        agent = LocalChatAgent.__new__(LocalChatAgent)
+        agent.system_prompt = "test"
+        calls = 0
+
+        def fake_call(messages, tools):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return {"choices": [{
+                    "message": {"role": "assistant", "content": "done"},
+                    "finish_reason": "stop",
+                }]}
+            return {"choices": [{
+                "message": {"role": "assistant", "content": "really done"},
+                "finish_reason": "stop",
+            }]}
+
+        agent._call_api = fake_call
+        with tempfile.TemporaryDirectory() as raw, patch.dict(
+            os.environ, {"GAME_LOOP_REQUIRE_GCB_DEMOS": "1"}, clear=False
+        ):
+            workspace = Path(raw)
+            demos = workspace / "game" / "demo_outputs"
+            demos.mkdir(parents=True)
+
+            original_gate = agent._demo_gate_message
+            def gate_and_create(count):
+                for index in range(3):
+                    (demos / f"demo_{index}.json").write_text("{}", encoding="utf-8")
+                return original_gate(count)
+            agent._demo_gate_message = gate_and_create
+            result = agent.run("build", workspace, tools=[], max_turns=3)
+
+        self.assertEqual(calls, 2)
+        self.assertEqual(result["turns"], 2)
+        self.assertTrue(any(
+            "deliverable gate" in item.get("content", "")
+            for item in result["messages"] if item.get("role") == "user"
+        ))
+
+    def test_demo_gate_only_allows_demo_json_writes(self):
+        from game_loop.chat_agent import LocalChatAgent
+
+        blocked = {
+            "id": "call-1",
+            "function": {"name": "run_command", "arguments": '{"command":"true"}'},
+        }
+        wrong_write = {
+            "id": "call-2",
+            "function": {"name": "write_file", "arguments": '{"path":"game/Main.gd","content":"x"}'},
+        }
+        demo_write = {
+            "id": "call-3",
+            "function": {
+                "name": "write_file",
+                "arguments": '{"path":"game/demo_outputs/demo_02.json","content":"{}"}',
+            },
+        }
+        self.assertFalse(LocalChatAgent._is_demo_write_tool_call(blocked))
+        self.assertFalse(LocalChatAgent._is_demo_write_tool_call(wrong_write))
+        self.assertTrue(LocalChatAgent._is_demo_write_tool_call(demo_write))
+        error = LocalChatAgent._demo_gate_tool_error(blocked, 1)
+        self.assertIn("temporarily blocked", json.loads(error["content"])["error"])
+
+    def test_chat_agent_run_command_timeout_kills_child_process_group(self):
+        from game_loop.chat_agent import LocalChatAgent
+
+        agent = LocalChatAgent.__new__(LocalChatAgent)
+        with tempfile.TemporaryDirectory() as raw:
+            workspace = Path(raw)
+            child_pid = workspace / "child.pid"
+            command = (
+                f"{sys.executable} -c "
+                + json.dumps(
+                    "import pathlib, subprocess, sys, time; "
+                    "p = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)']); "
+                    f"pathlib.Path({str(child_pid)!r}).write_text(str(p.pid)); "
+                    "time.sleep(30)"
+                )
+            )
+
+            result = agent._dispatch_tool(
+                "run_command",
+                {"command": command, "timeout": 1},
+                workspace,
+            )
+
+            self.assertFalse(result["ok"])
+            self.assertIn("timed out", result["error"])
+            deadline = __import__("time").monotonic() + 5
+            while not child_pid.exists() and __import__("time").monotonic() < deadline:
+                __import__("time").sleep(0.05)
+            self.assertTrue(child_pid.exists())
+            pid = int(child_pid.read_text(encoding="utf-8"))
+            for _ in range(20):
+                try:
+                    os.kill(pid, 0)
+                except OSError:
+                    break
+                __import__("time").sleep(0.1)
+            else:
+                try:
+                    os.kill(pid, 9)
+                except OSError:
+                    pass
+                self.fail(f"child process {pid} survived command timeout")
+
+    def test_chat_agent_compacts_large_write_file_arguments_in_history(self):
+        from game_loop.chat_agent import LocalChatAgent
+
+        agent = LocalChatAgent.__new__(LocalChatAgent)
+        agent.system_prompt = "test"
+        large_content = "x" * 2000
+        seen_second_request: list[list[dict[str, object]]] = []
+
+        def fake_call(messages, tools):
+            if len(seen_second_request) == 0:
+                seen_second_request.append(messages)
+                return {"choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "tool_calls": [{
+                            "id": "call-1",
+                            "type": "function",
+                            "function": {
+                                "name": "write_file",
+                                "arguments": json.dumps({
+                                    "path": "game/Main.gd",
+                                    "content": large_content,
+                                }),
+                            },
+                        }],
+                    }
+                }]}
+            seen_second_request.append(messages)
+            return {"choices": [{
+                "message": {"role": "assistant", "content": "done"},
+                "finish_reason": "stop",
+            }]}
+
+        agent._call_api = fake_call
+        with tempfile.TemporaryDirectory() as raw, patch.dict(
+            os.environ,
+            {
+                "GAME_LOOP_REQUIRE_GCB_DEMOS": "0",
+                "GAME_LOOP_TOOL_CALL_HISTORY_CONTENT_CHARS": "64",
+            },
+            clear=False,
+        ):
+            workspace = Path(raw)
+            result = agent.run("build", workspace, tools=[], max_turns=2)
+            self.assertEqual((workspace / "game" / "Main.gd").read_text(encoding="utf-8"), large_content)
+
+        self.assertEqual(result["turns"], 2)
+        replayed = seen_second_request[-1][2]
+        args = json.loads(replayed["tool_calls"][0]["function"]["arguments"])
+        self.assertTrue(args["_content_history_compacted"])
+        self.assertEqual(args["_content_chars"], len(large_content))
+        self.assertLess(len(args["content"]), 256)
+        self.assertNotEqual(args["content"], large_content)
+
+    def test_chat_agent_bounded_history_drops_orphan_tool_prefix(self):
+        from game_loop.chat_agent import LocalChatAgent
+
+        messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "task"},
+            {"role": "assistant", "tool_calls": [{"id": "old", "type": "function", "function": {"name": "x", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "old", "content": "{}"},
+            {"role": "assistant", "content": "older"},
+            {"role": "tool", "tool_call_id": "orphan-if-trimmed", "content": "{}"},
+            {"role": "assistant", "content": "recent"},
+            {"role": "user", "content": "continue"},
+        ]
+        with patch.dict(os.environ, {"GAME_LOOP_CHAT_MAX_HISTORY_MESSAGES": "3"}, clear=False):
+            bounded = LocalChatAgent._bounded_messages_for_api(messages)
+        self.assertEqual(bounded[:2], messages[:2])
+        self.assertNotEqual(bounded[2]["role"], "tool")
+        self.assertEqual([m["role"] for m in bounded], ["system", "user", "assistant", "user"])
+
+    def test_chat_agent_stops_after_required_demo_delivery(self):
+        from game_loop.chat_agent import LocalChatAgent
+
+        agent = LocalChatAgent.__new__(LocalChatAgent)
+        agent.system_prompt = "test"
+
+        def fake_call(_messages, _tools):
+            return {"choices": [{
+                "message": {
+                    "role": "assistant",
+                    "tool_calls": [{
+                        "id": "call-1",
+                        "type": "function",
+                        "function": {
+                            "name": "write_file",
+                            "arguments": json.dumps({
+                                "path": "game/demo_outputs/demo_3.json",
+                                "content": "{}",
+                            }),
+                        },
+                    }],
+                }
+            }]}
+
+        agent._call_api = fake_call
+        with tempfile.TemporaryDirectory() as raw:
+            workspace = Path(raw)
+            demo_dir = workspace / "game" / "demo_outputs"
+            demo_dir.mkdir(parents=True)
+            (demo_dir / "demo_1.json").write_text("{}", encoding="utf-8")
+            (demo_dir / "demo_2.json").write_text("{}", encoding="utf-8")
+            with patch.dict(
+                os.environ,
+                {
+                    "GAME_LOOP_REQUIRE_GCB_DEMOS": "1",
+                    "GAME_LOOP_STOP_AFTER_GCB_DEMOS_TURN": "1",
+                },
+                clear=False,
+            ):
+                result = agent.run("write demo_outputs", workspace, tools=[], max_turns=5)
+
+        self.assertEqual(result["turns"], 1)
+        self.assertTrue(result["final_text"])
+
+    def test_command_backend_terminate_process_group_permission_error_is_best_effort(self):
+        from game_loop.backends import command as command_backend
+
+        process = Mock()
+        process.pid = 12345
+        with patch.object(command_backend.os, "killpg", side_effect=PermissionError), \
+             patch.object(process, "terminate") as terminate:
+            command_backend._terminate_process_group(process)
+        terminate.assert_called_once()
 
     def test_gdbench_zip_sanitization_and_binary_normalization(self):
         with tempfile.TemporaryDirectory() as td:
@@ -1989,6 +2437,78 @@ class GameLoopTests(unittest.TestCase):
             self.assertEqual(result.submission.status, "completed")
             self.assertTrue(result.evaluation.feasible)
             self.assertEqual(result.evaluation.primary_score, 1.0)
+
+    def test_fallback_harness_proposal_avoids_recent_element_when_possible(self):
+        from game_loop.cli import _fallback_harness_proposal
+
+        selected = _fallback_harness_proposal(
+            [
+                {"id": "aaa_recent", "category": "skill"},
+                {"id": "bbb_fresh", "category": "skill"},
+            ],
+            [{"element_id": "aaa_recent"}],
+        )
+
+        self.assertEqual(selected["element_id"], "bbb_fresh")
+        self.assertEqual(selected["category"], "skill")
+
+    def test_admission_case_archives_config_mismatched_resume_dir(self):
+        from game_loop.cli import _run_harness_admission_case
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config = write_config(root, candidates=1, level="L4", max_probe_calls=2)
+            source_config = root / "config.json"
+            engine = HarnessEvolutionEngine(root / "outer", config.method.harness_evolution)
+            harness = engine.initialize()
+            case_dir = root / "case" / "parent"
+            case_dir.mkdir(parents=True)
+            (case_dir / "manifest.json").write_text(json.dumps({
+                "config_fingerprint": "old-fingerprint",
+                "harness_frozen_within_episode": True,
+                "budgets": {},
+            }))
+            (case_dir / "state.json").write_text(json.dumps({
+                "status": "running",
+                "champion_harness_id": harness.harness_id,
+            }))
+            task = root / "task"; task.mkdir()
+            seed = root / "seed"; seed.mkdir()
+
+            def fake_init(args):
+                (case_dir / "manifest.json").write_text(json.dumps({
+                    "config_fingerprint": config.fingerprint,
+                    "harness_frozen_within_episode": True,
+                    "budgets": {},
+                }))
+                (case_dir / "state.json").write_text(json.dumps({
+                    "status": "completed",
+                    "champion_harness_id": harness.harness_id,
+                    "champion_evaluation": {"primary_score": 0.25, "feasible": True},
+                    "model_calls": 1,
+                    "evaluator_queries": 1,
+                }))
+
+            with patch("game_loop.cli.cmd_init", side_effect=fake_init), \
+                    patch("game_loop.cli.cmd_evolve", return_value=None):
+                outcome = _run_harness_admission_case(
+                    case_id="case-1",
+                    case_dir=case_dir,
+                    harness=harness,
+                    runner=Mock(),
+                    outer_dir=root / "outer",
+                    config=config,
+                    source_config=source_config,
+                    task_source=task,
+                    seed_artifact=seed,
+                    seed_score=0.0,
+                    epoch=1,
+                    run_id_prefix="t",
+                )
+
+            self.assertTrue((case_dir.parent / "parent.config-retry-1").is_dir())
+            self.assertTrue(outcome.infrastructure_ok)
+            self.assertEqual(outcome.final_score, 0.25)
 
 
 if __name__ == "__main__":

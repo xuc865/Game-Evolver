@@ -22,6 +22,13 @@ from game_loop.core.harness import (
     HarnessReplayCase,
     HarnessSemanticGradient,
 )
+from game_loop.core.harness_evolution_memory import HarnessEvolutionMemory
+from game_loop.core.harness_rubric_validator import (
+    HarnessRubricValidator,
+    HeuristicRubricJudge,
+    TaskPoolEntry,
+    sample_task_pool,
+)
 
 
 @dataclass(frozen=True)
@@ -33,12 +40,13 @@ class AgentXRuntimeConfig:
     seed_artifact: Path
     seed_score: float = 0.0
     run_id_prefix: str = "ax"
+    task_pool: tuple[TaskPoolEntry, ...] = ()
 
 
 class AttributionDrivenInnerGradientProposer:
     """Propose inner-harness gradients from attribution evidence."""
 
-    _TAGS = (
+    _MODULE_TAGS = (
         "evidence_first",
         "gameplay_observability",
         "mechanic_depth",
@@ -46,6 +54,17 @@ class AttributionDrivenInnerGradientProposer:
         "engine_tooling_first",
         "minimal_coherent_patch",
     )
+    _ELEMENT_CATEGORIES = (
+        "skill",
+        "mcp",
+        "tool",
+        "context",
+        "protocol",
+        "workflow",
+    )
+
+    def __init__(self, memory: HarnessEvolutionMemory | None = None):
+        self.memory = memory
 
     def propose_inner(
         self,
@@ -55,29 +74,43 @@ class AttributionDrivenInnerGradientProposer:
         target_harness: HarnessProfile,
     ) -> HarnessSemanticGradient:
         del proposer_harness, target_harness
+        memory_hint = ""
+        if self.memory is not None:
+            memory_hint = self.memory.render_proposer_context(loop_role="inner")
         counts = dict(report.outcome_counts)
         if counts.get("probe_failed", 0) >= 2:
-            return HarnessSemanticGradient(
-                "probe failures indicate missing runtime evidence before patching",
-                ("evidence_first", "engine_tooling_first"),
-                report.run_refs,
+            diagnosis = (
+                "probe failures indicate missing runtime evidence before patching"
             )
-        if counts.get("infrastructure_failure", 0) >= 1:
-            return HarnessSemanticGradient(
-                "infrastructure failures require tighter validation and recovery",
-                ("regression_first", "minimal_coherent_patch"),
-                report.run_refs,
+            tags = ("skill", "tool", "evidence_first", "usage_driven")
+        elif counts.get("infrastructure_failure", 0) >= 1:
+            diagnosis = (
+                "infrastructure failures require tighter validation and recovery"
             )
-        if report.repeated_failures:
-            return HarnessSemanticGradient(
-                "repeated failure families require an alternative mechanic strategy",
-                ("mechanic_depth", "gameplay_observability"),
-                report.run_refs,
+            tags = ("protocol", "workflow", "regression_first", "usage_driven")
+        elif report.repeated_failures:
+            diagnosis = (
+                "repeated failure families require an alternative mechanic strategy"
             )
-        tag = self._TAGS[len(report.run_refs) % len(self._TAGS)]
+            tags = ("workflow", "skill", "mechanic_depth", "usage_driven")
+        else:
+            category = self._ELEMENT_CATEGORIES[
+                len(report.run_refs) % len(self._ELEMENT_CATEGORIES)
+            ]
+            module_tag = self._MODULE_TAGS[
+                len(report.run_refs) % len(self._MODULE_TAGS)
+            ]
+            diagnosis = (
+                f"rotate inner harness toward {category} catalog and {module_tag}"
+            )
+            tags = (category, module_tag, "usage_driven")
+            if len(report.run_refs) % 3 == 0:
+                tags = (*tags, "element_merge")
+        if memory_hint:
+            diagnosis = f"{diagnosis}; {memory_hint}"
         return HarnessSemanticGradient(
-            f"rotate inner harness emphasis toward {tag}",
-            (tag,),
+            diagnosis,
+            tags,
             report.run_refs,
         )
 
@@ -94,6 +127,9 @@ class InnerOutcomeOuterGradientProposer:
         "recovery",
     )
 
+    def __init__(self, memory: HarnessEvolutionMemory | None = None):
+        self.memory = memory
+
     def propose_outer(
         self,
         report: AttributionReport,
@@ -102,6 +138,9 @@ class InnerOutcomeOuterGradientProposer:
         proposer_harness: HarnessProfile,
     ) -> HarnessSemanticGradient:
         del proposer_harness
+        memory_hint = ""
+        if self.memory is not None:
+            memory_hint = self.memory.render_proposer_context(loop_role="outer")
         if latest_inner_result.accepted:
             diagnosis = "inner epoch promoted; refine the harness-improvement contract"
             tags = ("validation", "module_strategy")
@@ -112,8 +151,11 @@ class InnerOutcomeOuterGradientProposer:
             tags = ("recovery", "tool_interface")
             diagnosis = "infrastructure events require safer outer-loop refinement"
         tag = self._OUTER_TAGS[latest_inner_result.epoch % len(self._OUTER_TAGS)]
+        diagnosis = f"{diagnosis}; explore {tag}"
+        if memory_hint:
+            diagnosis = f"{diagnosis}; {memory_hint}"
         return HarnessSemanticGradient(
-            f"{diagnosis}; explore {tag}",
+            diagnosis,
             tags,
             report.run_refs,
         )
@@ -184,15 +226,20 @@ class HarnessLoopNestedReplayOracle:
         outcomes = []
         for case in cases:
             case_dir = self.replay_root / f"epoch_{epoch:03d}" / side / case.case_id
+            metadata = dict(case.metadata)
+            task_source = Path(metadata.pop("task_source_override", case.task_ref))
+            seed_artifact = Path(
+                metadata.pop("seed_artifact_override", case.parent_artifact_ref)
+            )
             outcomes.append(
                 run_frozen_harness_episode(
                     case_id=case.case_id,
                     case_dir=case_dir,
                     harness=harness,
                     config=self.config,
-                    task_source=Path(case.task_ref),
-                    seed_artifact=Path(case.parent_artifact_ref),
-                    seed_score=float(case.metadata.get("seed_score", self.seed_score)),
+                    task_source=task_source,
+                    seed_artifact=seed_artifact,
+                    seed_score=float(metadata.get("seed_score", self.seed_score)),
                     epoch=epoch,
                     run_id_prefix=f"{self.run_id_prefix}-{side[:1]}-",
                     init_handler=self.init_handler,
@@ -208,9 +255,13 @@ def build_agentx_nested_evolution(
     runtime: AgentXRuntimeConfig,
     init_handler,
     evolve_handler,
+    offline_rubric_judge: bool = False,
 ) -> AgentXNestedEvolution:
     inner_engine = HarnessEvolutionEngine(run_dir / "inner", runtime.inner_harness)
     outer_engine = HarnessEvolutionEngine(run_dir / "outer", runtime.outer_harness)
+    inner_memory = HarnessEvolutionMemory(run_dir / "inner" / "harness_archive")
+    outer_memory = HarnessEvolutionMemory(run_dir / "outer" / "harness_archive")
+    judge = HeuristicRubricJudge() if offline_rubric_judge else None
     oracle = HarnessLoopNestedReplayOracle(
         config=runtime.app_config,
         task_source=runtime.task_source,
@@ -225,7 +276,70 @@ def build_agentx_nested_evolution(
         run_dir=run_dir,
         inner_engine=inner_engine,
         outer_engine=outer_engine,
-        inner_gradient_proposer=AttributionDrivenInnerGradientProposer(),
-        outer_gradient_proposer=InnerOutcomeOuterGradientProposer(),
+        inner_gradient_proposer=AttributionDrivenInnerGradientProposer(inner_memory),
+        outer_gradient_proposer=InnerOutcomeOuterGradientProposer(outer_memory),
         replay_oracle=oracle,
+        inner_rubric_validator=HarnessRubricValidator(
+            runtime.inner_harness,
+            judge=judge,
+        ),
+        outer_rubric_validator=HarnessRubricValidator(
+            runtime.outer_harness,
+            judge=judge,
+        ),
+        inner_memory=inner_memory,
+        outer_memory=outer_memory,
+    )
+
+
+def build_agentx_replay_cases(
+    runtime: AgentXRuntimeConfig,
+    *,
+    loop_role: str,
+    epoch: int,
+    config_path: Path,
+) -> tuple[HarnessReplayCase, ...]:
+    if runtime.task_pool:
+        sample_size = (
+            runtime.outer_harness.rubric_validation_sample_size
+            if loop_role == "outer"
+            else runtime.inner_harness.rubric_validation_sample_size
+        )
+        cases = sample_task_pool(
+            runtime.task_pool,
+            sample_size=sample_size,
+            seed=epoch,
+            prefix=loop_role,
+        )
+        enriched: list[HarnessReplayCase] = []
+        for case in cases:
+            metadata = dict(case.metadata)
+            metadata.setdefault("seed_score", case.metadata.get("seed_score", runtime.seed_score))
+            metadata["config_path"] = str(config_path.resolve())
+            enriched.append(
+                HarnessReplayCase(
+                    case.case_id,
+                    case.task_ref,
+                    case.parent_artifact_ref,
+                    metadata=metadata,
+                )
+            )
+        return tuple(enriched)
+
+    sample_size = (
+        runtime.outer_harness.rubric_validation_sample_size
+        if loop_role == "outer"
+        else runtime.inner_harness.rubric_validation_sample_size
+    )
+    return tuple(
+        HarnessReplayCase(
+            f"{loop_role}-{index + 1:02d}",
+            str(runtime.task_source.resolve()),
+            str(runtime.seed_artifact.resolve()),
+            metadata={
+                "seed_score": runtime.seed_score,
+                "config_path": str(config_path.resolve()),
+            },
+        )
+        for index in range(sample_size)
     )

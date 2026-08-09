@@ -41,14 +41,36 @@ class RunLock:
         self.path = run_dir / ".loop.lock"
 
     def __enter__(self) -> "RunLock":
-        try:
-            self.path.mkdir()
-        except FileExistsError as exc:
+        if self.path.is_dir() and not self._try_acquire():
+            self._clear_if_stale()
+        if not self._try_acquire():
             owner = self.path / "owner.json"
             detail = read_json(owner) if owner.is_file() else {}
-            raise RunLockedError(f"run already locked: {detail}") from exc
-        atomic_write_json(self.path / "owner.json", {"pid": os.getpid(), "at": utc_now()})
+            raise RunLockedError(f"run already locked: {detail}")
         return self
+
+    def _try_acquire(self) -> bool:
+        try:
+            self.path.mkdir()
+        except FileExistsError:
+            return False
+        atomic_write_json(self.path / "owner.json", {"pid": os.getpid(), "at": utc_now()})
+        return True
+
+    def _clear_if_stale(self) -> None:
+        owner = self.path / "owner.json"
+        if owner.is_file():
+            pid = read_json(owner).get("pid")
+            if isinstance(pid, int) and pid > 0:
+                try:
+                    os.kill(pid, 0)
+                    return
+                except OSError:
+                    pass
+        if owner.exists():
+            owner.unlink()
+        if self.path.exists():
+            self.path.rmdir()
 
     def __exit__(self, exc_type, exc, tb) -> None:
         owner = self.path / "owner.json"

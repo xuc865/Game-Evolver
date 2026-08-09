@@ -1,0 +1,93 @@
+{
+  "modules": [
+    {
+      "id": "context_compiler",
+      "instruction": "Compile context from task requirements, parent artifact state, and feedback signals.",
+      "tags": [
+        "context",
+        "context_compiler"
+      ]
+    },
+    {
+      "id": "module_strategy",
+      "instruction": "Select and order modules based on task type and recent outcomes.",
+      "tags": [
+        "strategy",
+        "module_strategy"
+      ]
+    },
+    {
+      "id": "skill_governance",
+      "instruction": "Curate skill descriptions and manage skill loading priorities.",
+      "tags": [
+        "skills",
+        "skill_governance"
+      ]
+    },
+    {
+      "id": "tool_interface",
+      "instruction": "Manage tool interface assembly and safety scoping.",
+      "tags": [
+        "tools",
+        "tool_interface"
+      ]
+    },
+    {
+      "id": "feedback_synthesis",
+      "instruction": "Synthesize structured feedback from evaluator outputs and probe observations.",
+      "tags": [
+        "feedback",
+        "validation"
+      ]
+    },
+    {
+      "id": "session_routing",
+      "instruction": "Route sessions across heterogeneous agent frameworks and model backends.",
+      "tags": [
+        "routing",
+        "recovery"
+      ]
+    }
+  ],
+  "tool_interfaces": [
+    {
+      "id": "python_runtime",
+      "kind": "command_wrapper",
+      "description": "Run bounded Python inspection commands in the candidate workspace.",
+      "command": [
+        "python3",
+        "-c",
+        "import os; print(os.listdir('{artifact_dir}')[:5])"
+      ],
+      "safety_scope": "candidate_workspace_only",
+      "tags": [
+        "runtime",
+        "tool_interface"
+      ]
+    }
+  ],
+  "seed_modules": [
+    "context_compiler",
+    "module_strategy"
+  ],
+  "max_active_modules": 2,
+  "max_active_tool_interfaces": 1,
+  "mutation_width": 1,
+  "replay_min_cases": 2,
+  "rubric_validation_sample_size": 2,
+  "promotion_delta_min": 0.05,
+  "max_case_regression": 0.05,
+  "loop_role": "outer",
+  "require_rubric_validation": true,
+  "dynamic_rubric_generation": true,
+  "enable_usage_driven_mutation": false,
+  "rubric_provider": "deepseek",
+  "allowed_niches": [
+    "context_compiler",
+    "module_strategy",
+    "skill_governance",
+    "tool_interface",
+    "feedback_synthesis",
+    "session_routing"
+  ]
+}

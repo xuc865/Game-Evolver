@@ -37,6 +37,7 @@ def evolution_config(prefix: str) -> HarnessEvolutionConfig:
         "replay_min_cases": 2,
         "promotion_delta_min": 0.05,
         "max_case_regression": 0.05,
+        "require_rubric_validation": False,
     })
 
 

@@ -15,6 +15,11 @@ from game_loop.core.models import (
     PreparedTask,
 )
 from game_loop.gates import common_gate, merge_gates
+from game_loop.gcbench_runtime import (
+    render_runtime_instruction_block,
+    sanitize_public_instruction,
+    stage_local_runtime_overlay,
+)
 from game_loop.utils import read_json
 
 from .base import BenchmarkAdapter
@@ -43,7 +48,7 @@ class GameCraftBenchAdapter(BenchmarkAdapter):
     )
     required_command_fields = frozenset({
         "agent_cwd", "candidate_workspace", "artifact_path", "instruction_file",
-        "output_manifest",
+        "output_manifest", "breakdown_path", "task_id", "gcbench_root",
     })
 
     def doctor(self) -> dict[str, Any]:
@@ -60,9 +65,19 @@ class GameCraftBenchAdapter(BenchmarkAdapter):
         reward = float(value.get("reward", 0.0) or 0.0)
         build_ok = bool(value.get("build_ok", False))
         errors = [str(item) for item in value.get("errors", []) if str(item).strip()]
+        infrastructure_errors = [
+            str(item) for item in value.get("infrastructure_errors", [])
+            if str(item).strip()
+        ]
         judge_failed = any("judge failed" in item.lower() for item in errors)
         replay_failed = any("replay failed" in item.lower() for item in errors)
-        feasible = build_ok and not judge_failed and not replay_failed
+        infrastructure_failed = (
+            value.get("infrastructure_ok") is False
+            or bool(infrastructure_errors)
+            or judge_failed
+            or replay_failed
+        )
+        feasible = build_ok and not infrastructure_failed
         objectives: dict[str, float] = {}
         for item in value.get("requirements", []):
             if not isinstance(item, dict):
@@ -82,13 +97,14 @@ class GameCraftBenchAdapter(BenchmarkAdapter):
             objectives=objectives,
             constraints={
                 "build": build_ok,
-                "judge_complete": build_ok and not judge_failed,
-                "replay_complete": build_ok and not replay_failed,
+                "judge_complete": build_ok and not judge_failed and not infrastructure_errors,
+                "replay_complete": build_ok and not replay_failed and not infrastructure_errors,
+                "infrastructure_ok": not infrastructure_failed,
             },
-            diagnostics=[] if feasible else errors[:5],
+            diagnostics=[] if feasible else (infrastructure_errors + errors)[:5],
             evaluator={
                 "name": "GameCraftBench breakdown",
-                "infrastructure_failure": judge_failed or replay_failed,
+                "infrastructure_failure": infrastructure_failed,
             },
             terminal_success=terminal,
             raw_result_ref=str(path.resolve()),
@@ -104,6 +120,9 @@ class GameCraftBenchAdapter(BenchmarkAdapter):
         context: AttemptContext,
     ) -> PreparedTask:
         del context
+        task_source = task_source.resolve()
+        task_id = task_source.name
+        gcbench_root = Path(str(self.options.get("root", ""))).expanduser().resolve()
         overlay = candidate_dir / "task_overlay"
         workspace = overlay / "workspace" / "game"
         workspace.mkdir(parents=True, exist_ok=True)
@@ -116,6 +135,11 @@ class GameCraftBenchAdapter(BenchmarkAdapter):
         staged_parent = candidate_dir / "parent_overlay"
         self.stage_artifact(parent_artifact, staged_parent)
         shutil.copytree(staged_parent, workspace, dirs_exist_ok=True)
+        overlay_workspace = overlay / "workspace"
+        runtime = stage_local_runtime_overlay(
+            overlay_workspace=overlay_workspace,
+            gcbench_root=gcbench_root,
+        )
         extra_path = candidate_dir / "extra_instruction.txt"
         harness = feedback.get("agent_harness")
         rendered = (
@@ -123,7 +147,7 @@ class GameCraftBenchAdapter(BenchmarkAdapter):
             if isinstance(harness, dict)
             else ""
         )
-        public_instruction = (
+        public_instruction = sanitize_public_instruction(
             (task_source / "instruction.md").read_text(encoding="utf-8")
             if (task_source / "instruction.md").is_file()
             else ""
@@ -133,10 +157,13 @@ class GameCraftBenchAdapter(BenchmarkAdapter):
             + ("\n\n" if public_instruction else "")
             + "Improve the candidate Godot project in place. "
             + "The hidden rubric and shared assets are immutable; do not edit benchmark infrastructure."
+            + "\n\n"
+            + render_runtime_instruction_block(runtime)
             + (f"\n\n{rendered}" if rendered else ""),
             encoding="utf-8",
         )
         output_manifest = candidate_dir / "gcbench_execution.json"
+        breakdown_path = candidate_dir / "gcbench_verifier" / "breakdown.json"
         return PreparedTask(
             self.adapter_id,
             workspace,
@@ -147,6 +174,9 @@ class GameCraftBenchAdapter(BenchmarkAdapter):
                 "instruction_file": str(extra_path.resolve()),
                 "extra_instruction": str(extra_path.resolve()),
                 "output_manifest": str(output_manifest.resolve()),
+                "breakdown_path": str(breakdown_path.resolve()),
+                "task_id": task_id,
+                "gcbench_root": str(gcbench_root),
                 "candidate_dir": str(candidate_dir.resolve()),
             },
             {"output_manifest": str(output_manifest), "candidate_dir": str(candidate_dir)},

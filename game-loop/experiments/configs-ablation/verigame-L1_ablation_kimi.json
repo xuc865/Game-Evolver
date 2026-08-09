@@ -14,7 +14,6 @@
     "cwd": ".",
     "timeout_seconds": 600,
     "env": {
-      "CODEX_API_KEY": "sk-placeholder",
       "CODEX_API_BASE": "http://29.116.237.135:8080/v1",
       "CODEX_MODEL": "Kimi-K2.7-Code"
     }
@@ -144,12 +143,24 @@
       "seed_modules": [
         "context_compiler"
       ],
-      "max_active_modules": 1,
-      "max_active_tool_interfaces": 0,
+      "max_active_modules": 2,
+      "max_active_tool_interfaces": 1,
       "mutation_width": 1,
       "replay_min_cases": 2,
-      "promotion_delta_min": 0.03,
-      "max_case_regression": 0.08,
+      "rubric_validation_sample_size": 2,
+      "promotion_delta_min": 0.05,
+      "max_case_regression": 0.05,
+      "loop_role": "outer",
+      "require_rubric_validation": true,
+      "dynamic_rubric_generation": true,
+      "enable_usage_driven_mutation": false,
+      "rubric_provider": "deepseek",
+      "element_mutation_policy": {
+        "removal_min_usage": 5,
+        "removal_min_usage_share": 0.25,
+        "removal_max_accuracy": 0.35,
+        "merge_min_similarity": 0.55
+      },
       "allowed_niches": [
         "context_compiler"
       ]

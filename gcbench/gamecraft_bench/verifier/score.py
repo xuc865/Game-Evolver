@@ -33,17 +33,20 @@ import dataclasses
 import json
 import math
 import operator
+import os
 import random
+import shlex
 import shutil
 import subprocess
 import time
 from pathlib import Path
 
+from .. import config as cfg
 from .judges import JudgeError, MultimodalJudge, get_judge
 from .judges.base import JudgeRequest, RequirementSpec
 from .replay import ReplayError, replay_trace
 
-_JUDGE_MAX_ATTEMPTS = 5
+_JUDGE_MAX_ATTEMPTS = 3
 
 
 # ---------------------------------------------------------------------------
@@ -64,7 +67,7 @@ class RequirementScore:
 class DemoArtifacts:
     demo_id: str
     trace_path: Path
-    mp4_path: Path
+    mp4_path: Path | None
     frame_paths: list[Path]
     duration_seconds: float
 
@@ -80,6 +83,8 @@ class ScoreResult:
     judge_name: str
     judge_model: str
     errors: list[str]                            # non-fatal (one per failed pair)
+    infrastructure_errors: list[str]             # verifier/replay/judge failures
+    judge_input_mode: str
 
 
 def score_project(
@@ -94,6 +99,7 @@ def score_project(
     frame_interval_seconds: float = 0.5,
     max_demo_seconds: float | None = None,
     max_demos: int | None = None,
+    judge_input_mode: str = "vision",
 ) -> ScoreResult:
     """Score one Godot project. See module docstring for the pipeline."""
     project_dir = Path(project_dir).resolve()
@@ -115,9 +121,13 @@ def score_project(
 
     judge = judge or get_judge()
     errors: list[str] = []
+    infrastructure_errors: list[str] = []
+    judge_input_mode = judge_input_mode.strip().lower()
+    if judge_input_mode not in {"vision", "text"}:
+        raise ValueError("judge_input_mode must be 'vision' or 'text'")
 
     # 1. Build check.
-    build_ok, build_log = _run_build_check(build_spec, output_dir)
+    build_ok, build_log = _run_build_check(build_spec, output_dir, project_dir=project_dir)
 
     # Default per-requirement = 0; populated by judge if BUILD passes.
     # Per-requirement `agg` controls how the demo scores are folded into a
@@ -158,37 +168,63 @@ def score_project(
             demo_id = trace_path.stem
             demo_dir = output_dir / "demos" / demo_id
             demo_dir.mkdir(parents=True, exist_ok=True)
-            mp4_path = demo_dir / f"{demo_id}.mp4"
             log_dir = demo_dir / "logs"
-            try:
-                rr = replay_trace(
-                    project_dir=project_dir,
-                    trace_path=trace_path,
-                    output_mp4=mp4_path,
-                    viewport=viewport,
-                    record_size=record_size,
-                    fps=fps,
-                    log_dir=log_dir,
+            if judge_input_mode == "text":
+                # No display server, input injection, recording, MP4, or frame
+                # extraction exists on this branch. A bounded headless launch
+                # supplies runtime/startup evidence alongside source + trace.
+                try:
+                    duration_seconds = _run_text_runtime_probe(
+                        project_dir=project_dir,
+                        trace_path=trace_path,
+                        log_dir=log_dir,
+                        fps=fps,
+                        max_seconds=max_demo_seconds,
+                    )
+                except TextProbeCandidateError as e:
+                    message = f"text runtime probe rejected {demo_id}: {e}"
+                    errors.append(message)
+                    continue
+                except TextProbeInfrastructureError as e:
+                    message = f"text runtime probe failed for {demo_id}: {e}"
+                    errors.append(message)
+                    infrastructure_errors.append(message)
+                    continue
+                mp4_path = None
+                frames: list[Path] = []
+            else:
+                mp4_path = demo_dir / f"{demo_id}.mp4"
+                try:
+                    rr = replay_trace(
+                        project_dir=project_dir,
+                        trace_path=trace_path,
+                        output_mp4=mp4_path,
+                        viewport=viewport,
+                        record_size=record_size,
+                        fps=fps,
+                        log_dir=log_dir,
+                    )
+                except ReplayError as e:
+                    message = f"replay failed for {demo_id}: {e}"
+                    errors.append(message)
+                    infrastructure_errors.append(message)
+                    continue
+                duration_seconds = rr.duration_seconds
+                frames = _sample_frames(
+                    mp4_path,
+                    demo_dir / "frames",
+                    duration_seconds=duration_seconds,
+                    interval_seconds=frame_interval_seconds,
+                    max_window_seconds=max_demo_seconds,
+                    seed=demo_id,
                 )
-            except ReplayError as e:
-                errors.append(f"replay failed for {demo_id}: {e}")
-                continue
-
-            frames = _sample_frames(
-                mp4_path,
-                demo_dir / "frames",
-                duration_seconds=rr.duration_seconds,
-                interval_seconds=frame_interval_seconds,
-                max_window_seconds=max_demo_seconds,
-                seed=demo_id,
-            )
 
             demo_artifacts.append(DemoArtifacts(
                 demo_id=demo_id,
                 trace_path=trace_path,
                 mp4_path=mp4_path,
                 frame_paths=frames,
-                duration_seconds=rr.duration_seconds,
+                duration_seconds=duration_seconds,
             ))
 
         # 3. Score each demo: one batched judge call returns scores for
@@ -201,6 +237,13 @@ def score_project(
                 video_path=art.mp4_path,
                 frame_paths=list(art.frame_paths),
                 requirements=req_specs,
+                evidence_text=_collect_text_evidence(
+                    project_dir=project_dir,
+                    trace_path=art.trace_path,
+                    build_log=build_log,
+                    replay_log_dir=output_dir / "demos" / art.demo_id / "logs",
+                ) if judge_input_mode == "text" else "",
+                input_mode=judge_input_mode,
             )
             t0 = time.time()
             last_exc: JudgeError | None = None
@@ -222,7 +265,9 @@ def score_project(
                 resp_rationales = {}
                 resp_raw = ""
                 hard_failure = True
-                errors.append(f"judge failed on {art.demo_id}: {last_exc}")
+                message = f"judge failed on {art.demo_id}: {last_exc}"
+                errors.append(message)
+                infrastructure_errors.append(message)
             latency_s = time.time() - t0
 
             for r in requirements:
@@ -263,7 +308,9 @@ def score_project(
     try:
         reward = _safe_eval_formula(formula, variables)
     except FormulaError as e:
-        errors.append(f"score_formula evaluation failed: {e}")
+        message = f"score_formula evaluation failed: {e}"
+        errors.append(message)
+        infrastructure_errors.append(message)
         reward = 0.0
     reward = max(0.0, min(1.0, reward))
 
@@ -277,6 +324,8 @@ def score_project(
         judge_name=type(judge).__name__,
         judge_model=judge.model,
         errors=errors,
+        infrastructure_errors=infrastructure_errors,
+        judge_input_mode=judge_input_mode,
     )
 
     _write_artifacts(output_dir, result, judge_log, variables)
@@ -317,25 +366,193 @@ def _aggregate(agg: str, per_demo: dict[str, float]) -> float:
     return max(vals)
 
 
-def _run_build_check(spec: dict, output_dir: Path) -> tuple[bool, str]:
+_TEXT_EVIDENCE_SUFFIXES = {".gd", ".tscn", ".tres", ".godot", ".json", ".cfg", ".md", ".txt"}
+_TEXT_EVIDENCE_MAX_FILE_CHARS = 8_000
+# Keep text-only judge calls responsive on local OpenAI-compatible backbones.
+# The same source bundle is evaluated once per trace, so an oversized 96k
+# bundle multiplied latency without adding distinct behavioral evidence.
+_TEXT_EVIDENCE_MAX_TOTAL_CHARS = 32_000
+
+
+class TextProbeInfrastructureError(RuntimeError):
+    """The headless text-evidence probe could not be executed reliably."""
+
+
+class TextProbeCandidateError(RuntimeError):
+    """The submitted project/trace is invalid, but the verifier is healthy."""
+
+
+def _run_text_runtime_probe(
+    *,
+    project_dir: Path,
+    trace_path: Path,
+    log_dir: Path,
+    fps: int,
+    max_seconds: float | None,
+) -> float:
+    """Run a bounded, display-free Godot launch and capture textual output."""
+    godot = cfg.GODOT_BIN or shutil.which("godot")
+    if not godot:
+        raise TextProbeInfrastructureError(
+            "no Godot binary configured (set GAMECRAFT_BENCH_GODOT_BIN)"
+        )
+    try:
+        trace = json.loads(trace_path.read_text())
+    except (OSError, json.JSONDecodeError) as e:
+        # Malformed candidate-authored demo traces are a submission quality
+        # problem, not verifier infrastructure.  Marking them as infra would
+        # exclude the pair and hide that the game-making agent failed to
+        # produce valid replay evidence.
+        raise TextProbeCandidateError(f"could not read trace: {e}") from e
+
+    duration_frames = max(1, int(trace.get("duration_frames", fps)))
+    trace_seconds = duration_frames / max(1, fps)
+    probe_seconds = max(1.0, min(float(max_seconds or 10.0), trace_seconds, 15.0))
+    quit_after_frames = max(1, int(math.ceil(probe_seconds * max(1, fps))))
+    command = [
+        str(godot), "--headless", "--path", str(project_dir),
+        "--quit-after", str(quit_after_frames),
+    ]
+    scenario = trace.get("scenario")
+    if scenario:
+        command += ["--", "--scenario", str(scenario)]
+
+    log_dir.mkdir(parents=True, exist_ok=True)
+    timeout = probe_seconds + 10.0
+    started = time.time()
+    try:
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=_build_check_env(),
+        )
+    except subprocess.TimeoutExpired as e:
+        output = f"{e.stdout or ''}{e.stderr or ''}"
+        (log_dir / "godot.log").write_text(
+            f"$ {' '.join(command)}\n[probe timeout after {timeout:.1f}s]\n{output}"
+        )
+        raise TextProbeInfrastructureError(
+            f"Godot headless probe timed out after {timeout:.1f}s"
+        ) from e
+    except OSError as e:
+        raise TextProbeInfrastructureError(f"could not launch Godot: {e}") from e
+
+    output = (completed.stdout or "") + (completed.stderr or "")
+    (log_dir / "godot.log").write_text(
+        f"$ {' '.join(command)}\n[exit_code={completed.returncode}]\n{output}"
+    )
+    return max(0.0, time.time() - started)
+
+
+def _collect_text_evidence(
+    *,
+    project_dir: Path,
+    trace_path: Path,
+    build_log: str,
+    replay_log_dir: Path,
+) -> str:
+    """Collect bounded textual evidence without reading assets or secrets."""
+    sections: list[str] = []
+    remaining = _TEXT_EVIDENCE_MAX_TOTAL_CHARS
+
+    def add(label: str, content: str) -> None:
+        nonlocal remaining
+        if remaining <= 0:
+            return
+        clean = content[:_TEXT_EVIDENCE_MAX_FILE_CHARS]
+        block = f"\n===== {label} =====\n{clean}\n"
+        block = block[:remaining]
+        sections.append(block)
+        remaining -= len(block)
+
+    add("build output", build_log)
+    try:
+        add(f"input trace: {trace_path.name}", trace_path.read_text(errors="replace"))
+    except OSError as e:
+        add("input trace read error", str(e))
+
+    for name in ("godot.log", "xvfb.log", "ffmpeg.log"):
+        path = replay_log_dir / name
+        try:
+            if path.is_file():
+                add(f"replay runtime log: {name}", path.read_text(errors="replace"))
+        except OSError as e:
+            add(f"replay runtime log read error: {name}", str(e))
+
+    skip_parts = {".git", ".godot", "addons", "assets", "demo_outputs"}
+    for path in sorted(project_dir.rglob("*")):
+        if remaining <= 0:
+            break
+        if not path.is_file() or path.suffix.lower() not in _TEXT_EVIDENCE_SUFFIXES:
+            continue
+        rel = path.relative_to(project_dir)
+        if any(part in skip_parts or part.startswith(".env") for part in rel.parts):
+            continue
+        try:
+            if path.stat().st_size > 256_000:
+                continue
+            add(f"project source: {rel}", path.read_text(errors="replace"))
+        except OSError as e:
+            add(f"project source read error: {rel}", str(e))
+    return "".join(sections)
+
+
+def _localize_build_cmd(cmd: str, *, project_dir: Path) -> str:
+    """Rewrite container-style build_check commands for local verification."""
+    project = shlex.quote(str(project_dir.resolve()))
+    localized = cmd.replace("/workspace/game", project)
+    godot = cfg.GODOT_BIN or shutil.which("godot")
+    if godot:
+        godot_q = shlex.quote(godot)
+        stripped = localized.strip()
+        if stripped.startswith("godot "):
+            localized = f"{godot_q} {stripped[len('godot '):]}"
+        localized = localized.replace(" godot ", f" {godot_q} ")
+    return localized
+
+
+def _build_check_env() -> dict[str, str]:
+    env = os.environ.copy()
+    godot = cfg.GODOT_BIN or shutil.which("godot")
+    if godot:
+        env["PATH"] = str(Path(godot).parent) + os.pathsep + env.get("PATH", "")
+        env.setdefault("GAMECRAFT_BENCH_GODOT_BIN", godot)
+    return env
+
+
+def _run_build_check(
+    spec: dict,
+    output_dir: Path,
+    *,
+    project_dir: Path | None = None,
+) -> tuple[bool, str]:
     """Run the build smoke command in a shell. Captures combined output."""
     cmd = spec["cmd"]
+    if project_dir is not None:
+        cmd = _localize_build_cmd(cmd, project_dir=project_dir)
     timeout = float(spec.get("timeout_seconds", 60))
     log_path = output_dir / "build.log"
     try:
         proc = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, timeout=timeout,
+            cmd,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=_build_check_env(),
         )
         out = (proc.stdout or "") + (proc.stderr or "")
-        log_path.write_text(out)
+        log_path.write_text(f"$ {cmd}\n\n{out}")
         return proc.returncode == 0, out
     except subprocess.TimeoutExpired as e:
         msg = f"build_check timed out after {timeout}s\n{e.stdout or ''}{e.stderr or ''}"
-        log_path.write_text(msg)
+        log_path.write_text(f"$ {cmd}\n\n{msg}")
         return False, msg
     except OSError as e:
         msg = f"build_check could not run: {e}"
-        log_path.write_text(msg)
+        log_path.write_text(f"$ {cmd}\n\n{msg}")
         return False, msg
 
 
@@ -413,6 +630,8 @@ def _write_artifacts(
         "formula": result.formula,
         "build_ok": result.build_ok,
         "judge": {"name": result.judge_name, "model": result.judge_model},
+        "infrastructure_ok": not result.infrastructure_errors,
+        "infrastructure_errors": result.infrastructure_errors,
         "variables": variables,
         "requirements": [
             {
@@ -428,13 +647,14 @@ def _write_artifacts(
             {
                 "demo_id": d.demo_id,
                 "trace": str(d.trace_path),
-                "mp4": str(d.mp4_path),
+                "mp4": str(d.mp4_path) if d.mp4_path is not None else None,
                 "duration_seconds": d.duration_seconds,
                 "frames": [str(p) for p in d.frame_paths],
             }
             for d in result.demos
         ],
         "errors": result.errors,
+        "judge_input_mode": result.judge_input_mode,
     }
     (output_dir / "breakdown.json").write_text(
         json.dumps(breakdown, indent=2, sort_keys=False)
@@ -507,5 +727,7 @@ __all__ = [
     "FormulaError",
     "RequirementScore",
     "ScoreResult",
+    "TextProbeCandidateError",
+    "TextProbeInfrastructureError",
     "score_project",
 ]

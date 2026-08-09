@@ -32,7 +32,7 @@ def run_frozen_harness_episode(
         should_wipe = True
         if state_path.is_file():
             status = str(json.loads(state_path.read_text(encoding="utf-8")).get("status", ""))
-            if status in {"loop_ready_for_benchmark", "completed", "paused_infrastructure"}:
+            if status in {"loop_ready_for_benchmark", "running", "completed", "paused_infrastructure"}:
                 should_wipe = False
         if should_wipe:
             shutil.rmtree(case_dir)
@@ -113,6 +113,10 @@ def _episode_config_dict(config: AppConfig) -> dict:
                 "replay_min_cases": harness.replay_min_cases,
                 "promotion_delta_min": harness.promotion_delta_min,
                 "max_case_regression": harness.max_case_regression,
+                "loop_role": harness.loop_role,
+                "rubric_validation_sample_size": harness.rubric_validation_sample_size,
+                "require_rubric_validation": harness.require_rubric_validation,
+                "rubric_provider": harness.rubric_provider,
             },
         },
         "experiment": {"arm": "L4", "freezes_harness_outer_loop": True},

@@ -137,6 +137,17 @@ JUDGE_BACKEND: str = (_env("GAMECRAFT_BENCH_JUDGE", "openai") or "openai").strip
 # (defined in gamecraft_bench/verifier/judges); this overrides it.
 JUDGE_MODEL: str | None = _env("GAMECRAFT_BENCH_JUDGE_MODEL") or None
 
+# Evidence transport for OpenAI-compatible judges. ``text`` never sends
+# image_url content and instead grades source, trace, build and runtime logs.
+JUDGE_INPUT_MODE: str = (
+    _env("GAMECRAFT_BENCH_JUDGE_INPUT_MODE", "vision") or "vision"
+).strip().lower()
+if JUDGE_INPUT_MODE not in {"vision", "text"}:
+    raise ValueError(
+        "GAMECRAFT_BENCH_JUDGE_INPUT_MODE must be 'vision' or 'text', "
+        f"got {JUDGE_INPUT_MODE!r}"
+    )
+
 
 def _top_level(path: str) -> str | None:
     """Return the first path segment of an absolute path, e.g. /a/b -> /a."""
@@ -172,6 +183,7 @@ def env_for_subprocess() -> dict[str, str]:
     # Forward the verifier judge selection so the test script in the
     # sandbox uses the same backend / model as the host config.
     e["GAMECRAFT_BENCH_JUDGE"] = JUDGE_BACKEND
+    e["GAMECRAFT_BENCH_JUDGE_INPUT_MODE"] = JUDGE_INPUT_MODE
     if JUDGE_MODEL:
         e["GAMECRAFT_BENCH_JUDGE_MODEL"] = JUDGE_MODEL
     # Vendor API keys / base-url overrides. Standard names so users can

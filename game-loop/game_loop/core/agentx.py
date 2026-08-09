@@ -13,6 +13,11 @@ from game_loop.core.harness import (
     HarnessReplayCase,
     HarnessSemanticGradient,
 )
+from game_loop.core.harness_evolution_memory import (
+    HarnessEvolutionMemory,
+    build_rejection_experience,
+)
+from game_loop.core.harness_rubric_validator import HarnessRubricValidator
 from game_loop.utils import atomic_write_json, read_json, utc_now
 
 
@@ -110,6 +115,10 @@ class AgentXNestedEvolution:
         inner_gradient_proposer: InnerGradientProposer,
         outer_gradient_proposer: OuterGradientProposer,
         replay_oracle: NestedReplayOracle,
+        inner_rubric_validator: HarnessRubricValidator | None = None,
+        outer_rubric_validator: HarnessRubricValidator | None = None,
+        inner_memory: HarnessEvolutionMemory | None = None,
+        outer_memory: HarnessEvolutionMemory | None = None,
     ):
         if inner_engine.config.mutation_width != 1 or outer_engine.config.mutation_width != 1:
             raise ValueError("AgentX-safe nested evolution requires mutation_width=1 at both levels")
@@ -119,6 +128,14 @@ class AgentXNestedEvolution:
         self.inner_gradient_proposer = inner_gradient_proposer
         self.outer_gradient_proposer = outer_gradient_proposer
         self.replay_oracle = replay_oracle
+        self.inner_rubric_validator = inner_rubric_validator or HarnessRubricValidator(
+            inner_engine.config
+        )
+        self.outer_rubric_validator = outer_rubric_validator or HarnessRubricValidator(
+            outer_engine.config
+        )
+        self.inner_memory = inner_memory
+        self.outer_memory = outer_memory
         self.state_path = self.run_dir / "nested_evolution.json"
 
     def initialize(self) -> None:
@@ -166,14 +183,37 @@ class AgentXNestedEvolution:
             proposer_harness=frozen_outer,
             epoch=epoch,
         )
+        inner_rubric = self.inner_rubric_validator.validate_paired_outcomes(
+            parent_outcomes=inner_outcomes.parent,
+            candidate_outcomes=inner_outcomes.candidate,
+            parent_profile=inner_parent,
+            candidate_profile=inner_candidate,
+            case_task_refs={
+                case.case_id: Path(case.task_ref)
+                for case in inner_cases
+            },
+            module_categories=self.inner_engine.module_categories,
+        )
         inner_result = self.inner_engine.assess_epoch(
             epoch=epoch,
             parent=inner_parent,
             candidate=inner_candidate,
             parent_outcomes=inner_outcomes.parent,
             candidate_outcomes=inner_outcomes.candidate,
+            rubric_validation=inner_rubric.to_dict(),
         )
         self.inner_engine.record_epoch(inner_result)
+        if not inner_result.accepted and self.inner_memory is not None:
+            self.inner_memory.append(
+                build_rejection_experience(
+                    epoch=epoch,
+                    loop_role=self.inner_engine.config.loop_role,
+                    parent=inner_parent,
+                    candidate=inner_candidate,
+                    epoch_result=inner_result,
+                    rubric_validation=inner_rubric.to_dict(),
+                )
+            )
 
         # The outer epoch starts only after the complete inner epoch. Its target
         # is the resulting inner champion and remains frozen for all outer cases.
@@ -196,14 +236,37 @@ class AgentXNestedEvolution:
             target_harness=frozen_inner,
             epoch=epoch,
         )
+        outer_rubric = self.outer_rubric_validator.validate_paired_outcomes(
+            parent_outcomes=outer_outcomes.parent,
+            candidate_outcomes=outer_outcomes.candidate,
+            parent_profile=outer_parent,
+            candidate_profile=outer_candidate,
+            case_task_refs={
+                case.case_id: Path(case.task_ref)
+                for case in outer_cases
+            },
+            module_categories=self.outer_engine.module_categories,
+        )
         outer_result = self.outer_engine.assess_epoch(
             epoch=epoch,
             parent=outer_parent,
             candidate=outer_candidate,
             parent_outcomes=outer_outcomes.parent,
             candidate_outcomes=outer_outcomes.candidate,
+            rubric_validation=outer_rubric.to_dict(),
         )
         self.outer_engine.record_epoch(outer_result)
+        if not outer_result.accepted and self.outer_memory is not None:
+            self.outer_memory.append(
+                build_rejection_experience(
+                    epoch=epoch,
+                    loop_role=self.outer_engine.config.loop_role,
+                    parent=outer_parent,
+                    candidate=outer_candidate,
+                    epoch_result=outer_result,
+                    rubric_validation=outer_rubric.to_dict(),
+                )
+            )
         result = AgentXNestedEpochResult(
             inner_result,
             outer_result,
@@ -215,6 +278,8 @@ class AgentXNestedEvolution:
             **result.to_dict(),
             "inner_gradient": inner_gradient.to_dict(),
             "outer_gradient": outer_gradient.to_dict(),
+            "inner_rubric_validation": inner_rubric.to_dict(),
+            "outer_rubric_validation": outer_rubric.to_dict(),
             "completed_at": utc_now(),
         })
         atomic_write_json(self.state_path, state)

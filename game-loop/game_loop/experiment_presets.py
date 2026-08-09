@@ -4,6 +4,8 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from game_loop.harness_element_catalog import DEFAULT_INNER_SEED_ELEMENTS, INNER_ELEMENT_CATALOG
+
 PYTHON = "python3"
 PROBE_MODULE = ["-m", "game_loop.probe_tools"]
 
@@ -70,6 +72,50 @@ CODE_HARNESS_MODULES = [
         "id": "diversity_escape",
         "instruction": "Avoid repeating a recently rejected change family.",
         "tags": ["ExploreAlternative", "exploration"],
+    },
+]
+
+OUTER_HARNESS_MODULES = [
+    {
+        "id": "context_compiler",
+        "instruction": "Compile context from task requirements, parent artifact state, and feedback signals.",
+        "tags": ["context", "context_compiler"],
+    },
+    {
+        "id": "module_strategy",
+        "instruction": "Select and order modules based on task type and recent outcomes.",
+        "tags": ["strategy", "module_strategy"],
+    },
+    {
+        "id": "skill_governance",
+        "instruction": "Curate skill descriptions and manage skill loading priorities.",
+        "tags": ["skills", "skill_governance"],
+    },
+    {
+        "id": "tool_interface",
+        "instruction": "Manage tool interface assembly and safety scoping.",
+        "tags": ["tools", "tool_interface"],
+    },
+    {
+        "id": "feedback_synthesis",
+        "instruction": "Synthesize structured feedback from evaluator outputs and probe observations.",
+        "tags": ["feedback", "validation"],
+    },
+    {
+        "id": "session_routing",
+        "instruction": "Route sessions across heterogeneous agent frameworks and model backends.",
+        "tags": ["routing", "recovery"],
+    },
+]
+
+OUTER_TOOL_INTERFACES = [
+    {
+        "id": "python_runtime",
+        "kind": "command_wrapper",
+        "description": "Run bounded Python inspection commands in the candidate workspace.",
+        "command": [PYTHON, "-c", "import os; print(os.listdir('{artifact_dir}')[:5])"],
+        "safety_scope": "candidate_workspace_only",
+        "tags": ["runtime", "tool_interface"],
     },
 ]
 
@@ -481,21 +527,108 @@ def _harness_evolution(
     tool_interfaces: list[dict[str, Any]],
     seed_modules: list[str],
     allowed_niches: list[str] | None = None,
+    loop_role: str = "inner",
+    max_active_modules: int | None = None,
+    max_active_tool_interfaces: int | None = None,
+    replay_min_cases: int | None = None,
+    rubric_validation_sample_size: int | None = None,
+    promotion_delta_min: float | None = None,
+    max_case_regression: float | None = None,
+    require_rubric_validation: bool = True,
+    element_catalog: list[dict[str, Any]] | None = None,
+    seed_elements: dict[str, list[str]] | None = None,
 ) -> dict[str, Any]:
+    active_modules = max(1, len(seed_modules)) if max_active_modules is None else max_active_modules
+    active_tools = (
+        min(2, len(tool_interfaces))
+        if max_active_tool_interfaces is None
+        else max_active_tool_interfaces
+    )
+    if loop_role == "outer":
+        sample_size = rubric_validation_sample_size or 2
+        replay_cases = replay_min_cases or 2
+        promo_delta = promotion_delta_min if promotion_delta_min is not None else 0.05
+        regression = max_case_regression if max_case_regression is not None else 0.05
+    else:
+        sample_size = rubric_validation_sample_size or 3
+        replay_cases = replay_min_cases or 3
+        promo_delta = promotion_delta_min if promotion_delta_min is not None else 0.03
+        regression = max_case_regression if max_case_regression is not None else 0.08
     payload: dict[str, Any] = {
         "modules": deepcopy(modules),
         "tool_interfaces": deepcopy(tool_interfaces),
         "seed_modules": list(seed_modules),
-        "max_active_modules": max(1, len(seed_modules)),
-        "max_active_tool_interfaces": min(2, len(tool_interfaces)),
+        "max_active_modules": active_modules,
+        "max_active_tool_interfaces": active_tools,
         "mutation_width": 1,
-        "replay_min_cases": 2,
-        "promotion_delta_min": 0.03,
-        "max_case_regression": 0.08,
+        "replay_min_cases": replay_cases,
+        "rubric_validation_sample_size": sample_size,
+        "promotion_delta_min": promo_delta,
+        "max_case_regression": regression,
+        "loop_role": loop_role,
+        "require_rubric_validation": require_rubric_validation,
+        "dynamic_rubric_generation": True,
+        "enable_usage_driven_mutation": loop_role == "inner",
+        "rubric_provider": "deepseek",
+        "element_mutation_policy": {
+            "removal_min_usage": 5,
+            "removal_min_usage_share": 0.25,
+            "removal_max_accuracy": 0.35,
+            "merge_min_similarity": 0.55,
+        },
     }
+    if element_catalog is not None:
+        payload["element_catalog"] = deepcopy(element_catalog)
+    if seed_elements is not None:
+        payload["seed_elements"] = deepcopy(seed_elements)
     if allowed_niches is not None:
         payload["allowed_niches"] = list(allowed_niches)
     return payload
+
+
+def build_inner_harness_evolution(bench: str) -> dict[str, Any]:
+    preset = BENCHMARK_PRESETS[bench]
+    seed_modules = list(preset["seed_modules"])
+    modules = deepcopy(preset["harness_modules"])
+    tool_interfaces = deepcopy(preset["tool_interfaces"])
+    if bench in {"gdbench", "gcbench"}:
+        tool_interfaces = deepcopy(GAME_TOOL_INTERFACES)
+    return _harness_evolution(
+        modules=modules,
+        tool_interfaces=tool_interfaces,
+        seed_modules=seed_modules,
+        loop_role="inner",
+        max_active_modules=min(5, len(modules)),
+        max_active_tool_interfaces=min(4, max(2, len(tool_interfaces))),
+        replay_min_cases=3,
+        rubric_validation_sample_size=3,
+        element_catalog=deepcopy(INNER_ELEMENT_CATALOG),
+        seed_elements=deepcopy(DEFAULT_INNER_SEED_ELEMENTS),
+    )
+
+
+def build_outer_harness_evolution() -> dict[str, Any]:
+    seed_modules = ["context_compiler", "module_strategy"]
+    return _harness_evolution(
+        modules=deepcopy(OUTER_HARNESS_MODULES),
+        tool_interfaces=deepcopy(OUTER_TOOL_INTERFACES),
+        seed_modules=seed_modules,
+        allowed_niches=[
+            "context_compiler",
+            "module_strategy",
+            "skill_governance",
+            "tool_interface",
+            "feedback_synthesis",
+            "session_routing",
+        ],
+        loop_role="outer",
+        max_active_modules=2,
+        max_active_tool_interfaces=1,
+        replay_min_cases=2,
+        rubric_validation_sample_size=2,
+        promotion_delta_min=0.05,
+        max_case_regression=0.05,
+    )
 
 
 def build_method_section(
@@ -508,17 +641,32 @@ def build_method_section(
     if ablation:
         modules = deepcopy(ABLATION_HARNESS_MODULES)
         seed_modules = (
-            list(allowed_niches)
+            list(allowed_niches)[:2]
             if allowed_niches
-            else ["context_compiler", "module_strategy", "skill_governance"]
+            else ["context_compiler", "module_strategy"]
         )
         tool_interfaces: list[dict[str, Any]] = []
     else:
         modules = deepcopy(preset["harness_modules"])
         seed_modules = list(preset["seed_modules"])
         tool_interfaces = deepcopy(preset["tool_interfaces"])
+        if bench in {"gdbench", "gcbench"}:
+            tool_interfaces = deepcopy(GAME_TOOL_INTERFACES)
 
     max_selected = int(preset["max_selected_probes"])
+    harness_payload = _harness_evolution(
+        modules=modules,
+        tool_interfaces=tool_interfaces,
+        seed_modules=seed_modules,
+        allowed_niches=allowed_niches if ablation else None,
+        loop_role="outer" if ablation else "inner",
+        max_active_modules=2 if ablation else min(5, len(modules)),
+        max_active_tool_interfaces=1 if ablation else min(4, len(tool_interfaces) or 1),
+        replay_min_cases=2 if ablation else 3,
+        rubric_validation_sample_size=2 if ablation else 3,
+        element_catalog=None if ablation else deepcopy(INNER_ELEMENT_CATALOG),
+        seed_elements=None if ablation else deepcopy(DEFAULT_INNER_SEED_ELEMENTS),
+    )
     return {
         "level": "L4",
         "fixed_probes": deepcopy(preset["fixed_probes"]),
@@ -528,10 +676,5 @@ def build_method_section(
             "max_selected_probes": max_selected,
             "min_observations_per_probe": 1,
         },
-        "harness_evolution": _harness_evolution(
-            modules=modules,
-            tool_interfaces=tool_interfaces,
-            seed_modules=seed_modules,
-            allowed_niches=allowed_niches if ablation else None,
-        ),
+        "harness_evolution": harness_payload,
     }

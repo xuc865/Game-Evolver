@@ -31,6 +31,17 @@ SYSTEM_INSTRUCTION = (
     "Reply with strict JSON only, no prose, no markdown, no code fences."
 )
 
+TEXT_SYSTEM_INSTRUCTION = (
+    "You are a strict but fair video-game evaluator. You are evaluating a "
+    "Godot 2D game from textual evidence only: source/config snippets, the "
+    "input trace, build output, and replay/runtime logs. Do not claim that a "
+    "visual property was observed. Score each requirement from 0.0 to 1.0: "
+    "0.0 means contradicted or unsupported, 0.5 means partially supported or "
+    "ambiguous, and 1.0 means clearly supported by concrete implementation "
+    "and runtime evidence. Prefer runtime evidence over source-only claims. "
+    "Reply with strict JSON only, without markdown or prose."
+)
+
 
 def build_user_prompt(requirements: list[RequirementSpec]) -> str:
     """Return the user-facing prompt for one demo's batch of requirements.
@@ -55,6 +66,24 @@ def build_user_prompt(requirements: list[RequirementSpec]) -> str:
         "}",
     ]
     return "\n".join(lines)
+
+
+def build_text_user_prompt(
+    requirements: list[RequirementSpec], evidence_text: str
+) -> str:
+    """Build the text-only rubric prompt without any image content parts."""
+    return "\n".join([
+        "Evaluate the game against the requirements using only the evidence below.",
+        "A source snippet proves implementation intent, not necessarily successful runtime behavior.",
+        "Missing or inconclusive evidence must not receive full credit.",
+        "",
+        build_user_prompt(requirements).replace(
+            "Evaluate the recording against", "Evaluate the textual evidence against"
+        ),
+        "",
+        "Evidence:",
+        evidence_text or "(no textual evidence was collected)",
+    ])
 
 
 # ---------------------------------------------------------------------------
