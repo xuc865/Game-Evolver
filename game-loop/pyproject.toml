@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "game-loop"
+version = "0.1.0"
+description = "Benchmark-neutral game evolution loop"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+game-loop = "game_loop.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["game_loop*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

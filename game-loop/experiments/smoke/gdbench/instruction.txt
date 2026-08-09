@@ -1,0 +1,1 @@
+Fix the public Godot project so it satisfies the evaluator-side tests. Do not copy hidden test files into the workspace.

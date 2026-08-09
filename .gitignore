@@ -1,0 +1,44 @@
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+**/.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+**/node_modules/
+
+# Runtime artifacts and local experiment outputs
+game-loop/.baseline-agent-runs/
+game-loop/.smoke/
+game-loop/.game-loop-ui-runs/
+game-loop/.venvs/
+game-loop/.tools/
+
+# Large benchmark task archives (fetch via setup scripts)
+third_party/gamedevbench/tasks/
+third_party/gamedevbench/tasks_gt/
+gdbench/tasks/
+
+# Secrets — never commit credentials
+.env
+.env.*
+*.pem
+*secret*
+*credentials*
+
+# OpenGame demo asset bundles (Git LFS; fetch via OpenGame setup)
+third_party/OpenGame/assets/downloads/*.zip
+
+# HF / model caches
+**/.cache/
+**/huggingface/

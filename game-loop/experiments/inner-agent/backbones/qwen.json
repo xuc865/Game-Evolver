@@ -1,0 +1,6 @@
+{
+  "backbone_provider": "qwen",
+  "runtime_id": "opengame-qwen",
+  "permission_mode": "auto-edit",
+  "environment": {}
+}

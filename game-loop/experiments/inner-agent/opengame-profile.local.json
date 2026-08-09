@@ -1,0 +1,15 @@
+{
+  "runtime_id": "opengame-typescript-sdk-v1",
+  "sdk_module": "/Users/wangxucong/Desktop/workspace/harness-game/third_party/OpenGame/packages/sdk-typescript/dist/index.mjs",
+  "opengame_executable": "/Users/wangxucong/Desktop/workspace/harness-game/third_party/OpenGame/dist/cli.js",
+  "system_prompt_path": "/Users/wangxucong/Desktop/workspace/harness-game/third_party/OpenGame/agent-test/prompts/custom.md",
+  "system_prompt_variables": {
+    "{TEMPLATES_DIR}": "/Users/wangxucong/Desktop/workspace/harness-game/third_party/OpenGame/agent-test/templates",
+    "{DOCS_DIR}": "/Users/wangxucong/Desktop/workspace/harness-game/third_party/OpenGame/agent-test/docs"
+  },
+  "permission_mode": "yolo",
+  "max_session_turns": -1,
+  "timeout_seconds": 3600,
+  "environment": {},
+  "settings": {}
+}

@@ -1,0 +1,6 @@
+{
+  "backbone_provider": "deepseek",
+  "runtime_id": "opengame-deepseek",
+  "permission_mode": "auto-edit",
+  "environment": {}
+}

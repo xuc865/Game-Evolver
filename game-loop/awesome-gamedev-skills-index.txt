@@ -1,0 +1,265 @@
+# Awesome Gamedev Agent Skills Index
+
+## master_router
+Master skill router that directs the agent to the most relevant skill based on the current task context. When multiple skills could apply, the router evaluates task requirements and selects the best match.
+path: skills/master_router/SKILL.md
+
+## godot_scene_builder
+Creates and configures Godot scenes with proper node hierarchy, instancing, and scene inheritance patterns for 2D and 3D games.
+path: skills/godot_scene_builder/SKILL.md
+
+## gdscript_architect
+Designs clean GDScript architecture with autoload singletons, signal buses, state machines, and separation of concerns between game systems.
+path: skills/gdscript_architect/SKILL.md
+
+## godot_2d_physics
+Configures 2D physics bodies, collision shapes, collision layers/masks, and implements custom physics behavior for platformers, top-down, and arcade games.
+path: skills/godot_2d_physics/SKILL.md
+
+## godot_3d_physics
+Sets up 3D physics bodies, collision detection, raycasting, and rigid body dynamics for 3D game mechanics.
+path: skills/godot_3d_physics/SKILL.md
+
+## platformer_controller
+Implements responsive platformer character controllers with coyote time, jump buffering, variable jump height, and acceleration curves.
+path: skills/platformer_controller/SKILL.md
+
+## top_down_movement
+Creates smooth top-down movement systems with diagonal normalization, acceleration/deceleration, and directional facing.
+path: skills/top_down_movement/SKILL.md
+
+## tilemap_level_design
+Builds levels using TileMap/TileSet with auto-tiling, collision, navigation meshes, and layered rendering for 2D games.
+path: skills/tilemap_level_design/SKILL.md
+
+## godot_animation_player
+Creates complex animations using AnimationPlayer with keyframe interpolation, animation trees, and blend spaces.
+path: skills/godot_animation_player/SKILL.md
+
+## sprite_animation
+Implements sprite-based animations using AnimatedSprite2D/AnimatedSprite3D with frame sequences and transition logic.
+path: skills/sprite_animation/SKILL.md
+
+## godot_ui_system
+Builds user interfaces using Control nodes, VBoxContainer/HBoxContainer, themes, and responsive layout anchors.
+path: skills/godot_ui_system/SKILL.md
+
+## dialogue_system
+Implements branching dialogue systems with choice trees, character portraits, typewriter effects, and condition tracking.
+path: skills/dialogue_system/SKILL.md
+
+## inventory_system
+Creates inventory management with item stacking, drag-and-drop, equipment slots, and save/load persistence.
+path: skills/inventory_system/SKILL.md
+
+## quest_system
+Designs quest tracking systems with objectives, rewards, quest chains, prerequisite checking, and journal UI.
+path: skills/quest_system/SKILL.md
+
+## save_load_system
+Implements robust save/load using JSON or binary serialization with version migration and save slot management.
+path: skills/save_load_system/SKILL.md
+
+## audio_manager
+Creates a centralized audio manager for SFX and music with volume control, audio buses, ducking, and 2D/3D positional audio.
+path: skills/audio_manager/SKILL.md
+
+## particle_effects
+Designs GPU and CPU particle effects for explosions, ambient atmosphere, weather, and gameplay feedback.
+path: skills/particle_effects/SKILL.md
+
+## shader_programmer
+Writes custom GLSL shaders in Godot's shader language for visual effects, post-processing, water, fog, and stylized rendering.
+path: skills/shader_programmer/SKILL.md
+
+## lighting_setup
+Configures 2D and 3D lighting with Light2D, Light3D, shadows, global illumination, and environment settings.
+path: skills/lighting_setup/SKILL.md
+
+## camera_system
+Implements dynamic camera systems with smoothing, zoom, screen shake, follow behavior, and camera bounds.
+path: skills/camera_system/SKILL.md
+
+## enemy_ai_basic
+Creates basic enemy AI with state machines, pathfinding via NavigationAgent, patrol routes, and line-of-sight detection.
+path: skills/enemy_ai_basic/SKILL.md
+
+## enemy_ai_advanced
+Implements advanced AI with behavior trees, utility AI, group tactics, flanking, and adaptive difficulty.
+path: skills/enemy_ai_advanced/SKILL.md
+
+## boss_fight_designer
+Designs multi-phase boss encounters with attack patterns, telegraphing, enrage timers, and checkpoint recovery.
+path: skills/boss_fight_designer/SKILL.md
+
+## combat_system
+Builds melee and ranged combat with hitboxes, hurtboxes, combo systems, iframes, damage numbers, and knockback.
+path: skills/combat_system/SKILL.md
+
+## health_damage_system
+Implements health bars, damage types, resistance calculations, shields, regen, and death/respawn logic.
+path: skills/health_damage_system/SKILL.md
+
+## projectile_system
+Creates projectile systems with pooling, trajectory types, collision detection, and visual trail effects.
+path: skills/projectile_system/SKILL.md
+
+## weapon_system
+Designs weapon systems with swap mechanics, ammo management, reload animations, fire modes, and weapon stats.
+path: skills/weapon_system/SKILL.md
+
+## pickup_collectible
+Implements collectible items with spawn logic, magnet attraction, collection effects, and score tracking.
+path: skills/pickup_collectible/SKILL.md
+
+## checkpoint_system
+Creates checkpoint systems with activation triggers, respawn logic, state preservation, and level reset.
+path: skills/checkpoint_system/SKILL.md
+
+## procedural_generation
+Generates levels procedurally using cellular automata, wave function collapse, BSP trees, and noise-based terrain.
+path: skills/procedural_generation/SKILL.md
+
+## dungeon_generator
+Creates dungeon layouts with room placement, corridor carving, door generation, and difficulty scaling.
+path: skills/dungeon_generator/SKILL.md
+
+## terrain_generator
+Generates 3D terrain using heightmaps, noise functions, texture splatting, and vegetation placement.
+path: skills/terrain_generator/SKILL.md
+
+## roguelike_run_manager
+Manages roguelike run state with run seeds, meta-progression, permadeath, and run-level modifiers.
+path: skills/roguelike_run_manager/SKILL.md
+
+## card_game_engine
+Implements card game mechanics with deck management, hand state, card effects, turn phases, and AI opponents.
+path: skills/card_game_engine/SKILL.md
+
+## turn_based_combat
+Creates turn-based combat with initiative systems, action points, status effects, and turn order display.
+path: skills/turn_based_combat/SKILL.md
+
+## rts_unit_control
+Implements RTS-style unit selection, group movement, formation logic, and command queuing.
+path: skills/rts_unit_control/SKILL.md
+
+## tower_defense
+Builds tower defense mechanics with tower placement, enemy waves, targeting priority, and upgrade trees.
+path: skills/tower_defense/SKILL.md
+
+## racing_game_mechanics
+Implements racing physics, lap tracking, checkpoints, position ranking, and speed boost mechanics.
+path: skills/racing_game_mechanics/SKILL.md
+
+## rhythm_game_system
+Creates rhythm game mechanics with note charts, timing windows, input calibration, and scoring combos.
+path: skills/rhythm_game_system/SKILL.md
+
+## puzzle_mechanics
+Designs puzzle mechanics including grid puzzles, physics puzzles, pattern matching, and state tracking.
+path: skills/puzzle_mechanics/SKILL.md
+
+## physics_puzzle
+Implements physics-based puzzles using RigidBody2D/3D, joints, triggers, and constraint solving.
+path: skills/physics_puzzle/SKILL.md
+
+## multiplayer_sync
+Sets up multiplayer networking with ENet/WebSocket, state synchronization, interpolation, and client-side prediction.
+path: skills/multiplayer_sync/SKILL.md
+
+## game_state_machine
+Implements finite state machines for game flow: menu, loading, gameplay, pause, cutscene, and game-over states.
+path: skills/game_state_machine/SKILL.md
+
+## day_night_cycle
+Creates dynamic day/night cycles with time progression, lighting transitions, color grading, and ambient changes.
+path: skills/day_night_cycle/SKILL.md
+
+## weather_system
+Implements weather effects including rain, snow, fog, lightning, and wind with particle systems and audio.
+path: skills/weather_system/SKILL.md
+
+## minimap_radar
+Builds minimap/radar systems with icon tracking, fog of war, zoom levels, and waypoint markers.
+path: skills/minimap_radar/SKILL.md
+
+## hud_designer
+Creates HUD elements including health bars, score displays, timers, minimaps, and contextual prompts.
+path: skills/hud_designer/SKILL.md
+
+## main_menu_system
+Builds main menu systems with scene transitions, settings panels, save slot selection, and input remapping.
+path: skills/main_menu_system/SKILL.md
+
+## settings_manager
+Implements game settings with graphics options, audio levels, control remapping, and persistent preferences.
+path: skills/settings_manager/SKILL.md
+
+## localization_system
+Creates localization systems with translation files, language switching, text wrapping, and font fallback.
+path: skills/localization_system/SKILL.md
+
+## achievements_system
+Implements achievement tracking with unlock conditions, progress tracking, notifications, and persistence.
+path: skills/achievements_system/SKILL.md
+
+## leaderboard_system
+Creates online/local leaderboards with score submission, ranking, pagination, and friend filtering.
+path: skills/leaderboard_system/SKILL.md
+
+## tutorial_system
+Designs contextual tutorial systems with step-by-step guides, input hints, overlay arrows, and skip options.
+path: skills/tutorial_system/SKILL.md
+
+## cutscene_director
+Creates cutscene sequences using AnimationPlayer with camera control, character movement, and dialogue sync.
+path: skills/cutscene_director/SKILL.md
+
+## godot_input_manager
+Sets up input management with action maps, rebinding, gamepad support, and input buffering.
+path: skills/godot_input_manager/SKILL.md
+
+## mobile_controls
+Implements touch controls with virtual joysticks, touch buttons, gesture recognition, and multi-touch support.
+path: skills/mobile_controls/SKILL.md
+
+## gamepad_support
+Configures gamepad input with deadzone calibration, button mapping, rumble/haptics, and controller hot-swapping.
+path: skills/gamepad_support/SKILL.md
+
+## debug_overlay
+Creates debug overlays with FPS counter, performance graphs, entity inspectors, and cheat command consoles.
+path: skills/debug_overlay/SKILL.md
+
+## performance_optimizer
+Profiles and optimizes game performance with batching, LOD, culling, pooling, and frame budget analysis.
+path: skills/performance_optimizer/SKILL.md
+
+## godot_debugger
+Uses Godot's built-in debugger, remote scene tree inspector, performance monitors, and script debugging tools.
+path: skills/godot_debugger/SKILL.md
+
+## build_export
+Configures Godot export presets for Windows, macOS, Linux, Web, and mobile with proper signing and packaging.
+path: skills/build_export/SKILL.md
+
+## godot_testing
+Creates automated tests for game logic using GUT (Godot Unit Test) with test doubles and scene test harnesses.
+path: skills/godot_testing/SKILL.md
+
+## ci_cd_pipeline
+Sets up CI/CD pipelines for Godot projects with automated testing, export builds, and artifact distribution.
+path: skills/ci_cd_pipeline/SKILL.md
+
+## asset_pipeline
+Manages asset import pipeline with texture compression, audio normalization, model optimization, and import presets.
+path: skills/asset_pipeline/SKILL.md
+
+## godot_plugin_developer
+Creates custom Godot editor plugins and tools with dock panels, inspector integration, and gizmo drawing.
+path: skills/godot_plugin_developer/SKILL.md
+
+## godot_version_control
+Integrates version control with Godot projects using .gitignore patterns, scene merge strategies, and asset LFS.
+path: skills/godot_version_control/SKILL.md

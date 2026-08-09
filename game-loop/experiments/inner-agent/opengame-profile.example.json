@@ -1,0 +1,20 @@
+{
+  "runtime_id": "opengame-typescript-sdk-v1",
+  "sdk_module": "/absolute/path/to/OpenGame/packages/sdk-typescript/dist/index.mjs",
+  "opengame_executable": "/absolute/path/to/OpenGame/packages/cli/dist/index.js",
+  "model": "your-fixed-model",
+  "system_prompt_path": "/absolute/path/to/OpenGame/agent-test/prompts/custom.md",
+  "system_prompt_variables": {
+    "{TEMPLATES_DIR}": "/absolute/path/to/OpenGame/agent-test/templates",
+    "{DOCS_DIR}": "/absolute/path/to/OpenGame/agent-test/docs"
+  },
+  "permission_mode": "auto-edit",
+  "core_tools": [],
+  "exclude_tools": [],
+  "allowed_tools": [],
+  "mcp_servers": {},
+  "max_session_turns": -1,
+  "timeout_seconds": 3600,
+  "environment": {},
+  "settings": {}
+}

@@ -1,0 +1,237 @@
+{
+  "benchmark": {
+    "adapter": "gcbench",
+    "options": {
+      "root": "/Users/wangxucong/Desktop/workspace/harness-game/gcbench"
+    }
+  },
+  "backend": {
+    "command": [
+      "bash",
+      "scripts/run_chat_agent_direct.sh"
+    ],
+    "cwd": ".",
+    "timeout_seconds": 1800,
+    "env": {
+      "CODEX_API_KEY": "sk-placeholder",
+      "CODEX_API_BASE": "http://29.116.237.135:8080/v1",
+      "CODEX_MODEL": "Kimi-K2.7-Code"
+    }
+  },
+  "method": {
+    "level": "L4",
+    "fixed_probes": [
+      {
+        "id": "godot_public_import",
+        "command": [
+          "python3",
+          "-m",
+          "game_loop.probe_tools",
+          "godot-import",
+          "--artifact",
+          "{artifact_dir}"
+        ],
+        "cwd": ".",
+        "parser": "json_stdout",
+        "selection_mode": "required",
+        "timeout_seconds": 180,
+        "tags": [
+          "RepairConstraint",
+          "godot"
+        ]
+      },
+      {
+        "id": "gcbench_demo_evidence",
+        "command": [
+          "python3",
+          "-m",
+          "game_loop.probe_tools",
+          "gcbench-demo-evidence",
+          "--artifact",
+          "{artifact_dir}",
+          "--max-demos",
+          "10",
+          "--max-frames",
+          "600"
+        ],
+        "cwd": ".",
+        "parser": "json_stdout",
+        "selection_mode": "required",
+        "timeout_seconds": 30,
+        "tags": [
+          "ImproveObjective",
+          "behavior_evidence"
+        ]
+      },
+      {
+        "id": "godot_public_runtime",
+        "command": [
+          "python3",
+          "-m",
+          "game_loop.probe_tools",
+          "godot-playtest",
+          "--artifact",
+          "{artifact_dir}",
+          "--frames",
+          "600"
+        ],
+        "cwd": ".",
+        "parser": "json_stdout",
+        "selection_mode": "required",
+        "timeout_seconds": 600,
+        "tags": [
+          "ImproveObjective",
+          "runtime"
+        ]
+      },
+      {
+        "id": "godot_quality_inventory",
+        "command": [
+          "python3",
+          "-m",
+          "game_loop.probe_tools",
+          "godot-quality-inventory",
+          "--artifact",
+          "{artifact_dir}"
+        ],
+        "cwd": ".",
+        "parser": "json_stdout",
+        "selection_mode": "required",
+        "timeout_seconds": 30,
+        "tags": [
+          "coverage",
+          "godot"
+        ]
+      }
+    ],
+    "probe_families": [
+      {
+        "id": "godot_runtime_horizon",
+        "gene": {
+          "name": "frames",
+          "initial": 600,
+          "minimum": 100,
+          "maximum": 1800,
+          "step": 100,
+          "difficulty_direction": "increasing"
+        },
+        "probe": {
+          "cwd": ".",
+          "command": [
+            "python3",
+            "-m",
+            "game_loop.probe_tools",
+            "godot-playtest",
+            "--artifact",
+            "{artifact_dir}",
+            "--frames",
+            "[[frames]]"
+          ],
+          "timeout_seconds": 1800,
+          "selection_mode": "regression_anchor",
+          "parser": "json_stdout",
+          "tags": [
+            "ImproveObjective",
+            "runtime"
+          ]
+        },
+        "archive_capacity": 8
+      }
+    ],
+    "max_probe_calls": 30,
+    "active_selection": {
+      "max_selected_probes": 5,
+      "min_observations_per_probe": 1
+    },
+    "harness_evolution": {
+      "modules": [
+        {
+          "id": "context_compiler",
+          "instruction": "Compile context from task requirements, parent artifact state, and feedback signals.",
+          "tags": [
+            "context"
+          ]
+        },
+        {
+          "id": "module_strategy",
+          "instruction": "Select and order modules based on task type and recent outcomes.",
+          "tags": [
+            "strategy"
+          ]
+        },
+        {
+          "id": "skill_governance",
+          "instruction": "Curate skill descriptions and manage skill loading priorities.",
+          "tags": [
+            "skills"
+          ]
+        },
+        {
+          "id": "tool_interface",
+          "instruction": "Manage tool interface assembly and safety scoping.",
+          "tags": [
+            "tools"
+          ]
+        },
+        {
+          "id": "probe_governance",
+          "instruction": "Select and parameterise probes based on coverage and regression signals.",
+          "tags": [
+            "probes"
+          ]
+        },
+        {
+          "id": "feedback_synthesis",
+          "instruction": "Synthesize structured feedback from evaluator outputs and probe observations.",
+          "tags": [
+            "feedback"
+          ]
+        },
+        {
+          "id": "artifact_persistence",
+          "instruction": "Manage artifact snapshots, delivery contracts, and rollback points.",
+          "tags": [
+            "persistence"
+          ]
+        },
+        {
+          "id": "session_routing",
+          "instruction": "Route sessions across heterogeneous agent frameworks and model backends.",
+          "tags": [
+            "routing"
+          ]
+        }
+      ],
+      "tool_interfaces": [],
+      "seed_modules": [
+        "context_compiler"
+      ],
+      "max_active_modules": 1,
+      "max_active_tool_interfaces": 0,
+      "mutation_width": 1,
+      "replay_min_cases": 2,
+      "promotion_delta_min": 0.03,
+      "max_case_regression": 0.08,
+      "allowed_niches": [
+        "context_compiler"
+      ]
+    }
+  },
+  "evolution": {
+    "max_generations": 3,
+    "candidates_per_generation": 1,
+    "max_model_calls": 3,
+    "max_evaluator_queries": 3
+  },
+  "reliability": {
+    "pause_on_infrastructure_failure": true
+  },
+  "gates": {
+    "max_files": 5000,
+    "max_total_bytes": 1073741824
+  },
+  "experiment": {
+    "arm": "L4_agent",
+    "ablation_level": "L1"
+  }
+}

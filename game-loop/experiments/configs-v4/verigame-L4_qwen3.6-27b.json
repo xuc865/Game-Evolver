@@ -1,0 +1,208 @@
+{
+  "benchmark": {
+    "adapter": "verigame",
+    "options": {
+      "root": "/Users/wangxucong/Desktop/workspace/harness-game/game-loop"
+    }
+  },
+  "backend": {
+    "command": [
+      "python3",
+      "-m",
+      "game_loop.benchmarks.verigame_bridge"
+    ],
+    "cwd": ".",
+    "timeout_seconds": 600,
+    "env": {
+      "CODEX_API_KEY": "sk-placeholder",
+      "CODEX_API_BASE": "http://29.116.237.141:8080/v1",
+      "CODEX_MODEL": "Qwen3.6-27B"
+    }
+  },
+  "method": {
+    "level": "L4",
+    "fixed_probes": [
+      {
+        "id": "verigame_build",
+        "command": [
+          "python3",
+          "-m",
+          "game_loop.probe_tools",
+          "verigame-build",
+          "--artifact",
+          "{artifact_dir}"
+        ],
+        "cwd": ".",
+        "parser": "json_stdout",
+        "selection_mode": "required",
+        "timeout_seconds": 600,
+        "tags": [
+          "RepairConstraint",
+          "build"
+        ]
+      }
+    ],
+    "probe_families": [
+      {
+        "id": "verigame_screenshot_horizon",
+        "gene": {
+          "name": "wait_ms",
+          "initial": 1000,
+          "minimum": 500,
+          "maximum": 5000,
+          "step": 500,
+          "difficulty_direction": "decreasing"
+        },
+        "probe": {
+          "cwd": ".",
+          "command": [
+            "python3",
+            "-m",
+            "game_loop.probe_tools",
+            "verigame-screenshot",
+            "--artifact",
+            "{artifact_dir}",
+            "--wait-ms",
+            "[[wait_ms]]"
+          ],
+          "timeout_seconds": 120,
+          "selection_mode": "regression_anchor",
+          "parser": "json_stdout",
+          "tags": [
+            "ImproveObjective",
+            "visual"
+          ]
+        },
+        "archive_capacity": 8
+      }
+    ],
+    "max_probe_calls": 12,
+    "active_selection": {
+      "max_selected_probes": 2,
+      "min_observations_per_probe": 1
+    },
+    "harness_evolution": {
+      "modules": [
+        {
+          "id": "evidence_first",
+          "instruction": "Inspect executable evidence before choosing a patch.",
+          "tags": [
+            "ImproveObjective",
+            "functional_visuals"
+          ]
+        },
+        {
+          "id": "gameplay_observability",
+          "instruction": "Collect runtime and visual observations before accepting a candidate.",
+          "tags": [
+            "ImproveObjective",
+            "gameplay"
+          ]
+        },
+        {
+          "id": "mechanic_depth",
+          "instruction": "Prefer changes that deepen mechanics rather than cosmetic-only edits.",
+          "tags": [
+            "ImproveObjective",
+            "mechanics"
+          ]
+        },
+        {
+          "id": "regression_first",
+          "instruction": "Re-run preserved behavior before finishing.",
+          "tags": [
+            "RepairConstraint",
+            "feasibility"
+          ]
+        },
+        {
+          "id": "engine_tooling_first",
+          "instruction": "Use engine tooling to inspect import/runtime state before patching.",
+          "tags": [
+            "engine_tooling",
+            "godot"
+          ]
+        },
+        {
+          "id": "diversity_escape",
+          "instruction": "Avoid repeating a recently rejected change family.",
+          "tags": [
+            "ExploreAlternative",
+            "exploration"
+          ]
+        },
+        {
+          "id": "minimal_coherent_patch",
+          "instruction": "Keep patches minimal and coherent with the existing project structure.",
+          "tags": [
+            "RepairConstraint",
+            "feasibility"
+          ]
+        }
+      ],
+      "tool_interfaces": [
+        {
+          "id": "node_build_tool",
+          "kind": "command_wrapper",
+          "description": "Build the candidate web game with npm.",
+          "command": [
+            "python3",
+            "-m",
+            "game_loop.probe_tools",
+            "verigame-build",
+            "--artifact",
+            "{artifact_dir}"
+          ],
+          "safety_scope": "candidate_workspace_only",
+          "tags": [
+            "build"
+          ]
+        },
+        {
+          "id": "playwright_screenshot",
+          "kind": "engine_probe",
+          "description": "Verify build artifacts exist before screenshot-based checks.",
+          "command": [
+            "python3",
+            "-m",
+            "game_loop.probe_tools",
+            "verigame-screenshot",
+            "--artifact",
+            "{artifact_dir}"
+          ],
+          "safety_scope": "candidate_workspace_only",
+          "tags": [
+            "visual"
+          ]
+        }
+      ],
+      "seed_modules": [
+        "evidence_first",
+        "regression_first",
+        "engine_tooling_first"
+      ],
+      "max_active_modules": 3,
+      "max_active_tool_interfaces": 2,
+      "mutation_width": 1,
+      "replay_min_cases": 2,
+      "promotion_delta_min": 0.03,
+      "max_case_regression": 0.08
+    }
+  },
+  "evolution": {
+    "max_generations": 3,
+    "candidates_per_generation": 1,
+    "max_model_calls": 3,
+    "max_evaluator_queries": 3
+  },
+  "reliability": {
+    "pause_on_infrastructure_failure": true
+  },
+  "gates": {
+    "max_files": 5000,
+    "max_total_bytes": 1073741824
+  },
+  "experiment": {
+    "arm": "L4_agent"
+  }
+}

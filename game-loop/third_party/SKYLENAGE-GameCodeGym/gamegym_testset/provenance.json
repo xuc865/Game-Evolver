@@ -1,0 +1,8 @@
+{
+  "credential_source": "HF_TOKEN environment or anonymous",
+  "file": "pygame_seeds_2500_filtered.jsonl",
+  "repo_id": "alibabagroup/SKYLENAGE-GameCodeGym",
+  "repo_type": "dataset",
+  "revision": "f675345c7f134ebde0fa63205e81771601ed41f9",
+  "sha256": "cb10c6943410e31c993573410e4834af35b7a86ba62f27bc74781b5b79047e69"
+}

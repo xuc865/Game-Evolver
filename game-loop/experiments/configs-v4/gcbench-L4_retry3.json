@@ -1,0 +1,40 @@
+{
+  "benchmark": {
+    "adapter": "gcbench",
+    "options": {
+      "root": "/Users/wangxucong/Desktop/workspace/harness-game/gcbench"
+    }
+  },
+  "backend": {
+    "command": [
+      "bash",
+      "scripts/run_chat_agent_direct.sh"
+    ],
+    "cwd": ".",
+    "timeout_seconds": 1800,
+    "env": {
+      "CODEX_API_KEY": "sk-placeholder",
+      "CODEX_API_BASE": "http://29.116.237.135:8080/v1",
+      "CODEX_MODEL": "Kimi-K2.7-Code"
+    }
+  },
+  "method": {
+    "level": "L0"
+  },
+  "evolution": {
+    "max_generations": 1,
+    "candidates_per_generation": 3,
+    "max_model_calls": 3,
+    "max_evaluator_queries": 3
+  },
+  "reliability": {
+    "pause_on_infrastructure_failure": true
+  },
+  "gates": {
+    "max_files": 5000,
+    "max_total_bytes": 1073741824
+  },
+  "experiment": {
+    "arm": "retry3"
+  }
+}

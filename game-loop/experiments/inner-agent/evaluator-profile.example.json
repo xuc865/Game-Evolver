@@ -1,0 +1,16 @@
+{
+  "command": [
+    "python",
+    "/absolute/path/to/official-evaluator-entry.py",
+    "--task-source",
+    "{task_source}",
+    "--artifact",
+    "{artifact_path}",
+    "--output",
+    "{output_dir}/result.json"
+  ],
+  "result_path": "result.json",
+  "cwd": "{output_dir}",
+  "environment": {},
+  "timeout_seconds": 3600
+}

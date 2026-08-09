@@ -1,0 +1,176 @@
+{
+  "benchmark": {
+    "adapter": "nl2repo",
+    "options": {
+      "root": "/Users/wangxucong/Desktop/workspace/harness-game/game-loop"
+    }
+  },
+  "backend": {
+    "command": [
+      "python3",
+      "-m",
+      "game_loop.benchmarks.nl2repo_bridge"
+    ],
+    "cwd": ".",
+    "timeout_seconds": 1800,
+    "env": {
+      "CODEX_API_KEY": "sk-placeholder",
+      "CODEX_API_BASE": "http://29.116.237.141:8080/v1",
+      "CODEX_MODEL": "Qwen3.6-27B"
+    }
+  },
+  "method": {
+    "level": "L4",
+    "fixed_probes": [
+      {
+        "id": "artifact_exists",
+        "command": [
+          "python3",
+          "-c",
+          "import json,sys,os; a=sys.argv[1]; ok=os.path.isdir(a) and len(os.listdir(a))>0; print(json.dumps({'passed': ok}))",
+          "{artifact_dir}"
+        ],
+        "cwd": ".",
+        "parser": "json_stdout",
+        "selection_mode": "required",
+        "timeout_seconds": 30
+      }
+    ],
+    "probe_families": [
+      {
+        "id": "artifact_file_count",
+        "gene": {
+          "name": "min_files",
+          "initial": 1,
+          "minimum": 1,
+          "maximum": 20,
+          "step": 1,
+          "difficulty_direction": "increasing"
+        },
+        "probe": {
+          "cwd": ".",
+          "command": [
+            "python3",
+            "-c",
+            "import json,sys,os; a=sys.argv[1]; n=int(sys.argv[2]); c=len(os.listdir(a)) if os.path.isdir(a) else 0; print(json.dumps({'passed': c>=n, 'file_count': c, 'min_files': n}))",
+            "{artifact_dir}",
+            "[[min_files]]"
+          ],
+          "timeout_seconds": 30,
+          "selection_mode": "regression_anchor",
+          "parser": "json_stdout",
+          "tags": [
+            "ImproveObjective",
+            "coverage"
+          ]
+        },
+        "archive_capacity": 8
+      }
+    ],
+    "max_probe_calls": 12,
+    "active_selection": {
+      "max_selected_probes": 2,
+      "min_observations_per_probe": 1
+    },
+    "harness_evolution": {
+      "modules": [
+        {
+          "id": "evidence_first",
+          "instruction": "Inspect executable evidence before choosing a patch.",
+          "tags": [
+            "ImproveObjective"
+          ]
+        },
+        {
+          "id": "test_driven",
+          "instruction": "Use public tests and probes to guide the next patch.",
+          "tags": [
+            "RepairConstraint",
+            "tests"
+          ]
+        },
+        {
+          "id": "minimal_patch",
+          "instruction": "Prefer the smallest patch that resolves the observed failure.",
+          "tags": [
+            "RepairConstraint",
+            "feasibility"
+          ]
+        },
+        {
+          "id": "regression_first",
+          "instruction": "Re-run preserved behavior before finishing.",
+          "tags": [
+            "RepairConstraint",
+            "feasibility"
+          ]
+        },
+        {
+          "id": "diversity_escape",
+          "instruction": "Avoid repeating a recently rejected change family.",
+          "tags": [
+            "ExploreAlternative",
+            "exploration"
+          ]
+        }
+      ],
+      "tool_interfaces": [
+        {
+          "id": "python_runtime",
+          "kind": "command_wrapper",
+          "description": "Run bounded Python commands inside the candidate workspace.",
+          "command": [
+            "python3",
+            "-c",
+            "import os; print(os.listdir('{artifact_dir}')[:5])"
+          ],
+          "safety_scope": "candidate_workspace_only",
+          "tags": [
+            "runtime"
+          ]
+        },
+        {
+          "id": "shell_tool",
+          "kind": "command_wrapper",
+          "description": "Run bounded shell inspection commands in the candidate workspace.",
+          "command": [
+            "bash",
+            "-lc",
+            "ls -la '{artifact_dir}' | head"
+          ],
+          "safety_scope": "candidate_workspace_only",
+          "tags": [
+            "runtime"
+          ]
+        }
+      ],
+      "seed_modules": [
+        "evidence_first",
+        "test_driven",
+        "regression_first"
+      ],
+      "max_active_modules": 3,
+      "max_active_tool_interfaces": 2,
+      "mutation_width": 1,
+      "replay_min_cases": 2,
+      "promotion_delta_min": 0.03,
+      "max_case_regression": 0.08
+    }
+  },
+  "evolution": {
+    "max_generations": 3,
+    "candidates_per_generation": 1,
+    "max_model_calls": 3,
+    "max_evaluator_queries": 3
+  },
+  "reliability": {
+    "pause_on_infrastructure_failure": true
+  },
+  "gates": {
+    "max_files": 5000,
+    "max_total_bytes": 1073741824
+  },
+  "experiment": {
+    "arm": "L4_agent"
+  }
+}
