@@ -49,6 +49,12 @@ third_party/awesome-gamedev-agent-skills/
 third_party/gamedevbench/
 third_party/GameGen-Verifier/
 third_party/SKYLENAGE-GameCodeGym/
+game-loop/third_party/harbor/
+game-loop/third_party/tau2-bench/
+game-loop/third_party/terminal-bench-2/
+game-loop/third_party/NL2RepoBench/
+game-loop/third_party/awesome-gamedev-agent-skills/
+game-loop/third_party/gamedevbench/
 
 # Large benchmark task archives (fetch via setup scripts)
 third_party/gamedevbench/tasks/
