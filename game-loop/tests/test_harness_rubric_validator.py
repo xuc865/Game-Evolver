@@ -83,6 +83,37 @@ class HarnessRubricValidatorTests(unittest.TestCase):
         self.assertEqual(scores.soft["gameplay_responsiveness"], 0.75)
         self.assertEqual(urlopen_mock.call_count, 3)
 
+    @patch("game_loop.runtime.providers.BackboneProviderSpec.resolve")
+    @patch("urllib.request.urlopen")
+    def test_llm_judge_falls_back_to_heuristic_after_empty_responses(self, urlopen_mock, resolve_mock):
+        resolved = unittest.mock.Mock()
+        resolved.doctor.return_value = {"ready": True}
+        resolved.model = "judge-model"
+        resolved.base_url = "http://judge.local/v1"
+        resolved.api_key = ""
+        resolve_mock.return_value = resolved
+
+        class _Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return json.dumps({"choices": [{"message": {"content": ""}}]}).encode("utf-8")
+
+        urlopen_mock.side_effect = [_Response(), _Response(), _Response()]
+        scores = LLMRubricJudge(provider_id="deepseek").score(
+            evidence=_synthetic_evidence(passed=True),
+            hard_rubrics=DEFAULT_HARD_RUBRICS[:1],
+            soft_rubrics=DEFAULT_SOFT_RUBRICS[:1],
+        )
+        self.assertTrue(scores.infrastructure_ok)
+        self.assertIn("heuristic", scores.judge)
+        self.assertEqual(scores.hard["launches_without_crash"], 1.0)
+        self.assertTrue(scores.errors)
+
     def test_extract_json_object_skips_malformed_prefix_object(self):
         payload = extract_json_object(
             'draft: {"hard": {"launches_without_crash": 1} '

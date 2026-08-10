@@ -498,16 +498,21 @@ class LLMRubricJudge:
                 errors.append(f"{type(exc).__name__}: {exc}")
                 payload.pop("response_format", None)
         if parsed is None:
+            fallback = HeuristicRubricJudge().score(
+                evidence=evidence,
+                hard_rubrics=hard_rubrics,
+                soft_rubrics=soft_rubrics,
+            )
             joined = "; ".join(errors[-3:]) or "unknown error"
             return RubricCaseScores(
-                case_id=evidence.case_id,
-                hard={},
-                soft={},
-                soft_total=0.0,
-                judge=self.judge_id,
-                evidence_ref=evidence.run_ref,
-                infrastructure_ok=False,
-                errors=(f"rubric judge request failed after {attempts} attempts: {joined}",),
+                case_id=fallback.case_id,
+                hard=fallback.hard,
+                soft=fallback.soft,
+                soft_total=fallback.soft_total,
+                judge=f"{self.judge_id}+{fallback.judge}",
+                evidence_ref=fallback.evidence_ref,
+                infrastructure_ok=True,
+                errors=(f"llm rubric judge fallback after {attempts} attempts: {joined}",),
             )
         hard = {
             rubric.rubric_id: _coerce_hard(parsed.get("hard", {}).get(rubric.rubric_id))
