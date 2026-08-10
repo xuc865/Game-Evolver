@@ -82,16 +82,23 @@ def main() -> int:
     )
     tau_raw = read_json(tau_raw_path)
     tau_simulations = tau_raw.get("simulations", [])
+    tau_info = tau_raw.get("info") if isinstance(tau_raw.get("info"), dict) else {}
+    first_tau_simulation = next(
+        (item for item in tau_simulations if isinstance(item, dict)), {}
+    )
     nl2repo = read_json(run_root / "nl2repo-manifest.json")
     results[0]["evidence"] = {
         key: terminal.get(key)
         for key in ("solver", "agent_identity", "reward", "passed", "harbor_result")
     }
     results[1]["evidence"] = {
-        "agent_identity": tau_raw.get("info", {}).get("agent_info", {}).get("implementation"),
+        "agent_identity": (
+            tau_info.get("agent_info", {}).get("implementation")
+            if isinstance(tau_info.get("agent_info"), dict) else None
+        ),
         "reward": (
-            tau_simulations[0].get("reward_info", {}).get("reward")
-            if tau_simulations else tau_manifest.get("reward")
+            first_tau_simulation.get("reward_info", {}).get("reward")
+            if first_tau_simulation else tau_manifest.get("reward")
         ),
         "result_path": str(tau_raw_path) if tau_raw_path.is_file() else "",
     }
