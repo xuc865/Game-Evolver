@@ -248,15 +248,17 @@ class HarnessRubricValidatorTests(unittest.TestCase):
                 return json.dumps({"choices": [{"message": {"content": ""}}]}).encode("utf-8")
 
         urlopen_mock.side_effect = [_Response(), _Response(), _Response()]
-        scores = LLMRubricJudge(provider_id="deepseek").score(
-            evidence=_synthetic_evidence(passed=True),
-            hard_rubrics=DEFAULT_HARD_RUBRICS[:1],
-            soft_rubrics=DEFAULT_SOFT_RUBRICS[:1],
-        )
+        with patch("game_loop.core.harness_rubric_validator.time.sleep") as sleep_mock:
+            scores = LLMRubricJudge(provider_id="deepseek").score(
+                evidence=_synthetic_evidence(passed=True),
+                hard_rubrics=DEFAULT_HARD_RUBRICS[:1],
+                soft_rubrics=DEFAULT_SOFT_RUBRICS[:1],
+            )
         self.assertFalse(scores.infrastructure_ok)
         self.assertIn("heuristic", scores.judge)
         self.assertEqual(scores.hard["launches_without_crash"], 1.0)
         self.assertTrue(scores.errors)
+        self.assertEqual([call.args[0] for call in sleep_mock.call_args_list], [2, 4])
 
     def test_extract_json_object_skips_malformed_prefix_object(self):
         payload = extract_json_object(

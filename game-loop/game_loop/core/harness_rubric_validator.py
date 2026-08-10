@@ -6,6 +6,7 @@ import random
 import re
 import subprocess
 import sys
+import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, Sequence
@@ -782,6 +783,11 @@ class LLMRubricJudge:
                 )
                 if isinstance(exc, urllib.error.HTTPError) and exc.code in (400, 422):
                     supports_response_format = False
+            if parsed is None and attempt + 1 < attempts:
+                # Local OpenAI-compatible deployments can return HTTP 200 with
+                # an empty message while saturated. Give the service time to
+                # recover before retrying with the compact prompt.
+                time.sleep(2 ** (attempt + 1))
         if parsed is None:
             fallback = HeuristicRubricJudge().score(
                 evidence=evidence,
