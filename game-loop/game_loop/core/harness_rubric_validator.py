@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 import random
 import re
 import subprocess
 import sys
 import time
+import fcntl
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, Sequence
@@ -721,8 +723,20 @@ class LLMRubricJudge:
                 },
             )
             try:
-                with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
-                    value = json.loads(response.read().decode("utf-8"))
+                # The four local evolution supervisors share one judge
+                # deployment. Serialize judge calls across processes so a
+                # saturated gateway does not return empty 200 responses to
+                # every concurrent rubric batch.
+                lock_key = f"{resolved.base_url}|{resolved.model}"
+                lock_name = hashlib.sha256(lock_key.encode("utf-8")).hexdigest()[:24]
+                lock_path = Path("/tmp") / f"game-loop-rubric-judge-{lock_name}.lock"
+                with lock_path.open("a+") as lock_file:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+                    try:
+                        with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+                            value = json.loads(response.read().decode("utf-8"))
+                    finally:
+                        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
                 message = value["choices"][0]["message"]
                 parsed = None
                 parse_errors: list[str] = []
