@@ -302,6 +302,43 @@ class HarnessRubricValidatorTests(unittest.TestCase):
         )
         self.assertTrue(scores.infrastructure_ok)
 
+    @patch("urllib.request.urlopen")
+    @patch("game_loop.runtime.providers.BackboneProviderSpec.resolve")
+    def test_llm_judge_disables_deepseek_reasoning_for_structured_output(
+        self, resolve_mock, urlopen_mock
+    ):
+        resolved = unittest.mock.Mock()
+        resolved.doctor.return_value = {"ready": True}
+        resolved.model = "deepseek-v4-flash"
+        resolved.base_url = "https://judge.local/v1"
+        resolved.api_key = "key"
+        resolve_mock.return_value = resolved
+
+        class _Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return json.dumps({
+                    "choices": [{"message": {"content": json.dumps({
+                        "hard": {"launches_without_crash": 1},
+                        "soft": {"gameplay_responsiveness": 1.0},
+                    })}}]
+                }).encode("utf-8")
+
+        urlopen_mock.return_value = _Response()
+        scores = LLMRubricJudge(provider_id="deepseek").score(
+            evidence=_synthetic_evidence(passed=True),
+            hard_rubrics=DEFAULT_HARD_RUBRICS[:1],
+            soft_rubrics=DEFAULT_SOFT_RUBRICS[:1],
+        )
+        request_payload = json.loads(urlopen_mock.call_args.args[0].data)
+        self.assertEqual(request_payload["reasoning_effort"], "none")
+        self.assertTrue(scores.infrastructure_ok)
+
     def test_hard_and_soft_pair_comparison_enforces_monotonicity(self):
         parent = _score_artifact(passed=True)
         candidate = _score_artifact(passed=True, richer=True)

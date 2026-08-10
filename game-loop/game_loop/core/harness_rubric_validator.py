@@ -688,6 +688,11 @@ class LLMRubricJudge:
             for provider_name in ("qwen", "glm", "kimi")
         ):
             payload["chat_template_kwargs"] = {"enable_thinking": False}
+        elif "deepseek" in resolved.model.casefold():
+            # DeepSeek can spend the structured-output budget in
+            # reasoning_content on long evidence prompts. This keeps the
+            # machine-readable answer in message.content.
+            payload["reasoning_effort"] = "none"
         errors: list[str] = []
         parsed: dict[str, Any] | None = None
         attempts = 3
