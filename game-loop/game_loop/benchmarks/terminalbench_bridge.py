@@ -84,10 +84,14 @@ def _run_harbor(*, task_root: Path, output_manifest: Path, harness_context: Path
     # LiteLLM validates that an API-key field exists even for the internal
     # OpenAI-compatible deployments that intentionally do not require one.
     env.setdefault("OPENAI_API_KEY", "EMPTY")
-    if env.get("CODEX_PROVIDER", env.get("GAME_LOOP_BACKBONE_PROVIDER")) == "claude":
-        claude_key = env.get("ANTHROPIC_AUTH_TOKEN") or env.get("ANTHROPIC_API_KEY")
-        if claude_key:
-            env["OPENAI_API_KEY"] = claude_key
+    provider = env.get("CODEX_PROVIDER", env.get("GAME_LOOP_BACKBONE_PROVIDER", "")).casefold()
+    provider_key = {
+        "claude": env.get("ANTHROPIC_AUTH_TOKEN") or env.get("ANTHROPIC_API_KEY") or env.get("CODEX_API_KEY_CLAUDE"),
+        "gpt55": env.get("CODEX_API_KEY_GPT55") or env.get("OPENAI_API_KEY"),
+        "deepseek": env.get("DEEPSEEK_API_KEY"),
+    }.get(provider)
+    if provider_key:
+        env["OPENAI_API_KEY"] = provider_key
     model_name = model if "/" in model else f"openai/{model}"
     command = [str(harbor_python), "run", *( ["--dataset", dataset] if dataset else ["--path", str(task_root)] ),
                "--agent", "game_loop.benchmarks.agents.terminal_harbor:GameMakingHarborAgent",

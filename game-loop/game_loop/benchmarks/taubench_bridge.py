@@ -58,10 +58,14 @@ def main(argv: list[str] | None = None) -> int:
         if "/" not in model:
             model = "openai/" + model
         env["TAU_GAME_MAKING_MODEL"] = model
-    if env.get("CODEX_PROVIDER", env.get("GAME_LOOP_BACKBONE_PROVIDER")) == "claude":
-        claude_key = env.get("ANTHROPIC_AUTH_TOKEN") or env.get("ANTHROPIC_API_KEY")
-        if claude_key:
-            env["OPENAI_API_KEY"] = claude_key
+    provider = env.get("CODEX_PROVIDER", env.get("GAME_LOOP_BACKBONE_PROVIDER", "")).casefold()
+    provider_key = {
+        "claude": env.get("ANTHROPIC_AUTH_TOKEN") or env.get("ANTHROPIC_API_KEY") or env.get("CODEX_API_KEY_CLAUDE"),
+        "gpt55": env.get("CODEX_API_KEY_GPT55") or env.get("OPENAI_API_KEY"),
+        "deepseek": env.get("DEEPSEEK_API_KEY"),
+    }.get(provider)
+    if provider_key:
+        env["OPENAI_API_KEY"] = provider_key
     if args.harness_context:
         env["GAME_LOOP_HARNESS_CONTEXT"] = str(args.harness_context.resolve())
     try:
