@@ -31,6 +31,18 @@ MODELS = {
     },
     "glm5.2": {"CODEX_API_BASE": "http://29.116.237.75:8080/v1", "CODEX_MODEL": "GLM-5.2-W4AFP8-node1"},
     "deepseek_v4": {"CODEX_API_BASE": "https://api.deepseek.com", "CODEX_MODEL": "deepseek-v4-flash"},
+    "claude": {
+        "CODEX_API_BASE": "https://xmcode.shop/v1",
+        "CODEX_MODEL": "claude-sonnet-4-6",
+        "CODEX_PROVIDER": "claude",
+        "ANTHROPIC_BASE_URL": "https://xmcode.shop/v1",
+    },
+    "gpt55": {
+        "CODEX_API_BASE": "https://xmcode.shop/v1",
+        "CODEX_MODEL": "gpt-5.5",
+        "CODEX_PROVIDER": "gpt55",
+        "OPENAI_BASE_URL": "https://xmcode.shop/v1",
+    },
 }
 
 EVOLUTION_3x1 = {
@@ -205,6 +217,8 @@ def make_config(
             "qwen3.6-27b": "qwen",
             "glm5.2": "glm",
             "deepseek_v4": "deepseek",
+            "claude": "claude",
+            "gpt55": "gpt55",
         }[model_key]
     if bench == "vgamegym":
         env.setdefault(
@@ -276,7 +290,7 @@ def validate_configs(paths: list[Path]) -> int:
 
 def main() -> None:
     written: list[Path] = []
-    model_keys = ["kimi", "qwen3.6-27b", "glm5.2", "deepseek_v4"]
+    model_keys = ["kimi", "qwen3.6-27b", "glm5.2", "deepseek_v4", "claude", "gpt55"]
 
     for mk in model_keys:
         write_json(V4_DIR / f"gcbench-L4_{mk}.json", make_config("gcbench", model_key=mk))

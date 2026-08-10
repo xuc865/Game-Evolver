@@ -166,6 +166,7 @@ def build_parser() -> argparse.ArgumentParser:
     agentx_init.add_argument("--inner-config", type=Path)
     agentx_init.add_argument("--outer-config", type=Path)
     agentx_init.add_argument("--bench", default="gcbench")
+    agentx_init.add_argument("--enable-outer-evolution", action="store_true")
 
     agentx_epoch = sub.add_parser("agentx-nested-epoch")
     agentx_epoch.add_argument("--run-dir", type=Path, required=True)
@@ -181,6 +182,7 @@ def build_parser() -> argparse.ArgumentParser:
     agentx_epoch.add_argument("--outer-cases", type=int)
     agentx_epoch.add_argument("--attribution-runs", type=Path, nargs="*")
     agentx_epoch.add_argument("--offline-rubric-judge", action="store_true")
+    agentx_epoch.add_argument("--enable-outer-evolution", action="store_true")
 
     bench_loop_init = sub.add_parser("harness-bench-loop-init")
     bench_loop_init.add_argument("--loop-dir", type=Path, required=True)
@@ -1514,6 +1516,7 @@ def cmd_agentx_nested_init(args: argparse.Namespace) -> int:
         init_handler=cmd_init,
         evolve_handler=cmd_evolve,
         offline_rubric_judge=False,
+        outer_enabled=bool(args.enable_outer_evolution),
     )
     coordinator.initialize()
     return 0
@@ -1550,6 +1553,7 @@ def cmd_agentx_nested_epoch(args: argparse.Namespace) -> int:
         init_handler=cmd_init,
         evolve_handler=cmd_evolve,
         offline_rubric_judge=bool(args.offline_rubric_judge),
+        outer_enabled=bool(args.enable_outer_evolution),
     )
     if args.attribution_runs:
         report = TrajectoryAttributor().collect([path.resolve() for path in args.attribution_runs])

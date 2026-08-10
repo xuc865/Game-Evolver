@@ -31,6 +31,19 @@ RUBRIC="$(cd "$GAMECRAFT_ROOT/tasks/$TASK/tests" && pwd)/rubric.json"
 # earlier attempt still exist in the same candidate output directory.
 rm -f "$OUTPUT/breakdown.json" "$OUTPUT/reward.txt" "$OUTPUT/judge_log.json" "$OUTPUT/ctrf.json"
 
+_setup_verifier_home() {
+  local verifier_home="$OUTPUT/.godot-home"
+  local verifier_config="$OUTPUT/.xdg-config"
+  local verifier_cache="$OUTPUT/.xdg-cache"
+  local verifier_data="$OUTPUT/.xdg-data"
+  mkdir -p "$verifier_home" "$verifier_config" "$verifier_cache" "$verifier_data"
+  export HOME="$verifier_home"
+  export USERPROFILE="$verifier_home"
+  export XDG_CONFIG_HOME="$verifier_config"
+  export XDG_CACHE_HOME="$verifier_cache"
+  export XDG_DATA_HOME="$verifier_data"
+}
+
 _setup_godot_env() {
   if [[ -z "${GODOT_EXEC_PATH:-}" && -x "$PROJECT_ROOT/scripts/setup_godot.sh" ]]; then
     GODOT_EXEC_PATH="$("$PROJECT_ROOT/scripts/setup_godot.sh" 2>/dev/null || true)"
@@ -55,6 +68,7 @@ _has_demo_traces() {
 }
 
 _setup_godot_env
+_setup_verifier_home
 # Resolve the judge mode before choosing local versus Docker execution.  In
 # particular, DeepSeek's text-only mode has no Xvfb/xdotool/ffmpeg dependency
 # and must not be routed through the visual replay fallback merely because the

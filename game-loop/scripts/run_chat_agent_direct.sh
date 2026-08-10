@@ -19,6 +19,19 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+if [[ -f "$ROOT_DIR/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$ROOT_DIR/.env"
+  set +a
+fi
+if [[ -f "$ROOT_DIR/.env.local" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$ROOT_DIR/.env.local"
+  set +a
+fi
+
 # DashScope is OpenAI-compatible but its native credential name is
 # DASHSCOPE_API_KEY. Normalize it before the common launcher validates inputs.
 if [[ "${CODEX_API_BASE:-}" == "https://dashscope.aliyuncs.com/compatible-mode/v1" \

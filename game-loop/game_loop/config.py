@@ -41,7 +41,7 @@ class BackendConfig:
 class EvolutionConfig:
     max_generations: int = 3
     candidates_per_generation: int = 2
-    delta_min: float = 0.015
+    delta_min: float = 0.0
     objective_regression_epsilon: float = 0.08
     stop_after_rejections: int = 6
     feedback_disclosure: str = "OBJECTIVES"
@@ -57,7 +57,7 @@ class EvolutionConfig:
         result = cls(
             max_generations=int(value.get("max_generations", 3)),
             candidates_per_generation=int(value.get("candidates_per_generation", 2)),
-            delta_min=float(value.get("delta_min", 0.015)),
+            delta_min=float(value.get("delta_min", 0.0)),
             objective_regression_epsilon=float(value.get("objective_regression_epsilon", 0.08)),
             stop_after_rejections=int(value.get("stop_after_rejections", 6)),
             feedback_disclosure=disclosure,

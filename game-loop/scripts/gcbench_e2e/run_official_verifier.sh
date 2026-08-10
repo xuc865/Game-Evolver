@@ -63,6 +63,13 @@ fi
 if [ -n "${GAMECRAFT_BENCH_JUDGE_OPENAI_BASE_URL:-}" ]; then
   DOCKER_ENV+=(-e "GAMECRAFT_BENCH_JUDGE_OPENAI_BASE_URL=$GAMECRAFT_BENCH_JUDGE_OPENAI_BASE_URL")
 fi
+DOCKER_ENV+=(
+  -e "HOME=/tmp/godot-home"
+  -e "USERPROFILE=/tmp/godot-home"
+  -e "XDG_CONFIG_HOME=/tmp/godot-home/.config"
+  -e "XDG_CACHE_HOME=/tmp/godot-home/.cache"
+  -e "XDG_DATA_HOME=/tmp/godot-home/.local/share"
+)
 
 JUDGE_ARGS=(--judge "$JUDGE" --judge-input-mode "$JUDGE_INPUT_MODE")
 if [ -n "$JUDGE_MODEL" ]; then

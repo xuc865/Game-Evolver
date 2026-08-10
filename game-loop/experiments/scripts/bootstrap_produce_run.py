@@ -54,7 +54,7 @@ MODELS: dict[str, dict[str, str]] = {
         "api_key_required": "0",
         "max_output_tokens": "512",
         "api_retries": "10",
-        "api_timeout_seconds": "90",
+        "api_timeout_seconds": "180",
         "tool_read_max_chars": "2500",
         "tool_stdout_max_chars": "2500",
         "tool_stderr_max_chars": "1200",
@@ -77,6 +77,38 @@ MODELS: dict[str, dict[str, str]] = {
         "tool_stdout_max_chars": "2500",
         "tool_stderr_max_chars": "1200",
         "run_id_prefix": "ggl",
+    },
+    "claude": {
+        "run_name": "gcbench-produce-claude",
+        "config": "gcbench-L4_claude_produce.json",
+        "codex_api_base": "https://xmcode.shop/v1",
+        "codex_model": "claude-sonnet-4-6",
+        "codex_provider": "claude",
+        "api_key_var": "ANTHROPIC_AUTH_TOKEN",
+        "api_key_required": "1",
+        "max_output_tokens": "8192",
+        "api_retries": "4",
+        "api_timeout_seconds": "60",
+        "tool_read_max_chars": "2500",
+        "tool_stdout_max_chars": "2500",
+        "tool_stderr_max_chars": "1200",
+        "run_id_prefix": "gcl",
+    },
+    "gpt55": {
+        "run_name": "gcbench-produce-gpt55",
+        "config": "gcbench-L4_gpt55_produce.json",
+        "codex_api_base": "https://xmcode.shop/v1",
+        "codex_model": "gpt-5.5",
+        "codex_provider": "gpt55",
+        "api_key_var": "OPENAI_API_KEY",
+        "api_key_required": "1",
+        "max_output_tokens": "8192",
+        "api_retries": "4",
+        "api_timeout_seconds": "60",
+        "tool_read_max_chars": "2500",
+        "tool_stdout_max_chars": "2500",
+        "tool_stderr_max_chars": "1200",
+        "run_id_prefix": "ggp",
     },
 }
 
@@ -227,6 +259,7 @@ def bootstrap(model_key: str, *, reset: bool = True) -> Path:
                 f"CONFIG={config_path}",
                 f"CODEX_API_BASE={spec['codex_api_base']}",
                 f"CODEX_MODEL={spec['codex_model']}",
+                f"CODEX_PROVIDER={spec.get('codex_provider', model_key)}",
                 f"RUN_ID_PREFIX={spec['run_id_prefix']}",
                 f"AGENT_API_KEY_VAR={spec['api_key_var']}",
                 f"GAME_LOOP_AGENT_REQUIRES_API_KEY={spec['api_key_required']}",
@@ -284,11 +317,18 @@ def bootstrap(model_key: str, *, reset: bool = True) -> Path:
             for item in root_lines:
                 if item.startswith("DEEPSEEK_") or item.startswith("OPENAI_"):
                     lines.append(item)
+        elif spec["api_key_var"].startswith("ANTHROPIC_"):
+            for item in root_lines:
+                if item.startswith("ANTHROPIC_"):
+                    lines.append(item)
+        elif spec["api_key_var"].startswith("OPENAI_"):
+            for item in root_lines:
+                if item.startswith("OPENAI_"):
+                    lines.append(item)
         else:
             for item in root_lines:
                 if (
                     item.startswith("DEEPSEEK_")
-                    or item.startswith("OPENAI_")
                     or item.startswith("DASHSCOPE_")
                     or item.startswith("QWEN_")
                 ):

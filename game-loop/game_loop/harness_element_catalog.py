@@ -231,3 +231,98 @@ DEFAULT_INNER_SEED_ELEMENTS = {
     "protocol": ["proto_workspace_boundary", "proto_edit_verify_handoff"],
     "workflow": ["wf_probe_first", "wf_plan_patch_verify"],
 }
+
+
+OUTER_ELEMENT_CATALOG = [
+    {
+        "id": "ctx_inner_rejection_memory",
+        "category": "context",
+        "description": "Summarize rejected inner harness proposals before proposing a new element-library change.",
+        "spec": {
+            "window": "inner_rejection_experience",
+            "inner_tags": ["diversity_escape", "workflow"],
+        },
+        "tags": ["context", "inner_harness", "rejection_memory", "universal"],
+    },
+    {
+        "id": "ctx_element_usage_accuracy_digest",
+        "category": "context",
+        "description": "Expose per-element usage and accuracy trends to the harness-generation agent.",
+        "spec": {
+            "window": "element_stats",
+            "inner_tags": ["usage_driven"],
+        },
+        "tags": ["context", "element_stats", "usage_driven", "universal"],
+    },
+    {
+        "id": "skill_failure_to_element_mapping",
+        "category": "skill",
+        "description": "Map inner-loop failure families to reusable harness element categories and tags.",
+        "spec": {
+            "mode": "failure_to_element_mapping",
+            "inner_tags": ["skill", "tool", "context"],
+        },
+        "tags": ["skill", "failure_analysis", "element_library", "universal"],
+    },
+    {
+        "id": "skill_harness_gap_analysis",
+        "category": "skill",
+        "description": "Identify missing reusable harness-generation experience from recent game-agent traces.",
+        "spec": {
+            "mode": "harness_gap_analysis",
+            "inner_tags": ["element_add", "usage_driven"],
+        },
+        "tags": ["skill", "gap_analysis", "element_add", "universal"],
+    },
+    {
+        "id": "tool_outer_stats_inspector",
+        "category": "tool",
+        "description": "Inspect outer element usage/accuracy stats before changing the outer library.",
+        "spec": {
+            "command": "outer_element_stats_digest",
+            "inner_tags": ["usage_driven"],
+        },
+        "tags": ["tool", "stats", "accuracy", "universal"],
+    },
+    {
+        "id": "protocol_element_library_only",
+        "category": "protocol",
+        "description": "Constrain outer evolution to reusable element-library management, not hard module forcing.",
+        "spec": {
+            "scope": "element_library_management_only",
+            "inner_tags": ["usage_driven"],
+        },
+        "tags": ["protocol", "library_only", "safety", "universal"],
+    },
+    {
+        "id": "workflow_prune_merge_replace",
+        "category": "workflow",
+        "description": "Prune, merge, or replace low-accuracy harness-generation elements using recorded outcomes.",
+        "spec": {
+            "steps": ["inspect_stats", "select_category", "prune_or_merge", "record_change"],
+            "inner_tags": ["element_merge", "usage_driven"],
+        },
+        "tags": ["workflow", "stats_driven", "merge", "repair", "universal"],
+    },
+    {
+        "id": "workflow_targeted_element_addition",
+        "category": "workflow",
+        "description": "Add one targeted reusable harness-generation element for a repeated inner-loop failure mode.",
+        "spec": {
+            "steps": ["classify_failure", "choose_category", "add_element", "track_accuracy"],
+            "inner_tags": ["element_add", "usage_driven"],
+        },
+        "tags": ["workflow", "element_add", "failure_analysis", "universal"],
+    },
+]
+
+DEFAULT_OUTER_SEED_ELEMENTS = {
+    "context": [
+        "ctx_inner_rejection_memory",
+        "ctx_element_usage_accuracy_digest",
+    ],
+    "skill": ["skill_failure_to_element_mapping"],
+    "tool": ["tool_outer_stats_inspector"],
+    "protocol": ["protocol_element_library_only"],
+    "workflow": ["workflow_targeted_element_addition"],
+}

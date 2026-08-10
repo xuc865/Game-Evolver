@@ -770,18 +770,7 @@ class LoopController:
             reasons.append("candidate or baseline primary score is missing")
         else:
             delta = evaluation.primary_score - baseline.primary_score
-            threshold = (
-                0.0 if self.config.experiment.arm == "retry3"
-                else self.config.evolution.delta_min
-            )
-            below_threshold = (
-                delta <= threshold
-                if self.config.experiment.arm == "retry3"
-                else delta < threshold
-            )
-            if below_threshold:
-                comparator = "not above" if self.config.experiment.arm == "retry3" else "below"
-                reasons.append(f"primary delta {delta:.6f} {comparator} {threshold:.6f}")
+            threshold = 0.0 if self.config.experiment.arm == "retry3" else self.config.evolution.delta_min
             regressions = (
                 []
                 if self.config.experiment.arm == "retry3"
@@ -800,8 +789,9 @@ class LoopController:
             reasons.extend(probe_reasons)
             if probe_reasons:
                 status = "probe_failed"
-            improves = delta > 0.0 if self.config.experiment.arm == "retry3" else delta >= threshold
-            if improves and not regressions and not probe_reasons:
+            if delta < threshold:
+                reasons.append(f"primary delta {delta:.6f} below {threshold:.6f}")
+            if delta >= threshold and not regressions and not probe_reasons:
                 accepted = True
                 status = "accepted"
                 reasons.append(

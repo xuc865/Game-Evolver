@@ -97,6 +97,45 @@ class GameCraftBenchScoringTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0)
         self.assertIn("mode=text", completed.stdout)
 
+    def test_export_judge_env_prefers_model_specific_secret_over_root_openai(self) -> None:
+        script = ROOT / "scripts/gcbench_e2e/export_judge_env.sh"
+        completed = subprocess.run(
+            ["bash", "-c", f"source '{script}'; echo key=$OPENAI_API_KEY"],
+            capture_output=True,
+            text=True,
+            env={
+                "PATH": "/usr/bin:/bin",
+                "OPENAI_API_KEY": "bad-root-key",
+                "DEEPSEEK_API_KEY": "good-model-key",
+            },
+        )
+        self.assertEqual(completed.returncode, 0)
+        self.assertIn("key=good-model-key", completed.stdout)
+
+    def test_run_local_verifier_uses_isolated_home_for_godot(self) -> None:
+        source = (ROOT / "scripts" / "gcbench_e2e" / "run_local_verifier.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('export HOME="$verifier_home"', source)
+        self.assertIn('export XDG_CONFIG_HOME="$verifier_config"', source)
+        self.assertIn('export XDG_CACHE_HOME="$verifier_cache"', source)
+        self.assertIn('export XDG_DATA_HOME="$verifier_data"', source)
+
+    def test_run_official_verifier_sets_isolated_home_for_container(self) -> None:
+        source = (ROOT / "scripts" / "gcbench_e2e" / "run_official_verifier.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('HOME=/tmp/godot-home', source)
+        self.assertIn('XDG_CONFIG_HOME=/tmp/godot-home/.config', source)
+        self.assertIn('XDG_CACHE_HOME=/tmp/godot-home/.cache', source)
+        self.assertIn('XDG_DATA_HOME=/tmp/godot-home/.local/share', source)
+
+    def test_probe_tools_isolate_godot_runtime_env(self) -> None:
+        source = (ROOT / "game_loop" / "probe_tools.py").read_text(encoding="utf-8")
+        self.assertIn("def _godot_runtime_env()", source)
+        self.assertIn('"HOME": str(home)', source)
+        self.assertIn('env=_godot_runtime_env()', source)
+
     def test_localize_build_cmd_uses_project_and_godot(self) -> None:
         _import_gcbench_verifier()
         from gamecraft_bench.verifier import score as score_mod

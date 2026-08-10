@@ -29,6 +29,7 @@ GDBENCH = ROOT / "third_party" / "gamedevbench"
 SMOKE = ROOT / "experiments" / "smoke"
 SEEDS = ROOT / "experiments" / "public_baseline_seeds"
 DEFAULT_OUT = ROOT / ".smoke" / "public-baseline"
+BENCHMARKS = ("gcbench", "gdbench", "vgamegym", "verigame")
 
 
 def _config_path(bench: str, model: str) -> Path:
@@ -106,12 +107,20 @@ def _preflight_case(
     return report
 
 
-def run_smoke(*, model: str, output_root: Path, awesome_skills: bool, execute: bool) -> dict[str, object]:
+def run_smoke(
+    *,
+    model: str,
+    output_root: Path,
+    awesome_skills: bool,
+    execute: bool,
+    benches: tuple[str, ...] = BENCHMARKS,
+    seed_only: bool = False,
+) -> dict[str, object]:
     output_root = output_root.resolve()
     if output_root.exists():
         shutil.rmtree(output_root)
     cases: list[dict[str, object]] = []
-    for bench in ("gcbench", "gdbench", "vgamegym", "verigame"):
+    for bench in benches:
         case = _preflight_case(
             bench=bench,
             model=model,
@@ -136,8 +145,9 @@ def run_smoke(*, model: str, output_root: Path, awesome_skills: bool, execute: b
                 str(output_root / bench / "episode"),
                 "--run-id-prefix",
                 "epoch0",
-                "--baseline-only",
             ]
+            if seed_only:
+                command.append("--baseline-only")
             completed = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, check=False)
             case["execution_return_code"] = completed.returncode
             case["execution_stdout_tail"] = completed.stdout[-1000:]
@@ -148,6 +158,8 @@ def run_smoke(*, model: str, output_root: Path, awesome_skills: bool, execute: b
         "model": model,
         "awesome_skills": awesome_skills,
         "execute": execute,
+        "seed_only": seed_only,
+        "benchmarks": list(benches),
         "cases": cases,
     }
     atomic_write_json(output_root / "report.json", payload)
@@ -160,12 +172,26 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--awesome-skills", action="store_true")
     parser.add_argument("--execute", action="store_true")
+    parser.add_argument(
+        "--seed-only",
+        action="store_true",
+        help="Evaluate only the seed artifact instead of running game generation.",
+    )
+    parser.add_argument(
+        "--bench",
+        action="append",
+        choices=BENCHMARKS,
+        dest="benches",
+        help="Run only this benchmark; repeat to select multiple benchmarks.",
+    )
     args = parser.parse_args(argv)
     payload = run_smoke(
         model=args.model,
         output_root=args.output_root,
         awesome_skills=args.awesome_skills,
         execute=args.execute,
+        benches=tuple(args.benches or BENCHMARKS),
+        seed_only=args.seed_only,
     )
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     complete = all(

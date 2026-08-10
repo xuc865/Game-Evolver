@@ -108,6 +108,21 @@ PROVIDERS: dict[str, BackboneProviderSpec] = {
         ("DASHSCOPE_API_KEY", "QWEN_API_KEY"), "QWEN_BASE_URL", "QWEN_MODEL",
         "deployment-provided OpenAI-compatible endpoint", False, True,
     ),
+    "claude": BackboneProviderSpec(
+        "claude", "https://xmcode.shop/v1", "claude-sonnet-4-6",
+        ("CODEX_API_KEY_CLAUDE", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"),
+        "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL",
+        "xmcode.shop Anthropic-compatible endpoint",
+        True,
+        False,
+    ),
+    "gpt55": BackboneProviderSpec(
+        "gpt55", "https://xmcode.shop/v1", "gpt-5.5",
+        ("CODEX_API_KEY_GPT55", "OPENAI_API_KEY"), "OPENAI_BASE_URL", "OPENAI_MODEL",
+        "xmcode.shop OpenAI-compatible endpoint",
+        True,
+        False,
+    ),
 }
 
 
@@ -147,6 +162,7 @@ def smoke_provider(provider_id: str, *, timeout_seconds: int = 60) -> dict[str, 
         headers={
             "Authorization": f"Bearer {resolved.api_key or 'EMPTY'}",
             "Content-Type": "application/json",
+            "User-Agent": "game-loop/1.0",
         },
     )
     try:

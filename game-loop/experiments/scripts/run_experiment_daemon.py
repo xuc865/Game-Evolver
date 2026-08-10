@@ -15,6 +15,15 @@ import sys
 import time
 from pathlib import Path
 
+ROLE_MARKERS = (
+    "watchdog.sh",
+    "start_supervisor.sh",
+    "harness-self-supervise",
+    "run_gcbench_l4_backend.sh",
+    "game_loop.chat_agent",
+    "gamecraft_bench.verifier",
+)
+
 
 def _run_dir() -> Path:
     return Path(__file__).resolve().parent
@@ -91,6 +100,11 @@ def _owned_process_tree(
         # A stale/reused pid must never be killed merely because it remains in a
         # pidfile.  Every accepted root has to name this exact run directory.
         if pid is not None and pid in table and marker in table[pid][1]:
+            roots.add(pid)
+    for pid, (_ppid, command) in table.items():
+        if pid == os.getpid() or pid == os.getppid():
+            continue
+        if marker in command and any(role in command for role in ROLE_MARKERS):
             roots.add(pid)
     owned = set(roots)
     changed = True

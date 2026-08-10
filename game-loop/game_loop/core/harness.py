@@ -552,12 +552,20 @@ class HarnessEvolutionEngine:
         return active
 
     def record_element_stats(self, *, profile: HarnessProfile, result: HarnessEpochResult) -> None:
+        self.record_element_usage(profile=profile, success=result.accepted)
+
+    def record_element_usage(self, *, profile: HarnessProfile, success: bool) -> None:
         if not self.config.enable_usage_driven_mutation or not profile.active_elements:
             return
         from game_loop.core.harness_element_stats import HarnessElementStatsStore
 
         stats = HarnessElementStatsStore.load(self.root / "element_stats.json")
-        stats.record_epoch(profile=profile, result=result)
+        for element in profile.active_elements:
+            stats.touch(
+                category=element.category,
+                element_id=element.element_id,
+                success=success,
+            )
         stats.save(self.root / "element_stats.json")
 
     def render(self, profile: HarnessProfile) -> str:
@@ -686,7 +694,13 @@ class HarnessEvolutionEngine:
             })
         try:
             candidate = self.get(result.candidate_harness_id)
-            self.record_element_stats(profile=candidate, result=result)
+            should_record = True
+            if isinstance(result.rubric_validation, dict):
+                should_record = bool(
+                    result.rubric_validation.get("record_element_stats", True)
+                )
+            if should_record:
+                self.record_element_stats(profile=candidate, result=result)
         except (ValueError, KeyError):
             pass
 

@@ -47,6 +47,31 @@ def _resolve_godot_bin(explicit: str | None) -> str | None:
     return resolve_godot_executable(explicit)
 
 
+def _godot_runtime_env() -> dict[str, str]:
+    """Isolate Godot from the host user config directory during probes."""
+    env = os.environ.copy()
+    probe_home = env.get("GAME_LOOP_GODOT_HOME")
+    if not probe_home:
+        probe_home = str(Path.home() / ".cache" / "game-loop-godot-probe")
+    probe_root = Path(probe_home).expanduser()
+    config_home = probe_root / "config"
+    cache_home = probe_root / "cache"
+    data_home = probe_root / "data"
+    home = probe_root / "home"
+    for path in (home, config_home, cache_home, data_home):
+        path.mkdir(parents=True, exist_ok=True)
+    env.update(
+        {
+            "HOME": str(home),
+            "USERPROFILE": str(home),
+            "XDG_CONFIG_HOME": str(config_home),
+            "XDG_CACHE_HOME": str(cache_home),
+            "XDG_DATA_HOME": str(data_home),
+        }
+    )
+    return env
+
+
 def _artifact_root(path: Path) -> Path:
     root = path.expanduser().resolve()
     if not root.is_dir():
@@ -71,6 +96,7 @@ def cmd_godot_import(args: argparse.Namespace) -> int:
         return 1
     proc = subprocess.run(
         [godot, "--headless", "--path", str(artifact), "--import", "--quit"],
+        env=_godot_runtime_env(),
         capture_output=True,
         text=True,
         timeout=args.timeout,
@@ -105,6 +131,7 @@ def cmd_godot_playtest(args: argparse.Namespace) -> int:
             "--quit-after",
             str(args.frames),
         ],
+        env=_godot_runtime_env(),
         capture_output=True,
         text=True,
         timeout=args.timeout,

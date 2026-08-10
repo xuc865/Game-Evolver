@@ -4,7 +4,12 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from game_loop.harness_element_catalog import DEFAULT_INNER_SEED_ELEMENTS, INNER_ELEMENT_CATALOG
+from game_loop.harness_element_catalog import (
+    DEFAULT_INNER_SEED_ELEMENTS,
+    DEFAULT_OUTER_SEED_ELEMENTS,
+    INNER_ELEMENT_CATALOG,
+    OUTER_ELEMENT_CATALOG,
+)
 
 PYTHON = "python3"
 PROBE_MODULE = ["-m", "game_loop.probe_tools"]
@@ -563,7 +568,7 @@ def _harness_evolution(
         "loop_role": loop_role,
         "require_rubric_validation": require_rubric_validation,
         "dynamic_rubric_generation": True,
-        "enable_usage_driven_mutation": loop_role == "inner",
+        "enable_usage_driven_mutation": element_catalog is not None,
         "rubric_provider": "deepseek",
         "element_mutation_policy": {
             "removal_min_usage": 5,
@@ -621,8 +626,9 @@ def build_outer_harness_evolution() -> dict[str, Any]:
         max_active_tool_interfaces=1,
         replay_min_cases=2,
         rubric_validation_sample_size=2,
-        promotion_delta_min=0.05,
-        max_case_regression=0.05,
+        require_rubric_validation=False,
+        element_catalog=deepcopy(OUTER_ELEMENT_CATALOG),
+        seed_elements=deepcopy(DEFAULT_OUTER_SEED_ELEMENTS),
     )
 
 

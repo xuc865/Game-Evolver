@@ -76,7 +76,8 @@ class LocalChatAgent:
     def __init__(self) -> None:
         self.api_base = os.environ.get("CODEX_API_BASE", "").rstrip("/")
         self.model = os.environ.get("CODEX_MODEL", "")
-        self.api_key = os.environ.get("CODEX_API_KEY", "")
+        self.provider = os.environ.get("CODEX_PROVIDER", "").strip().casefold()
+        self.api_key = self._resolve_api_key(self.provider)
         self.thinking_mode = os.environ.get("CODEX_THINKING", "").strip().lower()
 
         if not self.api_base:
@@ -140,6 +141,26 @@ class LocalChatAgent:
             parts.append("- Do not run `find /` or search the host filesystem for Godot.\n")
 
         return "\n".join(parts)
+
+    @staticmethod
+    def _resolve_api_key(provider: str) -> str:
+        if provider == "claude":
+            return (
+                os.environ.get("CODEX_API_KEY_CLAUDE", "")
+                or os.environ.get("ANTHROPIC_AUTH_TOKEN", "")
+                or os.environ.get("ANTHROPIC_API_KEY", "")
+            )
+        if provider in {"gpt55", "gpt-5.5"}:
+            return (
+                os.environ.get("CODEX_API_KEY_GPT55", "")
+                or os.environ.get("OPENAI_API_KEY", "")
+            )
+        return (
+            os.environ.get("CODEX_API_KEY", "")
+            or os.environ.get("OPENAI_API_KEY", "")
+            or os.environ.get("ANTHROPIC_AUTH_TOKEN", "")
+            or os.environ.get("ANTHROPIC_API_KEY", "")
+        )
 
     @staticmethod
     def _demo_trace_count(workspace: Path) -> int:
@@ -244,7 +265,12 @@ class LocalChatAgent:
             # also merge at top level for compatibility
             payload.update(extra)
 
-        headers = {"Content-Type": "application/json"}
+        headers = {
+            "Content-Type": "application/json",
+            # xmcode.shop's Cloudflare policy rejects urllib's default
+            # Python signature with error 1010. Use an explicit client UA.
+            "User-Agent": "game-loop/1.0",
+        }
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
 

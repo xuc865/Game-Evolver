@@ -1,0 +1,6 @@
+[submodule "game-loop/third_party/awesome-gamedev-agent-skills"]
+	path = game-loop/third_party/awesome-gamedev-agent-skills
+	url = https://github.com/gamedev-skills/awesome-gamedev-agent-skills.git
+[submodule "game-loop/third_party/gamedevbench"]
+	path = game-loop/third_party/gamedevbench
+	url = https://github.com/waynchi/gamedevbench.git

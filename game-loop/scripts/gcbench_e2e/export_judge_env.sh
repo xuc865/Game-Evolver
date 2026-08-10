@@ -11,9 +11,9 @@ fi
 
 export GAMECRAFT_BENCH_JUDGE="${GAMECRAFT_BENCH_JUDGE:-openai}"
 
-judge_key="${GAMECRAFT_BENCH_JUDGE_OPENAI_API_KEY:-${OPENAI_API_KEY:-}}"
+judge_key="${GAMECRAFT_BENCH_JUDGE_OPENAI_API_KEY:-}"
 if [[ -z "$judge_key" ]]; then
-  judge_key="${DEEPSEEK_API_KEY:-${CODEX_API_KEY:-}}"
+  judge_key="${DEEPSEEK_API_KEY:-${CODEX_API_KEY:-${OPENAI_API_KEY:-}}}"
 fi
 if [[ -n "$judge_key" ]]; then
   export OPENAI_API_KEY="$judge_key"

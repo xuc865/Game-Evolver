@@ -1556,6 +1556,80 @@ class GameLoopTests(unittest.TestCase):
             self.assertEqual(state.probe_calls, 1)
             self.assertEqual(state.attempts[0]["status"], "infra_failed")
 
+    def test_l4_zero_delta_candidate_is_accepted_without_a_minimum_gain_threshold(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            seed = root / "seed"
+            seed.mkdir()
+            (seed / "score.txt").write_text("0.5")
+            task = root / "task"
+            task.mkdir()
+            config = write_config(
+                root,
+                candidates=1,
+                generations=1,
+                level="L4",
+                delta=0.0,
+                max_model_calls=1,
+                max_evaluator_queries=1,
+                max_probe_calls=2,
+            )
+            controller = LoopController.initialize(
+                run_dir=root / "l4-zero-delta",
+                task_source=task,
+                seed_artifact=seed,
+                seed_evaluation=EvaluationResult(0.5, True, {"quality": 0.5}),
+                config=config,
+                adapter=FakeAdapter([0.5]),
+            )
+            controller.backend = FakeBackend()
+            controller.probe_runner = FakeProbeRunner([
+                (True, 1.0, "completed"),
+                (True, 1.0, "completed"),
+            ])
+            state = controller.evolve()
+            attempt = state.attempts[0]
+            self.assertTrue(attempt["accepted"])
+            self.assertEqual(attempt["status"], "accepted")
+            self.assertNotIn("primary delta", " ".join(attempt["reasons"]))
+
+    def test_l4_negative_delta_candidate_is_rejected(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            seed = root / "seed"
+            seed.mkdir()
+            (seed / "score.txt").write_text("0.5")
+            task = root / "task"
+            task.mkdir()
+            config = write_config(
+                root,
+                candidates=1,
+                generations=1,
+                level="L4",
+                delta=0.0,
+                max_model_calls=1,
+                max_evaluator_queries=1,
+                max_probe_calls=2,
+            )
+            controller = LoopController.initialize(
+                run_dir=root / "l4-negative-delta",
+                task_source=task,
+                seed_artifact=seed,
+                seed_evaluation=EvaluationResult(0.5, True, {"quality": 0.5}),
+                config=config,
+                adapter=FakeAdapter([0.4]),
+            )
+            controller.backend = FakeBackend()
+            controller.probe_runner = FakeProbeRunner([
+                (True, 1.0, "completed"),
+                (True, 1.0, "completed"),
+            ])
+            state = controller.evolve()
+            attempt = state.attempts[0]
+            self.assertFalse(attempt["accepted"])
+            self.assertEqual(attempt["status"], "rejected")
+            self.assertIn("primary delta -0.100000 below 0.000000", attempt["reasons"])
+
     def test_fixed_command_probe_runner_parses_structured_metrics(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

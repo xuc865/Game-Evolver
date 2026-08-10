@@ -42,9 +42,16 @@ def _parser() -> argparse.ArgumentParser:
     doctor = subparsers.add_parser("doctor")
     doctor.add_argument("--profile", type=Path, required=True)
     providers = subparsers.add_parser("doctor-providers")
-    providers.add_argument("--provider", choices=("deepseek", "kimi", "glm", "qwen"))
+    providers.add_argument(
+        "--provider",
+        choices=("deepseek", "kimi", "glm", "qwen", "claude", "gpt55"),
+    )
     smoke = subparsers.add_parser("smoke-provider")
-    smoke.add_argument("--provider", required=True, choices=("deepseek", "kimi", "glm", "qwen"))
+    smoke.add_argument(
+        "--provider",
+        required=True,
+        choices=("deepseek", "kimi", "glm", "qwen", "claude", "gpt55"),
+    )
     smoke.add_argument("--timeout", type=int, default=60)
     return parser
 

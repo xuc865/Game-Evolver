@@ -59,6 +59,27 @@ class ProviderLaunchTests(unittest.TestCase):
             self.assertIn("Keep authored visuals", sanitized)
             self.assertIn("Ship deterministic traces", sanitized)
 
+    def test_stage_local_runtime_overlay_adds_bestiary_panel_alias(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            gcbench_root = root / "gcbench"
+            (gcbench_root / "tools").mkdir(parents=True)
+            overlay = root / "workspace"
+            scripts = overlay / "game" / "scripts"
+            scripts.mkdir(parents=True)
+            (scripts / "BestiaryOverlay.gd").write_text("extends Control\n", encoding="utf-8")
+            with patch(
+                "game_loop.gcbench_runtime.resolve_godot_executable",
+                return_value="/bin/true",
+            ):
+                stage_local_runtime_overlay(
+                    overlay_workspace=overlay,
+                    gcbench_root=gcbench_root,
+                )
+            alias = scripts / "BestiaryPanel.gd"
+            self.assertTrue(alias.is_file())
+            self.assertIn("BestiaryOverlay.gd", alias.read_text(encoding="utf-8"))
+
     def test_internal_provider_is_real_without_api_key(self) -> None:
         providers = [
         ("http://29.116.237.135:8080/v1", "Kimi-K2.7-Code"),
@@ -174,6 +195,8 @@ class ProviderLaunchTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn('str(watchdog), "--foreground"', daemon)
+        self.assertIn('"harness-self-supervise"', daemon)
+        self.assertIn('"run_gcbench_l4_backend.sh"', daemon)
 
     def test_parallel_start_preflights_before_stopping(self) -> None:
         source = (ROOT / "experiments" / "scripts" / "start_parallel_produce.sh").read_text(
@@ -335,6 +358,13 @@ class ProviderLaunchTests(unittest.TestCase):
         )
         self.assertIn('experiments/scripts/run_experiment_daemon.py', source)
         self.assertNotIn('runs/gcbench-harness-evolve/run_experiment_daemon.py', source)
+
+    def test_bootstrap_does_not_copy_root_openai_key_into_qwen_glm_env(self) -> None:
+        source = (ROOT / "experiments" / "scripts" / "bootstrap_produce_run.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('or item.startswith("DASHSCOPE_")', source)
+        self.assertNotIn('or item.startswith("OPENAI_")', source.split('else:', 1)[1].split('_write_executable', 1)[0])
 
 
 if __name__ == "__main__":

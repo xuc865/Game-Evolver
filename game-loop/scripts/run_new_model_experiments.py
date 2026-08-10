@@ -3,7 +3,7 @@
 run_new_model_experiments.py — Runner for 8 queues: GC/GD × 4 models.
 
 Benchmarks: gcbench, gdbench
-Models:     glm5.2, deepseek_v4, kimi, qwen3.6-27b
+Models:     glm5.2, deepseek_v4, kimi, qwen3.6-27b, claude, gpt55
 
 Usage:
   python3 run_new_model_experiments.py --queue glm5.2_gcbench
@@ -25,7 +25,7 @@ PYTHON = sys.executable
 CFG_DIR = ROOT / "experiments" / "configs-v4"
 
 BENCHES = ["gcbench", "gdbench"]
-MODELS = ["glm5.2", "deepseek_v4", "kimi", "qwen3.6-27b"]
+MODELS = ["glm5.2", "deepseek_v4", "kimi", "qwen3.6-27b", "claude", "gpt55"]
 
 TASK_SOURCES = {
     "gcbench": Path("/Users/wangxucong/Desktop/workspace/harness-game/gcbench/tasks"),
@@ -37,14 +37,15 @@ MODEL_CONFIG_SUFFIX = {
     "deepseek_v4": "deepseek",
     "kimi": "kimi",
     "qwen3.6-27b": "qwen",
+    "claude": "claude",
+    "gpt55": "gpt55",
 }
 
 
 def config_for(bench: str, model: str) -> Path:
-    primary = CFG_DIR / f"{bench}-L4_{model}.json"
-    if primary.is_file():
-        return primary
-    return CFG_DIR / f"{bench}-L4.json"
+    # A missing model-specific config must not silently run another model's
+    # harness.  Callers already report missing paths as a queue skip.
+    return CFG_DIR / f"{bench}-L4_{model}.json"
 
 
 def queue_id(model: str, bench: str) -> str:

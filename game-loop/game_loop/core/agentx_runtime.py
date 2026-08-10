@@ -73,10 +73,17 @@ class AttributionDrivenInnerGradientProposer:
         proposer_harness: HarnessProfile,
         target_harness: HarnessProfile,
     ) -> HarnessSemanticGradient:
-        del proposer_harness, target_harness
+        del target_harness
         memory_hint = ""
         if self.memory is not None:
             memory_hint = self.memory.render_proposer_context(loop_role="inner")
+        outer_tags: list[str] = []
+        outer_notes: list[str] = []
+        for element in proposer_harness.active_elements:
+            outer_notes.append(f"{element.category}:{element.element_id}")
+            raw_tags = element.spec.get("inner_tags", ())
+            if isinstance(raw_tags, list):
+                outer_tags.extend(str(tag) for tag in raw_tags)
         counts = dict(report.outcome_counts)
         if counts.get("probe_failed", 0) >= 2:
             diagnosis = (
@@ -108,6 +115,12 @@ class AttributionDrivenInnerGradientProposer:
                 tags = (*tags, "element_merge")
         if memory_hint:
             diagnosis = f"{diagnosis}; {memory_hint}"
+        if outer_notes:
+            diagnosis = (
+                f"{diagnosis}; outer harness-generation elements active: "
+                f"{', '.join(outer_notes[:6])}"
+            )
+        tags = tuple(dict.fromkeys((*tags, *outer_tags)))
         return HarnessSemanticGradient(
             diagnosis,
             tags,
@@ -142,14 +155,14 @@ class InnerOutcomeOuterGradientProposer:
         if self.memory is not None:
             memory_hint = self.memory.render_proposer_context(loop_role="outer")
         if latest_inner_result.accepted:
-            diagnosis = "inner epoch promoted; refine the harness-improvement contract"
-            tags = ("validation", "module_strategy")
+            diagnosis = "inner epoch promoted; reinforce accurate harness-generation elements"
+            tags = ("workflow", "usage_driven", "element_merge")
         else:
-            diagnosis = "inner epoch rejected; strengthen evidence-grounded refinement"
-            tags = ("context_compiler", "recovery")
+            diagnosis = "inner epoch rejected; update reusable harness-generation experience elements"
+            tags = ("context", "skill", "usage_driven", "element_add")
         if report.infrastructure_events:
-            tags = ("recovery", "tool_interface")
-            diagnosis = "infrastructure events require safer outer-loop refinement"
+            tags = ("protocol", "tool", "usage_driven", "element_add")
+            diagnosis = "infrastructure events require safer outer element-library refinement"
         tag = self._OUTER_TAGS[latest_inner_result.epoch % len(self._OUTER_TAGS)]
         diagnosis = f"{diagnosis}; explore {tag}"
         if memory_hint:
@@ -256,6 +269,7 @@ def build_agentx_nested_evolution(
     init_handler,
     evolve_handler,
     offline_rubric_judge: bool = False,
+    outer_enabled: bool = False,
 ) -> AgentXNestedEvolution:
     inner_engine = HarnessEvolutionEngine(run_dir / "inner", runtime.inner_harness)
     outer_engine = HarnessEvolutionEngine(run_dir / "outer", runtime.outer_harness)
@@ -289,6 +303,7 @@ def build_agentx_nested_evolution(
         ),
         inner_memory=inner_memory,
         outer_memory=outer_memory,
+        outer_enabled=outer_enabled,
     )
 
 

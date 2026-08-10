@@ -78,14 +78,14 @@ class NestedReplayOracle(Protocol):
 @dataclass(frozen=True)
 class AgentXNestedEpochResult:
     inner: HarnessEpochResult
-    outer: HarnessEpochResult
+    outer: HarnessEpochResult | None
     inner_proposer_harness_id: str
     outer_target_harness_id: str
 
     def to_dict(self) -> dict:
         return {
             "inner": self.inner.to_dict(),
-            "outer": self.outer.to_dict(),
+            "outer": None if self.outer is None else self.outer.to_dict(),
             "inner_proposer_harness_id": self.inner_proposer_harness_id,
             "outer_target_harness_id": self.outer_target_harness_id,
         }
@@ -119,6 +119,7 @@ class AgentXNestedEvolution:
         outer_rubric_validator: HarnessRubricValidator | None = None,
         inner_memory: HarnessEvolutionMemory | None = None,
         outer_memory: HarnessEvolutionMemory | None = None,
+        outer_enabled: bool = False,
     ):
         if inner_engine.config.mutation_width != 1 or outer_engine.config.mutation_width != 1:
             raise ValueError("AgentX-safe nested evolution requires mutation_width=1 at both levels")
@@ -136,6 +137,7 @@ class AgentXNestedEvolution:
         )
         self.inner_memory = inner_memory
         self.outer_memory = outer_memory
+        self.outer_enabled = outer_enabled
         self.state_path = self.run_dir / "nested_evolution.json"
 
     def initialize(self) -> None:
@@ -214,59 +216,65 @@ class AgentXNestedEvolution:
                     rubric_validation=inner_rubric.to_dict(),
                 )
             )
+        self.outer_engine.record_element_usage(
+            profile=frozen_outer,
+            success=inner_result.accepted,
+        )
 
-        # The outer epoch starts only after the complete inner epoch. Its target
-        # is the resulting inner champion and remains frozen for all outer cases.
         frozen_inner = self.inner_engine.champion()
-        outer_parent = self.outer_engine.champion()
-        outer_gradient = self.outer_gradient_proposer.propose_outer(
-            report,
-            latest_inner_result=inner_result,
-            proposer_harness=outer_parent,
-        )
-        outer_candidate = self.outer_engine.propose(
-            parent_id=outer_parent.harness_id,
-            gradient=outer_gradient,
-            epoch=epoch,
-        )
-        outer_outcomes = self.replay_oracle.evaluate_outer(
-            outer_cases,
-            parent=outer_parent,
-            candidate=outer_candidate,
-            target_harness=frozen_inner,
-            epoch=epoch,
-        )
-        outer_rubric = self.outer_rubric_validator.validate_paired_outcomes(
-            parent_outcomes=outer_outcomes.parent,
-            candidate_outcomes=outer_outcomes.candidate,
-            parent_profile=outer_parent,
-            candidate_profile=outer_candidate,
-            case_task_refs={
-                case.case_id: Path(case.task_ref)
-                for case in outer_cases
-            },
-            module_categories=self.outer_engine.module_categories,
-        )
-        outer_result = self.outer_engine.assess_epoch(
-            epoch=epoch,
-            parent=outer_parent,
-            candidate=outer_candidate,
-            parent_outcomes=outer_outcomes.parent,
-            candidate_outcomes=outer_outcomes.candidate,
-            rubric_validation=outer_rubric.to_dict(),
-        )
-        self.outer_engine.record_epoch(outer_result)
-        if not outer_result.accepted and self.outer_memory is not None:
-            self.outer_memory.append(
-                build_rejection_experience(
-                    epoch=epoch,
-                    loop_role=self.outer_engine.config.loop_role,
-                    parent=outer_parent,
-                    candidate=outer_candidate,
-                    epoch_result=outer_result,
-                    rubric_validation=outer_rubric.to_dict(),
-                )
+        outer_result: HarnessEpochResult | None = None
+        outer_validation: dict[str, object]
+        if self.outer_enabled:
+            # The outer epoch starts only after the complete inner epoch. Its
+            # target is the resulting inner champion and remains frozen while
+            # the outer harness-generation element library is updated.
+            outer_parent = self.outer_engine.champion()
+            outer_gradient = self.outer_gradient_proposer.propose_outer(
+                report,
+                latest_inner_result=inner_result,
+                proposer_harness=outer_parent,
             )
+            outer_candidate = self.outer_engine.propose(
+                parent_id=outer_parent.harness_id,
+                gradient=outer_gradient,
+                epoch=epoch,
+            )
+            del outer_cases
+            outer_validation = {
+                "accepted": True,
+                "mode": "outer_element_library_management",
+                "inner_epoch_accepted": inner_result.accepted,
+                "target_inner_harness_id": frozen_inner.harness_id,
+                "record_element_stats": False,
+                "reasons": [],
+                "created_at": utc_now(),
+            }
+            outer_result = HarnessEpochResult(
+                epoch=epoch,
+                parent_harness_id=outer_parent.harness_id,
+                candidate_harness_id=outer_candidate.harness_id,
+                accepted=True,
+                paired_deltas=(),
+                median_delta=None,
+                reasons=(),
+                excluded_pairs=(),
+                parent_outcomes=(),
+                candidate_outcomes=(),
+                created_at=utc_now(),
+                rubric_validation=outer_validation,
+            )
+            self.outer_engine.record_epoch(outer_result)
+        else:
+            del outer_cases
+            outer_validation = {
+                "accepted": True,
+                "mode": "outer_evolution_disabled",
+                "inner_epoch_accepted": inner_result.accepted,
+                "target_inner_harness_id": frozen_inner.harness_id,
+                "record_element_stats": False,
+                "reasons": [],
+                "created_at": utc_now(),
+            }
         result = AgentXNestedEpochResult(
             inner_result,
             outer_result,
@@ -277,9 +285,9 @@ class AgentXNestedEvolution:
         state["epochs"].append({
             **result.to_dict(),
             "inner_gradient": inner_gradient.to_dict(),
-            "outer_gradient": outer_gradient.to_dict(),
+            "outer_gradient": None if not self.outer_enabled else outer_gradient.to_dict(),
             "inner_rubric_validation": inner_rubric.to_dict(),
-            "outer_rubric_validation": outer_rubric.to_dict(),
+            "outer_element_library_update": outer_validation,
             "completed_at": utc_now(),
         })
         atomic_write_json(self.state_path, state)

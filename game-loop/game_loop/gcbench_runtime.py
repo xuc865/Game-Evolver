@@ -59,6 +59,14 @@ def stage_local_runtime_overlay(
     )
     wrapper.chmod(wrapper.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
+    bestiary_overlay = overlay_workspace / "game" / "scripts" / "BestiaryOverlay.gd"
+    bestiary_panel = overlay_workspace / "game" / "scripts" / "BestiaryPanel.gd"
+    if bestiary_overlay.is_file() and not bestiary_panel.exists():
+        bestiary_panel.write_text(
+            'extends "res://scripts/BestiaryOverlay.gd"\n',
+            encoding="utf-8",
+        )
+
     runtime_note = overlay_workspace / "RUNTIME_PATHS.md"
     visual_note = (
         "- Visual capture is disabled for this text-only backbone. Use bounded "

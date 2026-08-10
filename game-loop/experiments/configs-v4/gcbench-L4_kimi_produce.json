@@ -22,6 +22,7 @@
     "env": {
       "CODEX_API_BASE": "http://29.116.237.135:8080/v1",
       "CODEX_MODEL": "Kimi-K2.7-Code",
+      "GAME_LOOP_BACKBONE_PROVIDER": "kimi",
       "GAME_LOOP_CHAT_MAX_TURNS": "60",
       "GAME_LOOP_CHAT_MAX_OUTPUT_TOKENS": "8192",
       "GAME_LOOP_CHAT_API_MAX_RETRIES": "10",
@@ -234,8 +235,6 @@
       "mutation_width": 1,
       "replay_min_cases": 3,
       "rubric_validation_sample_size": 3,
-      "promotion_delta_min": 0.03,
-      "max_case_regression": 0.08,
       "loop_role": "inner",
       "require_rubric_validation": true,
       "dynamic_rubric_generation": true,
