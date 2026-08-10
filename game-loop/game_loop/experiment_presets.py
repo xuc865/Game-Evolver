@@ -420,6 +420,7 @@ BENCHMARK_PRESETS: dict[str, dict[str, Any]] = {
     "swebench": CODE_BENCH_PRESET,
     "nl2repo": CODE_BENCH_PRESET,
     "terminalbench": CODE_BENCH_PRESET,
+    "taubench": CODE_BENCH_PRESET,
     "weavebench": CODE_BENCH_PRESET,
     "verigame": {
         "fixed_probes": [

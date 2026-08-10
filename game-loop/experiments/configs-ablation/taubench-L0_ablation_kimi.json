@@ -1,0 +1,182 @@
+{
+  "benchmark": {
+    "adapter": "taubench",
+    "options": {
+      "root": "/Users/wangxucong/Desktop/workspace/harness-game/game-loop/third_party/tau2-bench"
+    }
+  },
+  "backend": {
+    "command": [
+      "python3",
+      "-m",
+      "game_loop.benchmarks.taubench_bridge",
+      "--tau-root",
+      "/Users/wangxucong/Desktop/workspace/harness-game/game-loop/third_party/tau2-bench",
+      "--domain",
+      "airline",
+      "--harness-context",
+      "{harness_context}",
+      "--output-manifest",
+      "{output_manifest}"
+    ],
+    "cwd": ".",
+    "timeout_seconds": 3600,
+    "env": {
+      "CODEX_API_BASE": "http://29.116.237.135:8080/v1",
+      "CODEX_MODEL": "Kimi-K2.7-Code",
+      "GAME_LOOP_BACKBONE_PROVIDER": "kimi"
+    }
+  },
+  "method": {
+    "level": "L4",
+    "fixed_probes": [
+      {
+        "id": "artifact_exists",
+        "command": [
+          "python3",
+          "-c",
+          "import json,sys,os; a=sys.argv[1]; ok=os.path.isdir(a) and len(os.listdir(a))>0; print(json.dumps({'passed': ok}))",
+          "{artifact_dir}"
+        ],
+        "cwd": ".",
+        "parser": "json_stdout",
+        "selection_mode": "required",
+        "timeout_seconds": 30
+      }
+    ],
+    "probe_families": [
+      {
+        "id": "artifact_file_count",
+        "gene": {
+          "name": "min_files",
+          "initial": 1,
+          "minimum": 1,
+          "maximum": 20,
+          "step": 1,
+          "difficulty_direction": "increasing"
+        },
+        "probe": {
+          "cwd": ".",
+          "command": [
+            "python3",
+            "-c",
+            "import json,sys,os; a=sys.argv[1]; n=int(sys.argv[2]); c=len(os.listdir(a)) if os.path.isdir(a) else 0; print(json.dumps({'passed': c>=n, 'file_count': c, 'min_files': n}))",
+            "{artifact_dir}",
+            "[[min_files]]"
+          ],
+          "timeout_seconds": 30,
+          "selection_mode": "regression_anchor",
+          "parser": "json_stdout",
+          "tags": [
+            "ImproveObjective",
+            "coverage"
+          ]
+        },
+        "archive_capacity": 8
+      }
+    ],
+    "max_probe_calls": 12,
+    "active_selection": {
+      "max_selected_probes": 2,
+      "min_observations_per_probe": 1
+    },
+    "harness_evolution": {
+      "modules": [
+        {
+          "id": "context_compiler",
+          "instruction": "Compile context from task requirements, parent artifact state, and feedback signals.",
+          "tags": [
+            "context"
+          ]
+        },
+        {
+          "id": "module_strategy",
+          "instruction": "Select and order modules based on task type and recent outcomes.",
+          "tags": [
+            "strategy"
+          ]
+        },
+        {
+          "id": "skill_governance",
+          "instruction": "Curate skill descriptions and manage skill loading priorities.",
+          "tags": [
+            "skills"
+          ]
+        },
+        {
+          "id": "tool_interface",
+          "instruction": "Manage tool interface assembly and safety scoping.",
+          "tags": [
+            "tools"
+          ]
+        },
+        {
+          "id": "probe_governance",
+          "instruction": "Select and parameterise probes based on coverage and regression signals.",
+          "tags": [
+            "probes"
+          ]
+        },
+        {
+          "id": "feedback_synthesis",
+          "instruction": "Synthesize structured feedback from evaluator outputs and probe observations.",
+          "tags": [
+            "feedback"
+          ]
+        },
+        {
+          "id": "artifact_persistence",
+          "instruction": "Manage artifact snapshots, delivery contracts, and rollback points.",
+          "tags": [
+            "persistence"
+          ]
+        },
+        {
+          "id": "session_routing",
+          "instruction": "Route sessions across heterogeneous agent frameworks and model backends.",
+          "tags": [
+            "routing"
+          ]
+        }
+      ],
+      "tool_interfaces": [],
+      "seed_modules": [
+        "context_compiler",
+        "module_strategy"
+      ],
+      "max_active_modules": 2,
+      "max_active_tool_interfaces": 1,
+      "mutation_width": 1,
+      "replay_min_cases": 2,
+      "rubric_validation_sample_size": 2,
+      "loop_role": "outer",
+      "require_rubric_validation": true,
+      "dynamic_rubric_generation": true,
+      "enable_usage_driven_mutation": false,
+      "rubric_provider": "deepseek",
+      "element_mutation_policy": {
+        "removal_min_usage": 5,
+        "removal_min_usage_share": 0.25,
+        "removal_max_accuracy": 0.35,
+        "merge_min_similarity": 0.55
+      }
+    }
+  },
+  "evolution": {
+    "max_generations": 3,
+    "candidates_per_generation": 1,
+    "max_model_calls": 3,
+    "max_evaluator_queries": 3
+  },
+  "reliability": {
+    "pause_on_infrastructure_failure": true
+  },
+  "gates": {
+    "max_files": 5000,
+    "max_total_bytes": 1073741824
+  },
+  "experiment": {
+    "arm": "L4_agent_no_harness_evolve",
+    "ablation_level": "L0"
+  }
+}

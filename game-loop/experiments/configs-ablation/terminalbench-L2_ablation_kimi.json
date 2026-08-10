@@ -9,7 +9,17 @@
     "command": [
       "python3",
       "-m",
-      "game_loop.benchmarks.terminalbench_bridge"
+      "game_loop.benchmarks.terminalbench_bridge",
+      "--task-root",
+      "{task_root}",
+      "--agent-workspace",
+      "{agent_workspace}",
+      "--instruction-file",
+      "{instruction_file}",
+      "--harness-context",
+      "{harness_context}",
+      "--output-manifest",
+      "{output_manifest}"
     ],
     "cwd": ".",
     "timeout_seconds": 1800,

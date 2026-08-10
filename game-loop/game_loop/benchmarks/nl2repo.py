@@ -24,7 +24,7 @@ from .base import BenchmarkAdapter
 class NL2RepoAdapter(BenchmarkAdapter):
     adapter_id = "nl2repo"
     capabilities = {
-        "score_topology": "binary",
+        "score_topology": "continuous",
         "natural_terminal_condition": True,
         "evaluation_coupling": "native_pytest_then_hidden_validation",
         "behavior_evidence": False,
@@ -40,7 +40,8 @@ class NL2RepoAdapter(BenchmarkAdapter):
         ),
     )
     required_command_fields = frozenset({
-        "repo_root", "task_file", "output_manifest",
+        "repo_root", "task_file", "output_manifest", "agent_cwd",
+        "artifact_path", "instruction_file", "official_task_root", "project_name",
     })
 
     def doctor(self) -> dict[str, Any]:
@@ -57,7 +58,9 @@ class NL2RepoAdapter(BenchmarkAdapter):
         value = read_json(path)
         passed = bool(value.get("passed", False))
         total = int(value.get("total", 0))
+        passed_count = int(value.get("passed_count", total if passed else 0))
         failures = int(value.get("failures", 0))
+        score = float(value.get("reward", min(passed_count / total, 1.0) if total else 0.0))
         errors = [str(item) for item in value.get("errors", []) if str(item).strip()]
         infra_markers = (
             "pytest not found",
@@ -65,20 +68,20 @@ class NL2RepoAdapter(BenchmarkAdapter):
             "collection error",
             "timeout",
         )
-        feasible = passed or not any(
+        feasible = not bool(value.get("infrastructure_error", False)) and (passed or not any(
             marker in " ".join(errors).lower() for marker in infra_markers
-        )
+        ))
         return EvaluationResult(
-            primary_score=1.0 if passed else 0.0,
+            primary_score=score,
             feasible=feasible,
-            objectives={"task_correctness": 1.0 if passed else 0.0},
+            objectives={"test_pass_rate": score},
             constraints={
                 "all_tests_passed": passed,
                 "pytest_complete": feasible,
             },
             diagnostics=[] if passed else (errors[:5] or [f"{failures}/{total} tests failed"]),
             evaluator={"name": "NL2RepoBench pytest suite"},
-            terminal_success=passed,
+            terminal_success=score >= 1.0,
             raw_result_ref=str(path.resolve()),
         )
 
@@ -122,14 +125,24 @@ class NL2RepoAdapter(BenchmarkAdapter):
             encoding="utf-8",
         )
         output_manifest = candidate_dir / "nl2repo_execution.json"
+        official_task_root = task_source.resolve() if task_source.is_dir() else task_source.parent.resolve()
+        project_name = official_task_root.name
         return PreparedTask(
             self.adapter_id,
             workspace,
             {
                 "repo_root": str(repo_dir.resolve()),
-                "task_file": str((workspace / "task_file.md").resolve()),
+                # The bridge prompt must include the evolved harness, not only
+                # the original NL2Repo start.md copied above.
+                "task_file": str(start_md.resolve()),
                 "output_manifest": str(output_manifest.resolve()),
                 "candidate_dir": str(candidate_dir.resolve()),
+                "agent_cwd": str(repo_dir.resolve()),
+                "candidate_workspace": str(repo_dir.resolve()),
+                "artifact_path": str(repo_dir.resolve()),
+                "instruction_file": str(start_md.resolve()),
+                "official_task_root": str(official_task_root),
+                "project_name": project_name,
             },
             {
                 "output_manifest": str(output_manifest),

@@ -67,6 +67,7 @@ BENCH_ROOTS = {
     "weavebench": str(ROOT),
     "verigame": str(ROOT),
     "vgamegym": str(ROOT),
+    "taubench": str(ROOT / "third_party" / "tau2-bench"),
 }
 
 BACKEND_CMDS = {
@@ -101,8 +102,17 @@ BACKEND_CMDS = {
         "180",
     ],
     "swebench": ["python3", "-m", "game_loop.benchmarks.swebench_bridge"],
-    "nl2repo": ["python3", "-m", "game_loop.benchmarks.nl2repo_bridge"],
-    "terminalbench": ["python3", "-m", "game_loop.benchmarks.terminalbench_bridge"],
+    "nl2repo": ["python3", "-m", "game_loop.benchmarks.nl2repo_bridge",
+                 "--repo-root", "{repo_root}", "--task-file", "{task_file}",
+                 "--official-task-root", "{official_task_root}",
+                 "--project-name", "{project_name}",
+                 "--output-manifest", "{output_manifest}"],
+    "terminalbench": ["python3", "-m", "game_loop.benchmarks.terminalbench_bridge",
+                       "--task-root", "{task_root}",
+                       "--agent-workspace", "{agent_workspace}",
+                       "--instruction-file", "{instruction_file}",
+                       "--harness-context", "{harness_context}",
+                       "--output-manifest", "{output_manifest}"],
     "weavebench": ["python3", "-m", "game_loop.benchmarks.weavebench_bridge"],
     "verigame": [
         "python3",
@@ -152,6 +162,13 @@ BACKEND_CMDS = {
             ]
         ),
     ],
+    "taubench": [
+        "python3", "-m", "game_loop.benchmarks.taubench_bridge",
+        "--tau-root", str(ROOT / "third_party" / "tau2-bench"),
+        "--domain", "airline",
+        "--harness-context", "{harness_context}",
+        "--output-manifest", "{output_manifest}",
+    ],
 }
 
 TIMEOUTS = {
@@ -163,6 +180,7 @@ TIMEOUTS = {
     "weavebench": 1800,
     "verigame": 600,
     "vgamegym": 600,
+    "taubench": 3600,
 }
 
 ALL_BENCHMARKS = [
@@ -174,6 +192,7 @@ ALL_BENCHMARKS = [
     "weavebench",
     "verigame",
     "vgamegym",
+    "taubench",
 ]
 
 ABLATION_LADDER = {
@@ -320,7 +339,7 @@ def main() -> None:
         write_json(V4_DIR / f"gdbench-L4_{mk}.json", make_config("gdbench", model_key=mk))
         written.append(V4_DIR / f"gdbench-L4_{mk}.json")
 
-    for bench in ["swebench", "nl2repo", "terminalbench", "weavebench"]:
+    for bench in ["swebench", "nl2repo", "terminalbench", "weavebench", "taubench"]:
         for mk in model_keys:
             path = V4_DIR / f"{bench}-L4_{mk}.json"
             write_json(path, make_config(bench, model_key=mk))

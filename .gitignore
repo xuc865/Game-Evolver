@@ -24,6 +24,31 @@ game-loop/.game-loop-ui-runs/
 game-loop/.venvs/
 game-loop/.tools/
 
+# Repository-local benchmark execution state (keep configs, omit live runs).
+game-loop/experiments/runs/
+game-loop/experiments/public-chain*/
+game-loop/experiments/tau-*-run*/
+game-loop/experiments/terminal-harbor-*/
+game-loop/experiments/terminalbench-*/
+game-loop/experiments/vgamegym-full-*/
+game-loop/experiments/docker-cli-config/
+game-loop/experiments/scripts/
+game-loop/.tmp_*/
+
+# Accidental sibling workspace/output directories are not project sources.
+/experiments/
+/game_loop/
+
+# Benchmark checkouts are fetched locally by setup/benchmark commands.
+third_party/harbor/
+third_party/tau2-bench/
+third_party/terminal-bench-2/
+third_party/NL2RepoBench/
+third_party/awesome-gamedev-agent-skills/
+third_party/gamedevbench/
+third_party/GameGen-Verifier/
+third_party/SKYLENAGE-GameCodeGym/
+
 # Large benchmark task archives (fetch via setup scripts)
 third_party/gamedevbench/tasks/
 third_party/gamedevbench/tasks_gt/

@@ -8,8 +8,19 @@
     "{DOCS_DIR}": "/Users/wangxucong/Desktop/workspace/harness-game/third_party/OpenGame/agent-test/docs"
   },
   "permission_mode": "yolo",
+  "exclude_tools": ["todo_write", "task"],
   "max_session_turns": -1,
   "timeout_seconds": 3600,
   "environment": {},
-  "settings": {}
+  "settings": {
+    "model": {
+      "generationConfig": {
+        "reasoning": false,
+        "samplingParams": {
+          "temperature": 0.2,
+          "max_tokens": 32768
+        }
+      }
+    }
+  }
 }

@@ -11,6 +11,7 @@ from .terminalbench import TerminalBenchAdapter
 from .weavebench import WeaveBenchAdapter
 from .verigame import VerigameAdapter
 from .vgamegym import VGameGymAdapter
+from .taubench import TauBenchAdapter
 
 _ADAPTERS: dict[str, type[BenchmarkAdapter]] = {
     "gcbench": GameCraftBenchAdapter,
@@ -21,6 +22,7 @@ _ADAPTERS: dict[str, type[BenchmarkAdapter]] = {
     "weavebench": WeaveBenchAdapter,
     "verigame": VerigameAdapter,
     "vgamegym": VGameGymAdapter,
+    "taubench": TauBenchAdapter,
 }
 
 
@@ -41,5 +43,6 @@ __all__ = [
     "WeaveBenchAdapter",
     "VerigameAdapter",
     "VGameGymAdapter",
+    "TauBenchAdapter",
     "load_adapter",
 ]

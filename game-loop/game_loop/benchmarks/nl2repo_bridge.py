@@ -2,105 +2,133 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
+import re
+import shlex
 import subprocess
-import sys
 from pathlib import Path
+
+from game_loop.runtime import GameTask, OpenGameRuntime
+from .runtime_config import runtime_config_from_environment
+from .sandbox import require_project_sandbox
+
+
+PACKAGE_CONFIG_FILES = (
+    "setup.py", "setup.cfg", "pyproject.toml", "requirements.txt",
+    "requirements-dev.txt", "requirements-test.txt", "requirements_dev.txt",
+    "requirements_test.txt", "tox.ini", "pytest.ini", "poetry.lock",
+    "Pipfile", "Pipfile.lock", "MANIFEST.in", "manifest.in",
+    "environment.yml", "conda-env.yaml",
+)
+
+
+def _load_json(path: Path) -> object:
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Run one NL2RepoBench task from a loop overlay"
-    )
+    parser = argparse.ArgumentParser(description="Evaluate one NL2Repo task officially")
     parser.add_argument("--repo-root", type=Path, required=True)
-    parser.add_argument("--task-file", type=Path, required=True)
+    parser.add_argument("--task-file", type=Path, required=True)  # compatibility/prompt trace
+    parser.add_argument("--official-task-root", type=Path, required=True)
+    parser.add_argument("--project-name", required=True)
     parser.add_argument("--output-manifest", type=Path, required=True)
-    parser.add_argument("--model", required=True)
     parser.add_argument("--timeout", type=int, default=1800)
-    parser.add_argument("--use-openhands", action="store_true",
-                        help="Use OpenHands instead of plain pytest")
+    parser.add_argument("--runtime-config-json")
     args = parser.parse_args(argv)
 
-    repo_root = args.repo_root.resolve()
-    task_file = args.task_file.resolve()
-
-    # Ensure start.md is in repo/ directory
-    start_md = repo_root / "start.md"
-    if not start_md.is_file() and task_file.is_file():
-        start_md.write_text(task_file.read_text(encoding="utf-8"), encoding="utf-8")
-
+    repo_root = require_project_sandbox(args.repo_root, label="repo_root")
+    output_manifest = require_project_sandbox(args.output_manifest, label="output_manifest")
+    task_root = args.official_task_root.resolve()
+    test_commands = [str(x) for x in _load_json(task_root / "test_commands.json")]
+    test_files = [str(x) for x in _load_json(task_root / "test_files.json")]
+    total = int((task_root / "test_case_count.txt").read_text(encoding="utf-8").strip())
     result_dir = repo_root.parent / "nl2repo_results"
     result_dir.mkdir(parents=True, exist_ok=True)
-    result_json = result_dir / "result.json"
+    runtime_config = runtime_config_from_environment(timeout_seconds=args.timeout)
+    if args.runtime_config_json:
+        from game_loop.runtime import OpenGameRuntimeConfig
+        runtime_config = OpenGameRuntimeConfig.from_dict(json.loads(args.runtime_config_json))
+    maker_task = GameTask(
+        task_id=args.project_name,
+        benchmark_id="nl2repo",
+        prompt=args.task_file.resolve().read_text(encoding="utf-8"),
+        task_source_ref=str(args.task_file.resolve()),
+        workspace_seed_ref=str(repo_root),
+        artifact_relpath=".",
+    )
+    maker = OpenGameRuntime(runtime_config)
+    maker_submission = maker.run(maker_task, episode_dir=result_dir / "opengame_episode")
+    artifact = Path(maker_submission.artifact_ref) if maker_submission.artifact_ref else None
+    if maker_submission.status != "completed" or artifact is None:
+        result = {"passed": False, "passed_count": 0, "total": total,
+                  "failures": 0, "errors": maker_submission.diagnostics[:5],
+                  "reward": 0.0, "infrastructure_error": True,
+                  "project_name": args.project_name, "return_code": -1}
+        (result_dir / "result.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+        output_manifest.parent.mkdir(parents=True, exist_ok=True)
+        output_manifest.write_text(json.dumps({**result, "result_dir": str(result_dir)}, indent=2) + "\n",
+                                          encoding="utf-8")
+        return 1
+    repo_root = artifact.resolve()
+    output_file = result_dir / "pytest_output.txt"
+    script_file = result_dir / "official_eval.sh"
 
-    if args.use_openhands:
-        cmd = [
-            "python", "-m", "openhands.runtime",
-            "--repo", str(repo_root),
-            "--task-file", str(start_md),
-            "--model", args.model,
-            "--timeout", str(args.timeout),
-        ]
-    else:
-        cmd = [
-            sys.executable, "-m", "pytest",
-            str(repo_root),
-            "--json-report",
-            f"--json-report-file={result_json}",
-            "-v",
-        ]
-
-    try:
-        proc = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=args.timeout,
-            cwd=str(repo_root),
-        )
-        return_code = proc.returncode
-    except subprocess.TimeoutExpired:
-        return_code = -1
-    except FileNotFoundError:
-        return_code = -2
-
-    # Parse pytest JSON report
-    passed = False
-    total = 0
-    failures = 0
-    errors_list: list[str] = []
-
-    if result_json.is_file():
-        try:
-            report = json.loads(result_json.read_text(encoding="utf-8"))
-            summary = report.get("summary", {})
-            total = int(summary.get("total", 0))
-            failures = int(summary.get("failed", 0))
-            errors_count = int(summary.get("error", 0))
-            passed = total > 0 and failures == 0 and errors_count == 0
-            for test in report.get("tests", []):
-                if test.get("outcome") in ("failed", "error"):
-                    errors_list.append(str(test.get("nodeid", "")))
-        except (json.JSONDecodeError, OSError):
-            pass
-    else:
-        # Fallback: use exit code
-        passed = return_code == 0
-
-    payload = {
-        "passed": passed,
-        "total": total,
-        "failures": failures,
-        "errors": errors_list[:10],
-        "result_dir": str(result_dir),
-        "return_code": return_code,
-    }
-    args.output_manifest.parent.mkdir(parents=True, exist_ok=True)
-    args.output_manifest.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+    remove_configs = " ".join(shlex.quote("/agent_copy/" + item) for item in PACKAGE_CONFIG_FILES)
+    remove_tests = "\n".join(
+        f"rm -rf {shlex.quote('/agent_copy/' + item)}" for item in test_files
+    )
+    commands = "\n".join(
+        f"(cd /workspace_eval && {cmd}) 2>&1 | tee -a /game_loop_result/pytest_output.txt"
+        for cmd in test_commands
+    )
+    script_file.write_text(
+        "#!/usr/bin/env bash\nset -e\n"
+        # Official NL2Repo images keep the private reference project and tests
+        # in /workspace. Build a separate evaluation tree before overlaying the
+        # candidate so the image's private tests are never exposed to OpenGame.
+        "cp -a /workspace /workspace_eval\n"
+        "cp -a /workspace_agent /agent_copy\n"
+        f"rm -f {remove_configs}\n{remove_tests}\n"
+        "cp -a /agent_copy/. /workspace_eval/\n"
+        "export PYTHONPATH=/workspace_eval:${PYTHONPATH:-}\n"
+        "set +e\n"
+        f"{commands}\n",
         encoding="utf-8",
     )
-    return 0 if passed else 1
+    image = f"ghcr.io/multimodal-art-projection/nl2repobench/{args.project_name}:1.0"
+    command = ["docker", "run", "--rm", "-i", "--platform", "linux/amd64",
+               "-v", f"{repo_root}:/workspace_agent:ro",
+               "-v", f"{result_dir}:/game_loop_result", image,
+               "bash", "-s"]
+    error = ""
+    try:
+        proc = subprocess.run(command, input=script_file.read_text(encoding="utf-8"),
+                              capture_output=True, text=True, timeout=args.timeout)
+        return_code = proc.returncode
+        error = proc.stderr[-2000:] if return_code not in (0, 1) else ""
+    except subprocess.TimeoutExpired:
+        return_code, error = -1, "timeout"
+    except FileNotFoundError:
+        return_code, error = -2, "docker not found"
+    text = output_file.read_text(encoding="utf-8", errors="replace") if output_file.is_file() else ""
+    passed_matches = re.findall(r"(\d+) passed", text)
+    failed_matches = re.findall(r"(\d+) failed", text)
+    error_matches = re.findall(r"(\d+) error", text)
+    passed_count = int(passed_matches[-1]) if passed_matches else 0
+    failures = int(failed_matches[-1]) if failed_matches else 0
+    errors = int(error_matches[-1]) if error_matches else 0
+    reward = min(passed_count / total, 1.0) if total else 0.0
+    infrastructure_error = not output_file.is_file() or return_code < 0 or bool(error)
+    result = {"passed": reward >= 1.0 and not infrastructure_error,
+              "passed_count": passed_count, "total": total, "failures": failures,
+              "errors": ([error] if error else []) + ([f"{errors} pytest errors"] if errors else []),
+              "reward": reward, "infrastructure_error": infrastructure_error,
+              "project_name": args.project_name, "return_code": return_code}
+    (result_dir / "result.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+    output_manifest.parent.mkdir(parents=True, exist_ok=True)
+    output_manifest.write_text(json.dumps({**result, "result_dir": str(result_dir)}, indent=2) + "\n",
+                                           encoding="utf-8")
+    return 0 if not infrastructure_error else 1
 
 
 if __name__ == "__main__":

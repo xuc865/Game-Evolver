@@ -42,7 +42,12 @@ def normalize_official_result(raw: dict[str, Any], *, raw_result_ref: Path) -> d
                 f"V-GameGym {modality} score is outside 0-100",
                 raw_result_ref=raw_result_ref,
             )
-        objectives[modality] = score / 100.0
+        # The released evaluator asks four 0-25 questions for every
+        # modality, but the paper reports Code on a 0-100 scale and
+        # Image/Video on a 0-25 scale.  Preserve the raw 0-100 result and
+        # convert only the normalized paper-facing objective here.
+        denominator = 100.0 if modality == "code" else 400.0
+        objectives[modality] = score / denominator
         if error:
             diagnostics.append(f"{modality}: {error}")
     if not run_ok:
@@ -63,7 +68,7 @@ def normalize_official_result(raw: dict[str, Any], *, raw_result_ref: Path) -> d
         "raw_result_ref": str(raw_result_ref.resolve()),
         "evaluator": {
             "name": "V-GameGym code/image/video evaluator contract",
-            "raw_score_scale": "0-100",
+            "raw_score_scale": "0-100 per modality; paper scale is Code 0-100, Screenshot/Video 0-25",
         },
     }
 
@@ -74,6 +79,24 @@ def infrastructure_failure(message: str, *, raw_result_ref: Path | None = None) 
         "status": "infrastructure_failure",
         "primary_score": None,
         "objectives": {},
+        "constraints": {
+            "game_runnable": False,
+            "code_judge_complete": False,
+            "screenshot_judge_complete": False,
+            "video_judge_complete": False,
+        },
+        "diagnostics": [message],
+        "raw_result_ref": None if raw_result_ref is None else str(raw_result_ref.resolve()),
+        "evaluator": {"name": "V-GameGym code/image/video evaluator contract"},
+    }
+
+
+def candidate_execution_failure(message: str, *, raw_result_ref: Path | None = None) -> dict[str, Any]:
+    return {
+        "schema_version": "vgamegym-evaluation-v1",
+        "status": "candidate_execution_failure",
+        "primary_score": 0.0,
+        "objectives": {"code": 0.0, "screenshot": 0.0, "video": 0.0},
         "constraints": {
             "game_runnable": False,
             "code_judge_complete": False,

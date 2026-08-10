@@ -11,7 +11,7 @@ from game_loop.benchmarks.verigame import VerigameAdapter
 from game_loop.benchmarks.verigame_bridge import run_bridge as run_verigame_bridge
 from game_loop.benchmarks.vgamegym import VGameGymAdapter
 from game_loop.benchmarks.vgamegym_bridge import run_bridge as run_vgamegym_bridge
-from game_loop.benchmarks.vgamegym_eval import normalize_official_result
+from game_loop.benchmarks.vgamegym_eval import candidate_execution_failure, normalize_official_result
 from game_loop.core.models import AttemptContext, BackendExecution, PreparedTask
 from game_loop.runtime import (
     GameTask,
@@ -177,8 +177,8 @@ class GameBenchmarkContractTests(unittest.TestCase):
                 raw_result_ref=raw_path,
             )
             self.assertEqual(result["status"], "completed")
-            self.assertAlmostEqual(result["primary_score"], 0.6)
-            self.assertEqual(result["objectives"], {"code": 0.9, "screenshot": 0.6, "video": 0.3})
+            self.assertAlmostEqual(result["primary_score"], (0.9 + 0.15 + 0.075) / 3)
+            self.assertEqual(result["objectives"], {"code": 0.9, "screenshot": 0.15, "video": 0.075})
 
     def test_vgamegym_missing_judge_is_infrastructure_failure(self):
         with tempfile.TemporaryDirectory() as td:
@@ -193,6 +193,16 @@ class GameBenchmarkContractTests(unittest.TestCase):
             )
             self.assertEqual(result["status"], "infrastructure_failure")
             self.assertIsNone(result["primary_score"])
+
+    def test_vgamegym_candidate_execution_failure_is_zero_not_infrastructure(self):
+        with tempfile.TemporaryDirectory() as td:
+            result = candidate_execution_failure(
+                "official recorder exited 2: candidate crashed",
+                raw_result_ref=Path(td) / "raw.json",
+            )
+            self.assertEqual(result["status"], "candidate_execution_failure")
+            self.assertEqual(result["primary_score"], 0.0)
+            self.assertEqual(result["objectives"], {"code": 0.0, "screenshot": 0.0, "video": 0.0})
 
     def test_vgamegym_completed_evaluation_with_unrunnable_game_is_not_infrastructure(self):
         with tempfile.TemporaryDirectory() as td:
@@ -306,7 +316,7 @@ class GameBenchmarkContractTests(unittest.TestCase):
             adapter = VGameGymAdapter({})
             evaluation = adapter.parse_evaluation(Path(payload["evaluation_path"]))
             self.assertTrue(evaluation.feasible)
-            self.assertAlmostEqual(evaluation.primary_score, 0.8)
+            self.assertAlmostEqual(evaluation.primary_score, (0.9 + 0.2 + 0.175) / 3)
 
     def test_verigame_bridge_offline_fake_worker_is_paper_compatible(self):
         with tempfile.TemporaryDirectory() as td:

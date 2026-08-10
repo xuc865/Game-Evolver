@@ -366,14 +366,19 @@
         {
           "id": "skill_godot_headless_playtest",
           "category": "skill",
-          "description": "Run Godot headless playtest and collect runtime diagnostics.",
+          "description": "Replay real gcbench input traces through the Godot game, inspect state progression and runtime logs, then use the evidence to drive edits.",
           "spec": {
-            "probe": "godot-playtest",
-            "frames": 120
+            "probe": "official-gcbench-demo-replay",
+            "requires_input_events": true,
+            "requires_runtime_logs": true,
+            "min_traces": 1
           },
           "tags": [
             "godot",
-            "runtime"
+            "runtime",
+            "interaction",
+            "state_transition",
+            "evidence"
           ]
         },
         {

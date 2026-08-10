@@ -19,12 +19,13 @@ from game_loop.gates import common_gate, merge_gates
 from game_loop.utils import atomic_write_json, read_json
 
 from .base import BenchmarkAdapter
+from .agents.context import write_harness_context
 
 
 class TerminalBenchAdapter(BenchmarkAdapter):
     adapter_id = "terminalbench"
     capabilities = {
-        "score_topology": "binary",
+        "score_topology": "continuous",
         "natural_terminal_condition": True,
         "evaluation_coupling": "native_container_eval_then_hidden_check",
         "behavior_evidence": False,
@@ -39,7 +40,9 @@ class TerminalBenchAdapter(BenchmarkAdapter):
         ),
     )
     required_command_fields = frozenset({
-        "task_root", "container_image", "output_manifest",
+        "task_root", "agent_workspace", "container_image", "output_manifest", "agent_cwd",
+        "artifact_path", "instruction_file",
+        "harness_context",
     })
 
     def doctor(self) -> dict[str, Any]:
@@ -50,11 +53,17 @@ class TerminalBenchAdapter(BenchmarkAdapter):
             "root": str(root),
             "root_exists": root.is_dir(),
             "tb_available": shutil.which("tb") is not None,
+            "harbor_project_available": (
+                (Path(__file__).resolve().parents[2] / "third_party" / "harbor").is_dir()
+            ),
+            "public_dataset": str(self.options.get("dataset", "terminal-bench@2.0")),
         }
 
     def parse_evaluation(self, path: Path) -> EvaluationResult:
         value = read_json(path)
         passed = bool(value.get("passed", False))
+        reward_value = value.get("reward")
+        reward = (1.0 if passed else 0.0) if reward_value is None else float(reward_value)
         task_id = str(value.get("task_id", ""))
         errors = [str(item) for item in value.get("errors", []) if str(item).strip()]
         infra_markers = (
@@ -63,13 +72,13 @@ class TerminalBenchAdapter(BenchmarkAdapter):
             "timeout",
             "tb not found",
         )
-        feasible = passed or not any(
+        feasible = not bool(value.get("infrastructure_error", False)) and (passed or not any(
             marker in " ".join(errors).lower() for marker in infra_markers
-        )
+        ))
         return EvaluationResult(
-            primary_score=1.0 if passed else 0.0,
+            primary_score=reward,
             feasible=feasible,
-            objectives={"task_correctness": 1.0 if passed else 0.0},
+            objectives={"task_correctness": reward},
             constraints={
                 "task_passed": passed,
                 "container_eval_complete": feasible,
@@ -92,39 +101,42 @@ class TerminalBenchAdapter(BenchmarkAdapter):
         del context
         overlay = candidate_dir / "task_overlay"
         workspace = overlay / "workspace"
-        task_dir = workspace / "task"
+        task_dir = candidate_dir / "private_task"
         task_dir.mkdir(parents=True, exist_ok=True)
         if task_source.is_dir():
             shutil.copytree(task_source, task_dir, dirs_exist_ok=True)
-        self.stage_artifact(parent_artifact, workspace / "candidate")
+        workspace.mkdir(parents=True, exist_ok=True)
+        self.stage_artifact(parent_artifact, workspace)
         harness = feedback.get("agent_harness")
         rendered = (
             str(harness.get("rendered_instruction", "")).strip()
             if isinstance(harness, dict)
             else ""
         )
-        # Inject evolution directive into terminus.txt
-        terminus_path = task_dir / "terminus.txt"
-        original_terminus = ""
-        if terminus_path.is_file():
-            original_terminus = terminus_path.read_text(encoding="utf-8")
-        directive = (
-            "\n\n# Evolution Directive\n\n"
-            "Complete the terminal task following the instructions above. "
-            "Do not modify benchmark infrastructure or hidden test scripts.\n"
-            + (f"\n{rendered}\n" if rendered else "")
+        instruction_file = workspace / "instruction.md"
+        public_instruction = (task_source / "instruction.md").read_text(encoding="utf-8")
+        instruction_file.write_text(
+            public_instruction + "\n\n# Evolution Directive\n\n"
+            "Complete the terminal task and verify the result. Do not access hidden evaluator files.\n"
+            + (f"\n{rendered}\n" if rendered else ""), encoding="utf-8"
         )
-        terminus_path.write_text(original_terminus + directive, encoding="utf-8")
         output_manifest = candidate_dir / "terminalbench_execution.json"
+        harness_context = write_harness_context(feedback, candidate_dir / "harness_context.md")
         container_image = str(self.options.get("container_image", ""))
         return PreparedTask(
             self.adapter_id,
             workspace,
             {
                 "task_root": str(task_dir.resolve()),
+                "agent_workspace": str(workspace.resolve()),
                 "container_image": container_image,
                 "output_manifest": str(output_manifest.resolve()),
                 "candidate_dir": str(candidate_dir.resolve()),
+                "candidate_workspace": str(workspace.resolve()),
+                "agent_cwd": str(workspace.resolve()),
+                "artifact_path": str(workspace.resolve()),
+                "instruction_file": str(instruction_file.resolve()),
+                "harness_context": str(harness_context),
             },
             {
                 "output_manifest": str(output_manifest),

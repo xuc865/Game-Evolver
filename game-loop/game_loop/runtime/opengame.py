@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import shutil
 import subprocess
 from dataclasses import asdict, dataclass, field
@@ -159,29 +160,44 @@ class TypeScriptSDKRunner:
         log_path = isolation.root / "sdk_bridge.log"
         atomic_write_json(request_path, request)
         with log_path.open("wb") as log:
+            process = subprocess.Popen(
+                [
+                    self.node_executable,
+                    str(self.bridge_path),
+                    str(request_path),
+                    str(raw_events),
+                    str(result_path),
+                ],
+                cwd=isolation.workspace,
+                env=dict(environment),
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
             try:
-                completed = subprocess.run(
-                    [
-                        self.node_executable,
-                        str(self.bridge_path),
-                        str(request_path),
-                        str(raw_events),
-                        str(result_path),
-                    ],
-                    cwd=isolation.workspace,
-                    env=dict(environment),
-                    stdout=log,
-                    stderr=subprocess.STDOUT,
-                    timeout=timeout_seconds,
-                    check=False,
-                )
+                return_code = process.wait(timeout=timeout_seconds)
             except subprocess.TimeoutExpired:
+                # The bridge can spawn the OpenGame CLI.  Killing only the
+                # bridge leaves that CLI orphaned and allows it to keep using
+                # the model endpoint after this task has timed out.
+                try:
+                    os.killpg(process.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                try:
+                    process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    process.wait(timeout=10)
                 return RunnerResult(-9, error=f"OpenGame SDK timed out after {timeout_seconds}s")
         events = tuple(_read_json_lines(raw_events))
         result = read_json(result_path) if result_path.is_file() else {}
         final = result.get("final_result") or {}
         return RunnerResult(
-            return_code=completed.returncode,
+            return_code=return_code,
             events=events,
             result_text=str(final.get("result", "")),
             usage=dict(final.get("usage", {})),
@@ -289,6 +305,7 @@ class OpenGameRuntime:
             "XDG_DATA_HOME": str(isolation.data_home),
         })
         provider_model = None
+        resolved_provider = None
         if self.config.backbone_provider is not None:
             resolved_provider = load_provider(self.config.backbone_provider).resolve(environment)
             environment = resolved_provider.inject(environment)
@@ -297,27 +314,57 @@ class OpenGameRuntime:
         atomic_write_json(isolation.root / "sdk_request.json", request)
         if system_prompt is not None:
             environment["QWEN_SYSTEM_MD"] = "1"
+        route = "primary"
         result = self.runner.run(
             request,
             isolation=isolation,
             environment=environment,
             timeout_seconds=self.config.timeout_seconds,
         )
+        artifact = _workspace_artifact(isolation.workspace, task.artifact_relpath)
+        primary_failed = (
+            result.return_code != 0
+            or bool(result.error)
+            or _looks_like_provider_error(result.result_text)
+            or not _artifact_exists(artifact)
+        )
+        if primary_failed and resolved_provider is not None:
+            fallback_environment = resolved_provider.fallback_inject(environment)
+            if fallback_environment is not None:
+                route = "fallback"
+                fallback_request = self._request(
+                    task,
+                    isolation,
+                    provider_model=resolved_provider.fallback_model,
+                )
+                atomic_write_json(isolation.root / "sdk_fallback_request.json", fallback_request)
+                trajectory.record("provider_fallback_started", "harness", {
+                    "primary_provider": resolved_provider.provider_id,
+                    "primary_base_url": resolved_provider.base_url,
+                    "fallback_base_url": resolved_provider.fallback_base_url,
+                    "fallback_model": resolved_provider.fallback_model,
+                })
+                result = self.runner.run(
+                    fallback_request,
+                    isolation=isolation,
+                    environment=fallback_environment,
+                    timeout_seconds=self.config.timeout_seconds,
+                )
+                artifact = _workspace_artifact(isolation.workspace, task.artifact_relpath)
         for raw in result.events:
             trajectory.record("sdk_message", "opengame", dict(raw))
 
-        artifact = _workspace_artifact(isolation.workspace, task.artifact_relpath)
         diagnostics: list[str] = []
         if result.error:
             diagnostics.append(result.error)
         provider_error = _looks_like_provider_error(result.result_text)
         if provider_error:
             diagnostics.append(result.result_text)
-        if not artifact.exists():
+        if not _artifact_exists(artifact):
             diagnostics.append(f"expected artifact is missing: {task.artifact_relpath}")
         status = (
             "completed"
-            if result.return_code == 0 and artifact.exists() and not provider_error
+            if result.return_code == 0 and _artifact_exists(artifact) and not provider_error
             else "failed"
         )
         trajectory.record("runtime_finished", "harness", {
@@ -338,6 +385,7 @@ class OpenGameRuntime:
                 "episode_root": str(isolation.root),
                 "runtime_config_hash": sha256_json(self.config.to_dict()),
                 "return_code": result.return_code,
+                "provider_route": route,
             },
         )
         atomic_write_json(isolation.root / "submission.json", submission.to_dict())
@@ -400,6 +448,20 @@ def _workspace_artifact(workspace: Path, relative: str) -> Path:
     except ValueError as exc:
         raise ValueError("artifact path escaped the episode workspace") from exc
     return artifact
+
+
+def _artifact_exists(artifact: Path) -> bool:
+    if artifact.is_file():
+        return True
+    if not artifact.is_dir():
+        return False
+    # A directory artifact is meaningful only after the agent has produced a
+    # real workspace file. EpisodeIsolation always creates .qwen metadata,
+    # which must not suppress provider fallback or mark an empty run complete.
+    return any(
+        path.is_file() and ".qwen" not in path.relative_to(artifact).parts
+        for path in artifact.rglob("*")
+    )
 
 
 def _looks_like_provider_error(text: str) -> bool:
