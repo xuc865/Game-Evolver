@@ -35,6 +35,14 @@ def build_verifier_env(*, gcbench_root: Path, project_root: Path | None = None) 
         env["PATH"] = str(Path(godot).parent) + os.pathsep + env.get("PATH", "")
 
     env.setdefault("GAMECRAFT_BENCH_JUDGE", "openai")
+    # The judge is a separate service from the backbone. Keep an explicit
+    # judge route from being replaced by inherited backbone OPENAI_* values.
+    if env.get("GAMECRAFT_BENCH_JUDGE_ALLOW_KEYLESS") == "1":
+        env.setdefault("GAMECRAFT_BENCH_JUDGE_OPENAI_API_KEY", "EMPTY")
+    if env.get("GAMECRAFT_BENCH_JUDGE_OPENAI_API_KEY"):
+        env["OPENAI_API_KEY"] = env["GAMECRAFT_BENCH_JUDGE_OPENAI_API_KEY"]
+    if env.get("GAMECRAFT_BENCH_JUDGE_OPENAI_BASE_URL"):
+        env["OPENAI_BASE_URL"] = env["GAMECRAFT_BENCH_JUDGE_OPENAI_BASE_URL"]
     if env.get("DEEPSEEK_API_KEY") and not env.get("OPENAI_API_KEY"):
         env["OPENAI_API_KEY"] = env["DEEPSEEK_API_KEY"]
     if env.get("DEEPSEEK_API_BASE") and not env.get("OPENAI_BASE_URL"):

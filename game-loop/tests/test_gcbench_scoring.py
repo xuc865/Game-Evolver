@@ -112,6 +112,21 @@ class GameCraftBenchScoringTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0)
         self.assertIn("key=good-model-key", completed.stdout)
 
+    def test_export_judge_env_allows_explicit_keyless_judge(self) -> None:
+        script = ROOT / "scripts/gcbench_e2e/export_judge_env.sh"
+        completed = subprocess.run(
+            ["bash", "-c", f"source '{script}'; printf '%s %s\\n' \"$OPENAI_API_KEY\" \"$OPENAI_BASE_URL\""],
+            capture_output=True,
+            text=True,
+            env={
+                "PATH": "/usr/bin:/bin",
+                "GAMECRAFT_BENCH_JUDGE_ALLOW_KEYLESS": "1",
+                "GAMECRAFT_BENCH_JUDGE_OPENAI_BASE_URL": "http://judge.local/v1",
+            },
+        )
+        self.assertEqual(completed.returncode, 0)
+        self.assertIn("EMPTY http://judge.local/v1", completed.stdout)
+
     def test_run_local_verifier_uses_isolated_home_for_godot(self) -> None:
         source = (ROOT / "scripts" / "gcbench_e2e" / "run_local_verifier.sh").read_text(
             encoding="utf-8"

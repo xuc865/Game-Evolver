@@ -51,6 +51,8 @@ def main(argv: list[str] | None = None) -> int:
     env["UV_CACHE_DIR"] = str(output_manifest.parent / "tau_uv_cache")
     if env.get("CODEX_API_BASE"):
         env["OPENAI_BASE_URL"] = env["CODEX_API_BASE"]
+    # LiteLLM requires the field to be present for keyless internal endpoints.
+    env.setdefault("OPENAI_API_KEY", "EMPTY")
     if env.get("CODEX_MODEL"):
         model = env["CODEX_MODEL"]
         if "/" not in model:

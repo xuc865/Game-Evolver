@@ -81,6 +81,9 @@ def _run_harbor(*, task_root: Path, output_manifest: Path, harness_context: Path
         env["DOCKER_CONFIG"] = str(local_docker_config)
     if env.get("CODEX_API_BASE"):
         env["OPENAI_BASE_URL"] = env["CODEX_API_BASE"]
+    # LiteLLM validates that an API-key field exists even for the internal
+    # OpenAI-compatible deployments that intentionally do not require one.
+    env.setdefault("OPENAI_API_KEY", "EMPTY")
     if env.get("CODEX_PROVIDER", env.get("GAME_LOOP_BACKBONE_PROVIDER")) == "claude":
         claude_key = env.get("ANTHROPIC_AUTH_TOKEN") or env.get("ANTHROPIC_API_KEY")
         if claude_key:
