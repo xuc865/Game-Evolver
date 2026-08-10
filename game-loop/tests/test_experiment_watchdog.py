@@ -47,7 +47,7 @@ def test_watchdog_tick_writes_status(tmp_path: Path):
     assert report["health_before"]["experiment_active"] is False
 
 
-def test_probe_prefers_business_supervisor_pid_and_keeps_launcher_state(tmp_path: Path):
+def test_probe_rejects_pid_that_does_not_belong_to_run(tmp_path: Path):
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     (run_dir / ".supervisor.pid").write_text(
@@ -59,13 +59,13 @@ def test_probe_prefers_business_supervisor_pid_and_keeps_launcher_state(tmp_path
     health = probe_experiment_health(run_dir)
 
     assert health.supervisor_pid == os.getpid()
-    assert health.supervisor_alive is True
+    assert health.supervisor_alive is False
     assert health.launcher_pid == 99999999
     assert health.launcher_alive is False
-    assert health.orchestrator_active is True
+    assert health.orchestrator_active is False
 
 
-def test_probe_uses_current_heartbeat_pid(tmp_path: Path):
+def test_probe_rejects_heartbeat_pid_without_current_run_command(tmp_path: Path):
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     (run_dir / ".supervisor.pid").write_text(
@@ -80,10 +80,10 @@ def test_probe_uses_current_heartbeat_pid(tmp_path: Path):
     health = probe_experiment_health(run_dir)
 
     assert health.supervisor_pid == os.getpid()
-    assert health.supervisor_alive is True
+    assert health.supervisor_alive is False
 
 
-def test_permission_denied_pid_probe_is_not_treated_as_dead(tmp_path: Path):
+def test_permission_denied_pid_probe_is_not_enough_for_run_ownership(tmp_path: Path):
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     (run_dir / ".supervisor.pid").write_text(
@@ -93,4 +93,4 @@ def test_permission_denied_pid_probe_is_not_treated_as_dead(tmp_path: Path):
     with patch("game_loop.experiment_watchdog.os.kill", side_effect=PermissionError):
         health = probe_experiment_health(run_dir)
 
-    assert health.supervisor_alive is True
+    assert health.supervisor_alive is False

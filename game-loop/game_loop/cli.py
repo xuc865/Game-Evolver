@@ -551,6 +551,17 @@ def run_harness_self_evolution(
         rubric_validation,
     )
     if rubric_validation.get("infrastructure_ok") is not True:
+        # Keep the failed attempt auditable, but make its retry state explicit
+        # so monitoring and resume logic never mistake it for a quality result.
+        atomic_write_json(
+            outer_dir / f"harness_rubric_validation_{epoch:03d}.retry.json",
+            {
+                "epoch": epoch,
+                "status": "retryable_infrastructure_failure",
+                "validation": rubric_validation,
+                "created_at": utc_now(),
+            },
+        )
         raise RuntimeError(
             f"epoch {epoch} rubric judge infrastructure failed; retrying without promotion"
         )

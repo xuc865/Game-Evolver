@@ -99,6 +99,14 @@ def _pgrep(pattern: str) -> list[int]:
     return pids
 
 
+def _process_belongs_to_run(pid: int | None, run_dir: Path, *markers: str) -> bool:
+    """Require a live PID to actually be the current run's process."""
+    if pid is None or not _pid_alive(pid):
+        return False
+    command = " ".join(_proc_args(pid))
+    return str(run_dir) in command and all(marker in command for marker in markers)
+
+
 @dataclass(frozen=True)
 class ExperimentHealth:
     supervisor_pid: int | None
@@ -171,9 +179,13 @@ def probe_experiment_health(run_dir: Path) -> ExperimentHealth:
     )
     return ExperimentHealth(
         supervisor_pid=supervisor_pid,
-        supervisor_alive=supervisor_pid is not None and _pid_alive(supervisor_pid),
+        supervisor_alive=_process_belongs_to_run(
+            supervisor_pid, run_dir, "game_loop.cli", "harness-self-supervise"
+        ),
         launcher_pid=launcher_pid,
-        launcher_alive=launcher_pid is not None and _pid_alive(launcher_pid),
+        launcher_alive=_process_belongs_to_run(
+            launcher_pid, run_dir, "start_supervisor.sh"
+        ),
         harness_supervise_pids=harness_supervise,
         worker_pids=worker_pids,
         heartbeat_age_seconds=heartbeat_age,

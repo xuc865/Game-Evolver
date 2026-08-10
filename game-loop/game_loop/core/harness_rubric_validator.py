@@ -668,11 +668,17 @@ class LLMRubricJudge:
                 {"role": "user", "content": prompt},
             ],
             "temperature": 0.0,
-            "max_tokens": 1800,
+            # The rubric prompt contains runtime/process evidence. Keep enough
+            # output budget for providers that otherwise spend the budget on
+            # hidden reasoning before emitting the small JSON object.
+            "max_tokens": 4000,
             "response_format": {"type": "json_object"},
         }
-        if "qwen" in resolved.model.casefold() or "glm" in resolved.model.casefold():
-            payload["chat_template_kwargs"] = {"enable_thinking": False}
+        # Rubric judging must produce a machine-checkable answer. Disable
+        # provider-side thinking for all known OpenAI-compatible deployments;
+        # the evidence and rubric comparison remain fully explicit in the
+        # prompt and the response is still schema-validated below.
+        payload["chat_template_kwargs"] = {"enable_thinking": False}
         errors: list[str] = []
         parsed: dict[str, Any] | None = None
         attempts = 3
@@ -690,13 +696,31 @@ class LLMRubricJudge:
                 with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
                     value = json.loads(response.read().decode("utf-8"))
                 message = value["choices"][0]["message"]
-                content = message.get("content") or message.get("reasoning_content") or ""
-                parsed = extract_json_object(content)
-                _validate_rubric_payload(
-                    parsed,
-                    hard_rubrics=hard_rubrics,
-                    soft_rubrics=soft_rubrics,
-                )
+                parsed = None
+                parse_errors: list[str] = []
+                # Some OpenAI-compatible deployments put malformed tokenized
+                # text in content while retaining valid JSON in reasoning.
+                for field_name in ("content", "reasoning_content", "reasoning"):
+                    content = message.get(field_name)
+                    if not isinstance(content, str) or not content.strip():
+                        continue
+                    try:
+                        candidate = extract_json_object(content)
+                        _validate_rubric_payload(
+                            candidate,
+                            hard_rubrics=hard_rubrics,
+                            soft_rubrics=soft_rubrics,
+                        )
+                    except (ValueError, TypeError, KeyError) as exc:
+                        parse_errors.append(f"{field_name}: {type(exc).__name__}: {exc}")
+                        continue
+                    parsed = candidate
+                    break
+                if parsed is None:
+                    raise ValueError(
+                        "no valid rubric JSON object found in response fields"
+                        + (f" ({'; '.join(parse_errors)})" if parse_errors else "")
+                    )
                 break
             except urllib.error.HTTPError as exc:
                 parsed = None
