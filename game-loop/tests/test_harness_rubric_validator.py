@@ -387,6 +387,35 @@ class HarnessRubricValidatorTests(unittest.TestCase):
         self.assertEqual(len(comparison.reasons), 1)
         self.assertIn("infrastructure failure", comparison.reasons[0])
 
+    def test_missing_or_infrastructure_case_marks_validation_as_infrastructure(self):
+        validator = HarnessRubricValidator(
+            HarnessEvolutionConfig(
+                modules=(),
+                require_rubric_validation=True,
+                rubric_validation_sample_size=1,
+            ),
+            judge=unittest.mock.Mock(),
+        )
+        parent = HarnessEpisodeOutcome(
+            "case-1", "parent", None, False, 0, 0,
+            infrastructure_ok=False,
+            run_ref="",
+        )
+        candidate = HarnessEpisodeOutcome(
+            "case-1", "candidate", None, False, 0, 0,
+            infrastructure_ok=False,
+            run_ref="",
+        )
+
+        result = validator.validate_paired_outcomes(
+            parent_outcomes=[parent],
+            candidate_outcomes=[candidate],
+        )
+
+        self.assertFalse(result.accepted)
+        self.assertFalse(result.infrastructure_ok)
+        self.assertIn("missing run_ref", " ".join(result.reasons))
+
     @patch("game_loop.core.harness_rubric_validator.collect_deep_playtest_evidence")
     def test_validator_integrated_with_assess_epoch(self, collect_mock):
         def side_effect(*, case_id, run_dir):

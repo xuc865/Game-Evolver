@@ -1022,9 +1022,11 @@ class HarnessRubricValidator:
             candidate_outcome = candidates[case_id]
             if not parent_outcome.run_ref or not candidate_outcome.run_ref:
                 reasons.append(f"{case_id}: missing run_ref for deep rubric validation")
+                infrastructure_ok = False
                 continue
             if not parent_outcome.infrastructure_ok or not candidate_outcome.infrastructure_ok:
                 reasons.append(f"{case_id}: infrastructure failure excludes rubric evidence")
+                infrastructure_ok = False
                 continue
             parent_evidence = collect_deep_playtest_evidence(
                 case_id=case_id,
@@ -1076,6 +1078,7 @@ class HarnessRubricValidator:
                 infrastructure_ok = False
 
         if len(case_results) < self.config.rubric_validation_sample_size:
+            infrastructure_ok = False
             reasons.append(
                 "usable rubric validation cases "
                 f"{len(case_results)} < required {self.config.rubric_validation_sample_size}"
