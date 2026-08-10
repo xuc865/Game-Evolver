@@ -820,6 +820,18 @@ def _run_harness_admission_case(
             f"{archived.name}; replaying"
         )
 
+    def infrastructure_failure_outcome() -> HarnessEpisodeOutcome:
+        return HarnessEpisodeOutcome(
+            case_id=case_id,
+            harness_id=harness.harness_id,
+            final_score=None,
+            feasible=False,
+            model_calls=0,
+            evaluator_queries=0,
+            infrastructure_ok=False,
+            run_ref=str(case_dir.resolve()),
+        )
+
     if case_dir.exists() and any(case_dir.iterdir()):
         state_path = case_dir / "state.json"
         manifest_path = case_dir / "manifest.json"
@@ -875,8 +887,18 @@ def _run_harness_admission_case(
                             )
                         except OSError:
                             _maybe_clear_stale_run_lock(case_dir)
+                if not manifest_path.is_file():
+                    archive_incomplete_case_dir()
+                    return infrastructure_failure_outcome()
                 evolve_args = argparse.Namespace(run_dir=case_dir, config=source_config.resolve())
-                cmd_evolve(evolve_args)
+                try:
+                    evolve_rc = cmd_evolve(evolve_args)
+                except (FileNotFoundError, FileExistsError, ValueError):
+                    if case_dir.exists() and any(case_dir.iterdir()):
+                        archive_incomplete_case_dir()
+                    return infrastructure_failure_outcome()
+                if evolve_rc not in (None, 0):
+                    return infrastructure_failure_outcome()
                 return load_episode_outcome(
                     case_id=case_id,
                     harness_id=harness.harness_id,
@@ -904,20 +926,16 @@ def _run_harness_admission_case(
         cold_start=False,
         harness_profile=profile_staging,
     )
-    init_rc = cmd_init(init_args)
+    try:
+        init_rc = cmd_init(init_args)
+    except (FileNotFoundError, FileExistsError, ValueError):
+        if case_dir.exists() and any(case_dir.iterdir()):
+            archive_incomplete_case_dir()
+        return infrastructure_failure_outcome()
     if init_rc not in (None, 0) or not (case_dir / "manifest.json").is_file():
         if case_dir.exists() and any(case_dir.iterdir()):
             archive_incomplete_case_dir()
-        return HarnessEpisodeOutcome(
-            case_id=case_id,
-            harness_id=harness.harness_id,
-            final_score=None,
-            feasible=False,
-            model_calls=0,
-            evaluator_queries=0,
-            infrastructure_ok=False,
-            run_ref=str(case_dir.resolve()),
-        )
+        return infrastructure_failure_outcome()
     atomic_write_json(case_dir / "harness_profile.json", harness.to_dict())
     shutil.copy2(config_path, case_dir / "config.snapshot.json")
 
@@ -926,18 +944,14 @@ def _run_harness_admission_case(
         run_dir=case_dir,
         config=config_path,
     )
-    evolve_rc = cmd_evolve(evolve_args)
+    try:
+        evolve_rc = cmd_evolve(evolve_args)
+    except (FileNotFoundError, FileExistsError, ValueError):
+        if case_dir.exists() and any(case_dir.iterdir()):
+            archive_incomplete_case_dir()
+        return infrastructure_failure_outcome()
     if evolve_rc not in (None, 0):
-        return HarnessEpisodeOutcome(
-            case_id=case_id,
-            harness_id=harness.harness_id,
-            final_score=None,
-            feasible=False,
-            model_calls=0,
-            evaluator_queries=0,
-            infrastructure_ok=False,
-            run_ref=str(case_dir.resolve()),
-        )
+        return infrastructure_failure_outcome()
 
     # ── load outcome ──
     return load_episode_outcome(

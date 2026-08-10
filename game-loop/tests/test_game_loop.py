@@ -2585,6 +2585,42 @@ class GameLoopTests(unittest.TestCase):
             self.assertFalse(outcome.infrastructure_ok)
             self.assertTrue((case_dir.parent / "parent.incomplete-retry-1").is_dir())
 
+    def test_admission_case_archives_init_file_exists_failure(self):
+        from game_loop.cli import _run_harness_admission_case
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config = write_config(root, candidates=1, level="L4", max_probe_calls=2)
+            source_config = root / "config.json"
+            engine = HarnessEvolutionEngine(root / "outer", config.method.harness_evolution)
+            harness = engine.initialize()
+            case_dir = root / "case" / "parent"
+            case_dir.mkdir(parents=True)
+            (case_dir / "state.json").write_text(json.dumps({"status": "running"}))
+            task = root / "task"; task.mkdir()
+            seed = root / "seed"; seed.mkdir()
+
+            with patch("game_loop.cli.cmd_init", side_effect=FileExistsError("not empty")), \
+                    patch("game_loop.cli.cmd_evolve") as evolve:
+                outcome = _run_harness_admission_case(
+                    case_id="case-1",
+                    case_dir=case_dir,
+                    harness=harness,
+                    runner=Mock(),
+                    outer_dir=root / "outer",
+                    config=config,
+                    source_config=source_config,
+                    task_source=task,
+                    seed_artifact=seed,
+                    seed_score=0.0,
+                    epoch=1,
+                    run_id_prefix="t",
+                )
+
+            evolve.assert_not_called()
+            self.assertFalse(outcome.infrastructure_ok)
+            self.assertTrue((case_dir.parent / "parent.incomplete-retry-1").is_dir())
+
 
 if __name__ == "__main__":
     unittest.main()
