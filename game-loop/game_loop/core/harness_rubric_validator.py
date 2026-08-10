@@ -674,11 +674,15 @@ class LLMRubricJudge:
             "max_tokens": 4000,
             "response_format": {"type": "json_object"},
         }
-        # Rubric judging must produce a machine-checkable answer. Disable
-        # provider-side thinking for all known OpenAI-compatible deployments;
-        # the evidence and rubric comparison remain fully explicit in the
-        # prompt and the response is still schema-validated below.
-        payload["chat_template_kwargs"] = {"enable_thinking": False}
+        # Kimi/GLM/Qwen need provider-specific thinking suppression for
+        # reliable JSON. DeepSeek's endpoint already honors response_format;
+        # sending chat_template_kwargs there can move the answer into
+        # reasoning_content on long evidence prompts.
+        if any(
+            provider_name in resolved.model.casefold()
+            for provider_name in ("qwen", "glm", "kimi")
+        ):
+            payload["chat_template_kwargs"] = {"enable_thinking": False}
         errors: list[str] = []
         parsed: dict[str, Any] | None = None
         attempts = 3
