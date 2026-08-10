@@ -14,6 +14,7 @@ from game_loop.core.harness_rubric_validator import (
     HarnessRubricValidator,
     collect_deep_playtest_evidence,
     compare_rubric_pair,
+    extract_json_object,
     sample_task_pool,
     TaskPoolEntry,
     LLMRubricJudge,
@@ -81,6 +82,15 @@ class HarnessRubricValidatorTests(unittest.TestCase):
         self.assertEqual(scores.hard["launches_without_crash"], 1.0)
         self.assertEqual(scores.soft["gameplay_responsiveness"], 0.75)
         self.assertEqual(urlopen_mock.call_count, 3)
+
+    def test_extract_json_object_skips_malformed_prefix_object(self):
+        payload = extract_json_object(
+            'draft: {"hard": {"launches_without_crash": 1} '
+            'final: {"hard": {"launches_without_crash": 1}, '
+            '"soft": {"gameplay_responsiveness": 0.8}}'
+        )
+        self.assertEqual(payload["hard"]["launches_without_crash"], 1)
+        self.assertEqual(payload["soft"]["gameplay_responsiveness"], 0.8)
 
     def test_hard_and_soft_pair_comparison_enforces_monotonicity(self):
         parent = _score_artifact(passed=True)

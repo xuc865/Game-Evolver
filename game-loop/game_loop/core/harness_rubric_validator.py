@@ -453,6 +453,7 @@ class LLMRubricJudge:
             ],
             "temperature": 0.0,
             "max_tokens": 1800,
+            "response_format": {"type": "json_object"},
         }
         if "qwen" in resolved.model.casefold() or "glm" in resolved.model.casefold():
             payload["chat_template_kwargs"] = {"enable_thinking": False}
@@ -746,7 +747,19 @@ class HarnessRubricValidator:
 
 
 def extract_json_object(text: str) -> dict[str, Any]:
-    match = re.search(r"\{.*\}", text, flags=re.DOTALL)
-    if not match:
-        raise ValueError("no JSON object found")
-    return json.loads(match.group(0))
+    decoder = json.JSONDecoder()
+    first_object: dict[str, Any] | None = None
+    starts = [match.start() for match in re.finditer(r"\{", text)]
+    for start in starts:
+        try:
+            value, _end = decoder.raw_decode(text[start:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            if first_object is None:
+                first_object = value
+            if "hard" in value or "soft" in value:
+                return value
+    if first_object is not None:
+        return first_object
+    raise ValueError("no JSON object found")
