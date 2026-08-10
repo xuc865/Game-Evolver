@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import random
 import re
 import subprocess
@@ -42,6 +43,7 @@ class DeepPlaytestEvidence:
     task_source: str
     probes: tuple[dict[str, Any], ...]
     file_inventory: tuple[str, ...]
+    process_evidence: dict[str, Any] = field(default_factory=dict)
     instruction_excerpt: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -53,6 +55,7 @@ class DeepPlaytestEvidence:
             "task_source": self.task_source,
             "probes": list(self.probes),
             "file_inventory": list(self.file_inventory[:40]),
+            "process_evidence": self.process_evidence,
             "instruction_excerpt": self.instruction_excerpt,
         }
 
@@ -154,14 +157,23 @@ def sample_task_pool(
     sample_size: int,
     seed: int,
     prefix: str,
+    anchor_index: int | None = None,
 ) -> tuple[HarnessReplayCase, ...]:
     if sample_size < 1:
         raise ValueError("sample_size must be >= 1")
     rng = random.Random(seed)
-    if len(pool) >= sample_size:
-        picked = rng.sample(list(pool), sample_size)
+    values = list(pool)
+    if anchor_index is not None:
+        anchor = values[anchor_index % len(values)]
+        remainder = [item for index, item in enumerate(values) if index != anchor_index % len(values)]
+        if len(values) >= sample_size:
+            picked = [anchor, *rng.sample(remainder, sample_size - 1)]
+        else:
+            picked = [anchor, *(rng.choice(values) for _ in range(sample_size - 1))]
+    elif len(pool) >= sample_size:
+        picked = rng.sample(values, sample_size)
     else:
-        picked = [rng.choice(list(pool)) for _ in range(sample_size)]
+        picked = [rng.choice(values) for _ in range(sample_size)]
     return tuple(
         entry.to_replay_case(f"{prefix}-{index + 1:02d}")
         for index, entry in enumerate(picked)
@@ -177,6 +189,7 @@ def resolve_episode_artifact(run_dir: Path) -> Path | None:
             candidate = run_dir / "artifacts" / champion_id / "artifact"
             if candidate.is_dir():
                 return candidate
+        return None
     artifacts_root = run_dir / "artifacts"
     if artifacts_root.is_dir():
         for child in sorted(artifacts_root.iterdir(), reverse=True):
@@ -188,6 +201,35 @@ def resolve_episode_artifact(run_dir: Path) -> Path | None:
         if candidate.is_dir():
             return candidate
     return None
+
+
+def resolve_episode_attempt_dir(run_dir: Path) -> Path:
+    """Resolve the attempt that produced the episode champion."""
+
+    run_dir = run_dir.resolve()
+    state_path = run_dir / "state.json"
+    if state_path.is_file():
+        state = read_json(state_path)
+        champion_id = str(state.get("champion_artifact_id", "")).strip()
+        attempts = state.get("attempts", [])
+        if champion_id and isinstance(attempts, list):
+            for attempt in reversed(attempts):
+                if not isinstance(attempt, dict):
+                    continue
+                if str(attempt.get("artifact_id", "")).strip() != champion_id:
+                    continue
+                candidate_dir = Path(str(attempt.get("candidate_dir", "")).strip()).expanduser()
+                if candidate_dir.is_dir() and run_dir in candidate_dir.resolve().parents:
+                    return candidate_dir.resolve()
+                artifact_id = str(attempt.get("artifact_id", "")).strip()
+                for selection_path in sorted(run_dir.glob("generation_*/candidate_*/selection.json")):
+                    try:
+                        selection = read_json(selection_path)
+                    except (OSError, ValueError, json.JSONDecodeError):
+                        continue
+                    if str(selection.get("artifact_id", "")).strip() == artifact_id:
+                        return selection_path.parent.resolve()
+    return run_dir
 
 
 def _instruction_excerpt(task_source: Path) -> str:
@@ -204,14 +246,134 @@ def _instruction_excerpt(task_source: Path) -> str:
     return ""
 
 
-def _run_probe(command: list[str], *, timeout: int = 120) -> dict[str, Any]:
-    proc = subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        check=False,
+def _gcbench_gameplay_replay_probe(
+    *,
+    artifact: Path,
+    run_dir: Path,
+) -> dict[str, Any]:
+    """Require official demo input traces and their completed runtime replays."""
+
+    demo_dir = artifact / "demo_outputs"
+    traces = sorted(demo_dir.glob("*.json")) if demo_dir.is_dir() else []
+    traces = [path for path in traces if path.name != "_example_trace.json"]
+    attempt_dir = resolve_episode_attempt_dir(run_dir)
+    replay_logs = [
+        path
+        for path in sorted(attempt_dir.glob("gcbench_verifier/demos/*/logs/*.log"))
+        if "_example_trace" not in path.parts
+    ]
+    input_traces = 0
+    input_events = 0
+    actionable_events = 0
+    valid_trace_names: set[str] = set()
+    actionable_types = {
+        "mouse_click", "mouse_down", "mouse_up", "mouse_move",
+        "key_press", "key_down", "key_up",
+    }
+    for trace in traces:
+        try:
+            payload = json.loads(trace.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        events = payload.get("events", [])
+        if isinstance(events, list) and events:
+            input_traces += 1
+            input_events += len(events)
+            valid_actions = sum(
+                1 for event in events
+                if isinstance(event, dict)
+                and str(event.get("type", "")).casefold() in actionable_types
+            )
+            actionable_events += valid_actions
+            if valid_actions:
+                valid_trace_names.add(trace.stem)
+    replay_trace_names = {
+        path.parents[1].name
+        for path in replay_logs
+    }
+    missing_replays = sorted(valid_trace_names - replay_trace_names)
+    fatal_markers = ("parse error", "script error", "fatal", "segmentation fault")
+    fatal_logs = 0
+    for log in replay_logs:
+        try:
+            text = log.read_text(encoding="utf-8", errors="replace").casefold()
+        except OSError:
+            continue
+        if any(marker in text for marker in fatal_markers):
+            fatal_logs += 1
+    passed = bool(
+        input_traces
+        and len(valid_trace_names) == input_traces
+        and actionable_events
+        and replay_logs
+        and not missing_replays
+        and not fatal_logs
     )
+    return {
+        "passed": passed,
+        "score": 1.0 if passed else 0.0,
+        "diagnostics": [
+            f"attempt_dir={attempt_dir}",
+            f"input_traces={input_traces}",
+            f"input_events={input_events}",
+            f"actionable_events={actionable_events}",
+            f"replay_runtime_logs={len(replay_logs)}",
+            f"missing_replay_traces={missing_replays}",
+            f"fatal_replay_logs={fatal_logs}",
+        ],
+    }
+
+
+def _collect_process_evidence(run_dir: Path) -> dict[str, Any]:
+    attempt_dir = resolve_episode_attempt_dir(run_dir)
+    selection_path = attempt_dir / "selection.json"
+    selection = read_json(selection_path) if selection_path.is_file() else {}
+    probe_summary = selection.get("probe_summary", {})
+    if not isinstance(probe_summary, dict):
+        probe_summary = {}
+    backend_log_path = attempt_dir / "backend.log"
+    backend_log = (
+        backend_log_path.read_text(encoding="utf-8", errors="replace")
+        if backend_log_path.is_file()
+        else ""
+    )
+    tool_calls = re.findall(r"\[chat_agent\] tool_call: ([A-Za-z0-9_.-]+)", backend_log)
+    turns = [int(value) for value in re.findall(r"\[chat_agent\] turn (\d+)/\d+", backend_log)]
+    return {
+        "attempt_dir": str(attempt_dir),
+        "selection_status": selection.get("status"),
+        "selection_reasons": list(selection.get("reasons", []))[:5],
+        "mutation_intent": selection.get("mutation_intent", {}),
+        "selected_probe_ids": list(probe_summary.get("selected_probe_ids", [])),
+        "candidate_probe_results": list(probe_summary.get("candidate", []))[:20],
+        "agent_turns": max(turns, default=0),
+        "tool_call_counts": {
+            name: tool_calls.count(name)
+            for name in sorted(set(tool_calls))
+        },
+        "backend_log_present": bool(backend_log),
+    }
+
+
+def _run_probe(command: list[str], *, timeout: int = 120) -> dict[str, Any]:
+    try:
+        proc = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {
+            "command": command,
+            "return_code": None,
+            "result": {
+                "passed": False,
+                "score": 0.0,
+                "diagnostics": [f"{type(exc).__name__}: {exc}"],
+            },
+        }
     payload: dict[str, Any] = {
         "command": command,
         "return_code": proc.returncode,
@@ -265,6 +427,7 @@ def collect_deep_playtest_evidence(
                 },
             ),
             file_inventory=(),
+            process_evidence=_collect_process_evidence(run_dir),
             instruction_excerpt=_instruction_excerpt(task_source),
         )
 
@@ -283,6 +446,17 @@ def collect_deep_playtest_evidence(
                 [python, "-m", "game_loop.probe_tools", "godot-quality-inventory", "--artifact", str(artifact)],
             )
         )
+        if benchmark_id == "gcbench":
+            probes.append(
+                {
+                    "command": ["official_gcbench_demo_replay_evidence"],
+                    "return_code": 0,
+                    "result": _gcbench_gameplay_replay_probe(
+                        artifact=artifact,
+                        run_dir=run_dir,
+                    ),
+                }
+            )
     elif kind == "web":
         probes.append(
             _run_probe(
@@ -315,13 +489,11 @@ def collect_deep_playtest_evidence(
             )
         )
 
-    inventory = tuple(
-        sorted(
-            path.relative_to(artifact).as_posix()
-            for path in artifact.rglob("*")
-            if path.is_file()
-        )[:80]
-    )
+    inventory = tuple(sorted(
+        path.relative_to(artifact).as_posix()
+        for path in artifact.rglob("*")
+        if path.is_file()
+    ))
     normalized = []
     for index, probe in enumerate(probes):
         normalized.append({"probe_id": f"deep_probe_{index}", **probe})
@@ -333,6 +505,7 @@ def collect_deep_playtest_evidence(
         task_source=str(task_source),
         probes=tuple(normalized),
         file_inventory=inventory,
+        process_evidence=_collect_process_evidence(run_dir),
         instruction_excerpt=_instruction_excerpt(task_source),
     )
 
@@ -361,20 +534,63 @@ class HeuristicRubricJudge:
             else 0.0
         )
         inventory_ok = bool(evidence.file_inventory)
+        results_by_command: dict[str, dict[str, Any]] = {}
+        for probe in evidence.probes:
+            command = probe.get("command", [])
+            result = probe.get("result", {})
+            if not isinstance(command, list) or not isinstance(result, dict):
+                continue
+            command_text = " ".join(str(part) for part in command)
+            for marker in (
+                "godot-playtest",
+                "godot-quality-inventory",
+                "official_gcbench_demo_replay_evidence",
+                "verigame-build",
+                "pygame-runtime",
+            ):
+                if marker in command_text:
+                    results_by_command[marker] = result
+
+        runtime_results = [
+            result
+            for marker, result in results_by_command.items()
+            if marker in {
+                "godot-playtest",
+                "official_gcbench_demo_replay_evidence",
+                "verigame-build",
+                "pygame-runtime",
+            }
+        ]
+        runtime_legal = (
+            all(result.get("passed") for result in runtime_results)
+            if runtime_results
+            else passed_all
+        )
+        leaked = any(
+            "rubric.json" in path.casefold() or "/tests/" in f"/{path.casefold()}"
+            for path in evidence.file_inventory
+        )
+        public_spec_integrity = inventory_ok and not leaked
+        artifact_path = Path(evidence.artifact_path).resolve() if evidence.artifact_path else None
+        run_path = Path(evidence.run_ref).resolve()
+        workspace_safe = bool(artifact_path) and run_path in artifact_path.parents and all(
+            not path.startswith("../") and not Path(path).is_absolute()
+            for path in evidence.file_inventory
+        )
         hard: dict[str, float] = {}
         for rubric in hard_rubrics:
-            if rubric.rubric_id == "launches_without_crash":
-                hard[rubric.rubric_id] = 1.0 if passed_all else 0.0
-            elif rubric.rubric_id == "respects_task_constraints":
-                hard[rubric.rubric_id] = 1.0 if inventory_ok else 0.0
+            if rubric.rubric_id in {"launches_without_crash", "deep_runtime_legal"}:
+                hard[rubric.rubric_id] = 1.0 if runtime_legal else 0.0
+            elif rubric.rubric_id in {"respects_task_constraints", "public_spec_integrity"}:
+                hard[rubric.rubric_id] = 1.0 if public_spec_integrity else 0.0
             elif rubric.rubric_id == "produces_runnable_artifact":
                 hard[rubric.rubric_id] = 1.0 if evidence.artifact_path and passed_all else 0.0
             elif rubric.rubric_id == "no_hidden_test_leakage":
-                leaked = any(
-                    "rubric.json" in path or "/tests/" in path
-                    for path in evidence.file_inventory
-                )
                 hard[rubric.rubric_id] = 0.0 if leaked else 1.0
+            elif rubric.rubric_id in {"harness_safe_workspace", "mcp_boundary_respected"}:
+                hard[rubric.rubric_id] = 1.0 if workspace_safe else 0.0
+            elif rubric.rubric_id == "skill_application_valid":
+                hard[rubric.rubric_id] = 1.0 if runtime_legal else 0.0
             else:
                 hard[rubric.rubric_id] = 1.0 if passed_all else 0.0
 
@@ -476,9 +692,14 @@ class LLMRubricJudge:
                 message = value["choices"][0]["message"]
                 content = message.get("content") or message.get("reasoning_content") or ""
                 parsed = extract_json_object(content)
-                _validate_rubric_payload(parsed)
+                _validate_rubric_payload(
+                    parsed,
+                    hard_rubrics=hard_rubrics,
+                    soft_rubrics=soft_rubrics,
+                )
                 break
             except urllib.error.HTTPError as exc:
+                parsed = None
                 body = ""
                 try:
                     body = exc.read().decode("utf-8", errors="replace")
@@ -495,6 +716,7 @@ class LLMRubricJudge:
                 ValueError,
                 IndexError,
             ) as exc:
+                parsed = None
                 errors.append(f"{type(exc).__name__}: {exc}")
                 payload.pop("response_format", None)
         if parsed is None:
@@ -511,7 +733,7 @@ class LLMRubricJudge:
                 soft_total=fallback.soft_total,
                 judge=f"{self.judge_id}+{fallback.judge}",
                 evidence_ref=fallback.evidence_ref,
-                infrastructure_ok=True,
+                infrastructure_ok=False,
                 errors=(f"llm rubric judge fallback after {attempts} attempts: {joined}",),
             )
         hard = {
@@ -552,12 +774,16 @@ class LLMRubricJudge:
         soft_template = {item.rubric_id: 0.0 for item in soft_rubrics}
         return (
             "Score this game using deep runtime evidence, not surface file presence alone.\n"
+            "For gcbench, require official demo traces with real input events and completed verifier runtime logs as gameplay evidence. A project that merely launches, contains files, or has nominal demo JSON without replay evidence must not receive passing gameplay scores.\n"
+            "Inspect whether the evidence demonstrates actual interaction and state progression: input was delivered, the game remained alive, and replay logs contain no fatal errors. Do not infer gameplay quality from filenames or descriptions.\n"
+            "Score workflow, repair, exploration, skill, tool/MCP, and context soft rubrics only from Process evidence below. If the corresponding process evidence is absent, assign 0 rather than inferring behavior from the artifact.\n"
             "Return exactly one JSON object shaped like:\n"
             f"{json.dumps({'hard': hard_template, 'soft': soft_template}, ensure_ascii=False)}\n\n"
             f"Task excerpt:\n{evidence.instruction_excerpt[:900]}\n\n"
             f"Benchmark: {evidence.benchmark_id}\n"
             f"Artifact: {evidence.artifact_path}\n"
             f"Deep probes:\n{json.dumps(list(evidence.probes), ensure_ascii=False)[:2500]}\n\n"
+            f"Process evidence:\n{json.dumps(evidence.process_evidence, ensure_ascii=False)[:2500]}\n\n"
             f"File inventory sample:\n{list(evidence.file_inventory)[:25]}\n\n"
             f"Hard rubrics (0/1):\n{hard_lines}\n\n"
             f"Soft rubrics (0..1):\n{soft_lines}\n"
@@ -566,23 +792,50 @@ class LLMRubricJudge:
 
 def _coerce_hard(value: Any) -> float:
     if value is None:
-        return 0.0
+        raise ValueError("hard rubric value is missing")
     number = float(value)
-    return 1.0 if number >= 0.5 else 0.0
+    if not math.isfinite(number) or number not in {0.0, 1.0}:
+        raise ValueError(f"hard rubric value must be 0 or 1, got {value!r}")
+    return number
 
 
 def _coerce_soft(value: Any) -> float:
     if value is None:
-        return 0.0
+        raise ValueError("soft rubric value is missing")
     number = float(value)
-    return max(0.0, min(1.0, number))
+    if not math.isfinite(number) or not 0.0 <= number <= 1.0:
+        raise ValueError(f"soft rubric value must be within [0, 1], got {value!r}")
+    return number
 
 
-def _validate_rubric_payload(parsed: dict[str, Any]) -> None:
+def _validate_rubric_payload(
+    parsed: dict[str, Any],
+    *,
+    hard_rubrics: Sequence[HarnessRubricCriterion],
+    soft_rubrics: Sequence[HarnessRubricCriterion],
+) -> None:
     if not isinstance(parsed.get("hard"), dict):
         raise ValueError("rubric JSON key 'hard' must be an object")
     if not isinstance(parsed.get("soft"), dict):
         raise ValueError("rubric JSON key 'soft' must be an object")
+    expected_hard = {item.rubric_id for item in hard_rubrics}
+    expected_soft = {item.rubric_id for item in soft_rubrics}
+    actual_hard = set(parsed["hard"])
+    actual_soft = set(parsed["soft"])
+    if actual_hard != expected_hard:
+        raise ValueError(
+            f"rubric JSON hard keys mismatch: expected={sorted(expected_hard)} "
+            f"actual={sorted(actual_hard)}"
+        )
+    if actual_soft != expected_soft:
+        raise ValueError(
+            f"rubric JSON soft keys mismatch: expected={sorted(expected_soft)} "
+            f"actual={sorted(actual_soft)}"
+        )
+    for rubric_id in expected_hard:
+        _coerce_hard(parsed["hard"][rubric_id])
+    for rubric_id in expected_soft:
+        _coerce_soft(parsed["soft"][rubric_id])
 
 
 def compare_rubric_pair(
@@ -607,9 +860,26 @@ def compare_rubric_pair(
             candidate=candidate,
             reasons=tuple(reasons),
         )
+    parent_fallback = "heuristic" in parent.judge
+    candidate_fallback = "heuristic" in candidate.judge
+    if parent_fallback != candidate_fallback:
+        reasons.append(
+            f"{case_id}: rubric judge methods differ "
+            f"(parent={parent.judge}, candidate={candidate.judge})"
+        )
+        return RubricPairComparison(
+            case_id=case_id,
+            passed=False,
+            parent=parent,
+            candidate=candidate,
+            reasons=tuple(reasons),
+        )
     for rubric in hard_rubrics:
-        old = parent.hard.get(rubric.rubric_id, 0.0)
-        new = candidate.hard.get(rubric.rubric_id, 0.0)
+        if rubric.rubric_id not in parent.hard or rubric.rubric_id not in candidate.hard:
+            reasons.append(f"{case_id}: missing hard rubric {rubric.rubric_id}")
+            continue
+        old = parent.hard[rubric.rubric_id]
+        new = candidate.hard[rubric.rubric_id]
         if new < old:
             reasons.append(
                 f"{case_id}: hard rubric {rubric.rubric_id} regressed "

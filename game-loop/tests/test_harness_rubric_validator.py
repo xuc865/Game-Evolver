@@ -10,6 +10,7 @@ from game_loop.config import DEFAULT_HARD_RUBRICS, DEFAULT_SOFT_RUBRICS, Harness
 from game_loop.core.harness import HarnessEpisodeOutcome
 from game_loop.core.harness_evolution_memory import HarnessEvolutionMemory, build_rejection_experience
 from game_loop.core.harness_rubric_validator import (
+    DeepPlaytestEvidence,
     HeuristicRubricJudge,
     HarnessRubricValidator,
     collect_deep_playtest_evidence,
@@ -18,6 +19,8 @@ from game_loop.core.harness_rubric_validator import (
     sample_task_pool,
     TaskPoolEntry,
     LLMRubricJudge,
+    RubricCaseScores,
+    _gcbench_gameplay_replay_probe,
 )
 from game_loop.core.harness import HarnessEpochResult, HarnessProfile
 
@@ -31,6 +34,103 @@ def _write_godot_artifact(root: Path) -> None:
 
 
 class HarnessRubricValidatorTests(unittest.TestCase):
+    def test_gcbench_replay_probe_reads_champion_attempt_logs(self):
+        with tempfile.TemporaryDirectory() as td:
+            run_dir = Path(td) / "run"
+            artifact = run_dir / "artifacts" / "champion" / "artifact"
+            demo_dir = artifact / "demo_outputs"
+            demo_dir.mkdir(parents=True)
+            (demo_dir / "demo.json").write_text(
+                json.dumps({"events": [{"type": "key_down", "key": "W"}]})
+            )
+            attempt_dir = run_dir / "generation_001" / "candidate_01"
+            log_dir = attempt_dir / "gcbench_verifier" / "demos" / "demo" / "logs"
+            log_dir.mkdir(parents=True)
+            (log_dir / "godot.log").write_text("Godot Engine finished normally\n")
+            run_dir.mkdir(parents=True, exist_ok=True)
+            (run_dir / "state.json").write_text(json.dumps({
+                "champion_artifact_id": "champion",
+                "attempts": [{
+                    "artifact_id": "champion",
+                    "candidate_dir": str(attempt_dir),
+                }],
+            }))
+
+            result = _gcbench_gameplay_replay_probe(
+                artifact=artifact,
+                run_dir=run_dir,
+            )
+
+            self.assertTrue(result["passed"])
+            self.assertIn("replay_runtime_logs=1", result["diagnostics"])
+
+    def test_gcbench_replay_probe_requires_each_actionable_trace(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            artifact = root / "artifact"
+            demos = artifact / "demo_outputs"
+            demos.mkdir(parents=True)
+            for name in ("one", "two"):
+                (demos / f"{name}.json").write_text(json.dumps({
+                    "events": [{"frame": 1, "type": "key_press", "keycode": "A"}],
+                }))
+            logs = root / "gcbench_verifier" / "demos" / "one" / "logs"
+            logs.mkdir(parents=True)
+            (logs / "godot.log").write_text("runtime ok\n")
+
+            result = _gcbench_gameplay_replay_probe(artifact=artifact, run_dir=root)
+
+            self.assertFalse(result["passed"])
+            self.assertIn("missing_replay_traces=['two']", result["diagnostics"])
+
+    def test_dynamic_hard_rubrics_do_not_collapse_on_replay_failure(self):
+        evidence = DeepPlaytestEvidence(
+            case_id="a",
+            run_ref="/tmp",
+            artifact_path="/tmp/artifact",
+            benchmark_id="gcbench",
+            task_source="/tmp/task",
+            probes=(
+                {
+                    "probe_id": "deep_probe_0",
+                    "command": ["python", "-m", "game_loop.probe_tools", "godot-playtest"],
+                    "result": {"passed": True, "score": 1.0},
+                },
+                {
+                    "probe_id": "deep_probe_1",
+                    "command": ["official_gcbench_demo_replay_evidence"],
+                    "result": {"passed": False, "score": 0.0},
+                },
+            ),
+            file_inventory=("project.godot", "scripts/main.gd"),
+        )
+        hard = tuple(
+            HarnessEvolutionConfig.from_dict({
+                "modules": [{"id": "a", "instruction": "a", "tags": []}],
+                "seed_modules": ["a"],
+                "max_active_modules": 1,
+                "max_active_tool_interfaces": 0,
+                "mutation_width": 1,
+                "hard_rubrics": [
+                    {"rubric_id": "deep_runtime_legal", "kind": "hard"},
+                    {"rubric_id": "public_spec_integrity", "kind": "hard"},
+                    {"rubric_id": "harness_safe_workspace", "kind": "hard"},
+                    {"rubric_id": "skill_application_valid", "kind": "hard"},
+                ],
+            }).hard_rubrics
+        )
+
+        scores = HeuristicRubricJudge().score(
+            evidence=evidence,
+            hard_rubrics=hard,
+            soft_rubrics=DEFAULT_SOFT_RUBRICS,
+        )
+
+        self.assertEqual(scores.hard["deep_runtime_legal"], 0.0)
+        self.assertEqual(scores.hard["public_spec_integrity"], 1.0)
+        self.assertEqual(scores.hard["harness_safe_workspace"], 1.0)
+        self.assertEqual(scores.hard["skill_application_valid"], 0.0)
+
     @patch("game_loop.runtime.providers.BackboneProviderSpec.resolve")
     def test_llm_judge_outage_is_infrastructure_not_heuristic_score(self, resolve_mock):
         resolved = unittest.mock.Mock()
@@ -85,7 +185,7 @@ class HarnessRubricValidatorTests(unittest.TestCase):
 
     @patch("game_loop.runtime.providers.BackboneProviderSpec.resolve")
     @patch("urllib.request.urlopen")
-    def test_llm_judge_falls_back_to_heuristic_after_empty_responses(self, urlopen_mock, resolve_mock):
+    def test_llm_judge_malformed_responses_are_infrastructure_failure(self, urlopen_mock, resolve_mock):
         resolved = unittest.mock.Mock()
         resolved.doctor.return_value = {"ready": True}
         resolved.model = "judge-model"
@@ -109,7 +209,7 @@ class HarnessRubricValidatorTests(unittest.TestCase):
             hard_rubrics=DEFAULT_HARD_RUBRICS[:1],
             soft_rubrics=DEFAULT_SOFT_RUBRICS[:1],
         )
-        self.assertTrue(scores.infrastructure_ok)
+        self.assertFalse(scores.infrastructure_ok)
         self.assertIn("heuristic", scores.judge)
         self.assertEqual(scores.hard["launches_without_crash"], 1.0)
         self.assertTrue(scores.errors)
@@ -148,6 +248,28 @@ class HarnessRubricValidatorTests(unittest.TestCase):
         )
         self.assertFalse(comparison.passed)
         self.assertTrue(any("hard rubric" in reason for reason in comparison.reasons))
+
+    def test_infrastructure_failure_stops_pair_comparison(self):
+        parent = _score_artifact(passed=True)
+        candidate = RubricCaseScores(
+            case_id=parent.case_id,
+            hard={},
+            soft={},
+            soft_total=0.0,
+            judge="llm_deep_playtest_v1+heuristic_deep_playtest_v1",
+            evidence_ref="/tmp/candidate",
+            infrastructure_ok=False,
+            errors=("judge failed",),
+        )
+        comparison = compare_rubric_pair(
+            case_id="a",
+            parent=parent,
+            candidate=candidate,
+            hard_rubrics=DEFAULT_HARD_RUBRICS,
+            soft_rubrics=DEFAULT_SOFT_RUBRICS,
+        )
+        self.assertEqual(len(comparison.reasons), 1)
+        self.assertIn("infrastructure failure", comparison.reasons[0])
 
     @patch("game_loop.core.harness_rubric_validator.collect_deep_playtest_evidence")
     def test_validator_integrated_with_assess_epoch(self, collect_mock):
@@ -199,6 +321,76 @@ class HarnessRubricValidatorTests(unittest.TestCase):
         second = sample_task_pool(pool, sample_size=3, seed=7, prefix="inner")
         self.assertEqual(first, second)
         self.assertEqual(len(first), 3)
+
+    def test_epoch_anchor_covers_each_pool_task_once(self):
+        pool = tuple(TaskPoolEntry(f"t{index}", f"s{index}") for index in range(5))
+        anchors = [
+            sample_task_pool(
+                pool,
+                sample_size=3,
+                seed=epoch,
+                prefix=f"e{epoch:03d}",
+                anchor_index=epoch - 1,
+            )[0].task_ref
+            for epoch in range(1, len(pool) + 1)
+        ]
+        self.assertEqual(anchors, [item.task_ref for item in pool])
+
+    @patch("game_loop.runtime.providers.BackboneProviderSpec.resolve")
+    @patch("urllib.request.urlopen")
+    def test_llm_judge_rejects_missing_rubric_keys(self, urlopen_mock, resolve_mock):
+        resolved = unittest.mock.Mock()
+        resolved.doctor.return_value = {"ready": True}
+        resolved.model = "judge-model"
+        resolved.base_url = "http://judge.local/v1"
+        resolved.api_key = ""
+        resolve_mock.return_value = resolved
+
+        class _Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return json.dumps({
+                    "choices": [{"message": {"content": json.dumps({
+                        "hard": {},
+                        "soft": {},
+                    })}}]
+                }).encode("utf-8")
+
+        urlopen_mock.side_effect = [_Response(), _Response(), _Response()]
+        scores = LLMRubricJudge(provider_id="deepseek").score(
+            evidence=_synthetic_evidence(passed=True),
+            hard_rubrics=DEFAULT_HARD_RUBRICS[:1],
+            soft_rubrics=DEFAULT_SOFT_RUBRICS[:1],
+        )
+        self.assertFalse(scores.infrastructure_ok)
+        self.assertIn("keys mismatch", scores.errors[0])
+
+    def test_gcbench_deep_probe_requires_input_replay_evidence(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            artifact = root / "artifact"
+            artifact.mkdir()
+            demo_dir = artifact / "demo_outputs"
+            demo_dir.mkdir()
+            (demo_dir / "gameplay.json").write_text(
+                json.dumps({"duration_frames": 120, "events": [{"frame": 10, "type": "key_press"}]}),
+                encoding="utf-8",
+            )
+            logs = root / "gcbench_verifier" / "demos" / "gameplay" / "logs"
+            logs.mkdir(parents=True)
+            (logs / "godot.log").write_text("game started\nstate=playing\n", encoding="utf-8")
+            result = _gcbench_gameplay_replay_probe(artifact=artifact, run_dir=root)
+            self.assertTrue(result["passed"])
+            self.assertIn("input_events=1", result["diagnostics"])
+
+            (logs / "fatal.log").write_text("SCRIPT ERROR: fatal\n", encoding="utf-8")
+            failed = _gcbench_gameplay_replay_probe(artifact=artifact, run_dir=root)
+            self.assertFalse(failed["passed"])
 
     def test_rejection_memory_is_reused_in_proposer_context(self):
         with tempfile.TemporaryDirectory() as td:

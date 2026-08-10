@@ -498,14 +498,14 @@ class GameLoopTests(unittest.TestCase):
             config = write_config(
                 root,
                 candidates=1,
-                generations=3,
+                generations=1,
                 max_model_calls=3,
                 max_evaluator_queries=3,
                 level="L4",
                 max_probe_calls=6,
                 experiment_arm="L4_agent",
             )
-            adapter = FakeAdapter([0.6, 0.7, 0.65])
+            adapter = FakeAdapter([0.6])
             controller = LoopController.initialize(
                 run_dir=root / "l4-agent",
                 task_source=task,
@@ -517,18 +517,16 @@ class GameLoopTests(unittest.TestCase):
             controller.backend = FakeBackend()
             controller.probe_runner = FakeProbeRunner([
                 (True, 1.0, "completed"), (True, 1.0, "completed"),
-                (True, 1.0, "completed"), (True, 1.0, "completed"),
-                (True, 1.0, "completed"), (True, 1.0, "completed"),
             ])
             state = controller.evolve()
             self.assertEqual(
                 {attempt["parent_artifact_id"] for attempt in state.attempts},
                 {state.seed_artifact_id},
             )
-            self.assertEqual(state.champion_result.primary_score, 0.7)
+            self.assertEqual(state.champion_result.primary_score, 0.6)
             self.assertEqual(
                 [len(item["recent_attempts"]) for item in adapter.feedback],
-                [0, 1, 2],
+                [0],
             )
             manifest = json.loads((root / "l4-agent" / "manifest.json").read_text())
             self.assertTrue(manifest["artifact_parent_frozen_to_seed"])
@@ -617,6 +615,21 @@ class GameLoopTests(unittest.TestCase):
                     max_model_calls=3,
                     experiment_arm="parent_only",
                 )
+
+    def test_l4_agent_allows_one_generation_per_epoch(self):
+        with tempfile.TemporaryDirectory() as td:
+            config = write_config(
+                Path(td),
+                candidates=1,
+                generations=1,
+                max_model_calls=3,
+                max_evaluator_queries=3,
+                level="L4",
+                max_probe_calls=6,
+                experiment_arm="L4_agent",
+            )
+            self.assertEqual(config.evolution.max_generations, 1)
+            self.assertEqual(config.evolution.candidates_per_generation, 1)
 
     def test_levels_above_l4_are_rejected(self):
         with tempfile.TemporaryDirectory() as td:
@@ -769,7 +782,11 @@ class GameLoopTests(unittest.TestCase):
                 level="L4",
                 max_probe_calls=2,
             )
-            engine = HarnessEvolutionEngine(root / "outer", config.method.harness_evolution)
+            harness_config = replace(
+                config.method.harness_evolution,
+                require_rubric_validation=False,
+            )
+            engine = HarnessEvolutionEngine(root / "outer", harness_config)
             seed = engine.initialize()
             runner = ReplayRunner({
                 ("parent", "a"): 0.50,
@@ -824,6 +841,7 @@ class GameLoopTests(unittest.TestCase):
                     HarnessEpisodeOutcome("a", candidate.harness_id, 0.7, True, 4, 3),
                     HarnessEpisodeOutcome("b", candidate.harness_id, 0.5, True, 3, 3),
                 ],
+                rubric_validation={"accepted": True, "reasons": []},
             )
             self.assertFalse(result.accepted)
             self.assertTrue(any("budgets differ" in reason for reason in result.reasons))

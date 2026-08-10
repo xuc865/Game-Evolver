@@ -1079,8 +1079,15 @@ class ExperimentConfig:
             raise ValueError("retry3 requires a 1 generation x 3 independent-candidate layout")
         if arm == "parent_only" and evolution.candidates_per_generation != 1:
             raise ValueError("parent_only requires candidates_per_generation=1")
-        if arm in iterative_arms - {"retry3"} and evolution.max_generations != 3:
-            raise ValueError(f"{arm} requires a 3 generation x 1 candidate layout")
+        if arm in iterative_arms - {"retry3"}:
+            expected_generations = 1 if arm in {
+                "L4_agent",
+                "L4_agent_no_harness_evolve",
+            } else 3
+            if evolution.max_generations != expected_generations:
+                raise ValueError(
+                    f"{arm} requires a {expected_generations} generation x 1 candidate layout"
+                )
         if arm == "L1":
             expected_probe_calls = 6 * len(method.fixed_probes)
             if method.max_probe_calls != expected_probe_calls:

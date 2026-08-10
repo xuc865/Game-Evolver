@@ -13,7 +13,7 @@ from game_loop.utils import atomic_write_json, read_json, utc_now
 
 # Abstract benchmark families — references intent only, never official rubrics/tests.
 _BENCH_FAMILY_HINTS: dict[str, str] = {
-    "gcbench": "python/pygame-style game crafting with demo replay evidence",
+    "gcbench": "Godot game crafting with deterministic input replay evidence",
     "gdbench": "godot engine game development with import/runtime checks",
     "vgamegym": "multi-file game code iteration with visual/runtime validation",
     "verigame": "web game build with npm/playwright-style verification",
@@ -156,14 +156,14 @@ def _build_hard_rubrics(
             "public_spec_integrity",
             "hard",
             (
-                "Delivered artifact follows the public instruction for this task; "
-                "no hidden benchmark files were imported."
+                "The delivered artifact has the public task's required runnable structure "
+                "and contains no benchmark-private rubric or test files."
             ),
         ),
         HarnessRubricCriterion(
             "harness_safe_workspace",
             "hard",
-            "Agent changes stay inside allowed workspace scopes declared by harness tools/MCP.",
+            "The collected artifact is rooted in the isolated episode workspace and all inventoried paths are relative to it.",
         ),
     ]
     if "skill" in harness_focus:
@@ -171,7 +171,7 @@ def _build_hard_rubrics(
             HarnessRubricCriterion(
                 "skill_application_valid",
                 "hard",
-                "Loaded skills were applied without breaking build/runtime legality.",
+                "The artifact remains build- and runtime-legal after the active skill workflow is applied.",
             )
         )
     if "mcp" in harness_focus:
@@ -179,7 +179,7 @@ def _build_hard_rubrics(
             HarnessRubricCriterion(
                 "mcp_boundary_respected",
                 "hard",
-                "MCP calls stayed within declared safety scopes and did not mutate benchmark infra.",
+                "The collected artifact remains inside the isolated episode workspace after MCP-assisted work.",
             )
         )
     del family  # referenced in soft rubrics only as abstract hint

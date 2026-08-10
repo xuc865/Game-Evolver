@@ -525,8 +525,29 @@ class HarnessEvolutionEngine:
             generation=epoch,
             rationale=gradient.diagnosis,
         )
+        if self._behavior_signature(profile) == self._behavior_signature(parent):
+            raise ValueError(
+                "harness mutation is a no-op: candidate does not change executable behavior"
+            )
         self._write_profile(profile)
         return profile
+
+    @staticmethod
+    def _behavior_signature(profile: HarnessProfile) -> tuple[Any, ...]:
+        return (
+            profile.active_modules,
+            tuple(
+                (item.interface_id, item.kind, item.description, item.command, item.source_hash)
+                for item in profile.active_tool_interfaces
+            ),
+            tuple(
+                (item.element_id, item.category, item.description, item.spec_hash)
+                for item in profile.active_elements
+            ),
+            profile.context_compiler.to_dict().__repr__(),
+            profile.recovery_policy.to_dict().__repr__(),
+            profile.validation_policy.to_dict().__repr__(),
+        )
 
     def _mutate_modules(
         self,
@@ -663,8 +684,13 @@ class HarnessEvolutionEngine:
             reasons.append(
                 f"usable replay pairs {len(deltas)} < required {self.config.replay_min_cases}"
             )
-        if rubric_validation is not None and not rubric_validation.get("accepted", True):
-            reasons.extend(str(item) for item in rubric_validation.get("reasons", []))
+        if self.config.require_rubric_validation and rubric_validation is None:
+            reasons.append("required rubric validation is missing")
+        elif rubric_validation is not None and rubric_validation.get("accepted") is not True:
+            validation_reasons = rubric_validation.get("reasons", [])
+            reasons.extend(str(item) for item in validation_reasons)
+            if not validation_reasons:
+                reasons.append("rubric validation did not explicitly accept")
         accepted = not reasons
         return HarnessEpochResult(
             epoch=epoch,

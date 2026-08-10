@@ -54,9 +54,9 @@ INNER_ELEMENT_CATALOG = [
     {
         "id": "skill_godot_headless_playtest",
         "category": "skill",
-        "description": "Run Godot headless playtest and collect runtime diagnostics.",
-        "spec": {"probe": "godot-playtest", "frames": 120},
-        "tags": ["godot", "runtime"],
+        "description": "Replay real gcbench input traces through the Godot game, inspect state progression and runtime logs, then use the evidence to drive edits.",
+        "spec": {"probe": "official-gcbench-demo-replay", "requires_input_events": True, "requires_runtime_logs": True, "min_traces": 1},
+        "tags": ["godot", "runtime", "interaction", "state_transition", "evidence"],
     },
     {
         "id": "skill_web_build_verify",

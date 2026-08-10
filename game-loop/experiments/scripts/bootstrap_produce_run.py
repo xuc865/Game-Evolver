@@ -186,11 +186,27 @@ def ensure_produce_config(model_key: str, spec: dict[str, str]) -> Path:
     if isinstance(harness, dict):
         harness["rubric_judge_timeout_seconds"] = 45
     cfg["evolution"] = {
-        "max_generations": 3,
+        "max_generations": 1,
         "candidates_per_generation": 1,
         "max_model_calls": 3,
         "max_evaluator_queries": 3,
     }
+    harness = cfg.get("method", {}).get("harness_evolution", {})
+    for element in harness.get("element_catalog", []):
+        if element.get("id") == "skill_godot_headless_playtest":
+            element["description"] = (
+                "Replay real gcbench input traces through the Godot game, inspect state "
+                "progression and runtime logs, then use the evidence to drive edits."
+            )
+            element["spec"] = {
+                "probe": "official-gcbench-demo-replay",
+                "requires_input_events": True,
+                "requires_runtime_logs": True,
+                "min_traces": 1,
+            }
+            element["tags"] = [
+                "godot", "runtime", "interaction", "state_transition", "evidence"
+            ]
     dst.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return dst
 
@@ -491,7 +507,7 @@ exec python3 -m game_loop.cli harness-self-supervise \
   --task-pool "$RUN_DIR/task_pool_gcbench.json" \
   --evaluate-seed \
   --start-epoch 1 \
-  --max-epochs 20 \
+  --max-epochs "$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))))' "$RUN_DIR/task_pool_gcbench.json")" \
   --cases 3 \
   --run-id-prefix "$RUN_ID_PREFIX" \
   --heartbeat-seconds 30

@@ -423,6 +423,7 @@ def run_harness_self_evolution(
         sample_size=sample_size,
         seed=epoch,
         prefix=f"e{epoch:03d}",
+        anchor_index=epoch - 1,
     )
 
     # ── resume: reuse existing plan if available ──
@@ -454,6 +455,7 @@ def run_harness_self_evolution(
     # ── propose or reuse candidate ──
     if (existing_plan
             and existing_plan.get("parent_harness_id") == parent.harness_id
+            and existing_plan.get("config_fingerprint") == config.fingerprint
             and existing_plan.get("candidate_harness_id")):
         candidate = engine.get(existing_plan["candidate_harness_id"])
         print(f"[resume] reusing candidate {candidate.harness_id} from existing plan")
@@ -468,6 +470,7 @@ def run_harness_self_evolution(
             "epoch": epoch,
             "parent_harness_id": parent.harness_id,
             "candidate_harness_id": candidate.harness_id,
+            "config_fingerprint": config.fingerprint,
             "gradient": gradient.to_dict(),
             "num_cases": num_cases,
             "created_at": utc_now(),
@@ -547,7 +550,7 @@ def run_harness_self_evolution(
         outer_dir / f"harness_rubric_validation_{epoch:03d}.json",
         rubric_validation,
     )
-    if not rubric_validation.get("infrastructure_ok", True):
+    if rubric_validation.get("infrastructure_ok") is not True:
         raise RuntimeError(
             f"epoch {epoch} rubric judge infrastructure failed; retrying without promotion"
         )
@@ -603,13 +606,33 @@ def _run_paired_harness_admission_case(
     Returns a dict with 'parent' and 'candidate' outcomes, or None if the case
     was skipped (already completed in a previous run).
     """
+    config_fingerprint = str(getattr(config, "fingerprint", ""))
+    if not config_fingerprint:
+        raise ValueError("paired admission requires a non-empty config fingerprint")
     case_dir.mkdir(parents=True, exist_ok=True)
 
     # ── resume: skip if paired_admission.json already exists ──
     paired_path = case_dir / "paired_admission.json"
     if paired_path.is_file():
         existing = json.loads(paired_path.read_text(encoding="utf-8"))
-        if isinstance(existing, dict) and existing.get("candidate_harness_id") == candidate.harness_id:
+        matches_current_pair = (
+            isinstance(existing, dict)
+            and existing.get("parent_harness_id") == parent.harness_id
+            and existing.get("candidate_harness_id") == candidate.harness_id
+            and existing.get("config_fingerprint") == config_fingerprint
+        )
+        if not matches_current_pair:
+            retry_index = 1
+            while (case_dir.parent / f"{case_dir.name}.pair-retry-{retry_index}").exists():
+                retry_index += 1
+            archived = case_dir.parent / f"{case_dir.name}.pair-retry-{retry_index}"
+            case_dir.rename(archived)
+            case_dir.mkdir(parents=True, exist_ok=True)
+            print(
+                f"[{case_id}] archived mismatched paired admission to "
+                f"{archived.name}; replaying"
+            )
+        else:
             parent_run_dir = case_dir / "parent"
             candidate_run_dir = case_dir / "candidate"
             if parent_run_dir.is_dir() and candidate_run_dir.is_dir():
@@ -631,6 +654,7 @@ def _run_paired_harness_admission_case(
                     candidate=candidate,
                     parent_outcome=parent_outcome,
                     candidate_outcome=candidate_outcome,
+                    config_fingerprint=config_fingerprint,
                     created_at=str(existing.get("created_at") or utc_now()),
                 )
                 if existing != normalized:
@@ -697,6 +721,7 @@ def _run_paired_harness_admission_case(
             candidate=candidate,
             parent_outcome=parent_outcome,
             candidate_outcome=candidate_outcome,
+            config_fingerprint=config_fingerprint,
         )
         atomic_write_json(paired_path, paired)
         print(
@@ -729,6 +754,7 @@ def _run_paired_harness_admission_case(
         candidate=candidate,
         parent_outcome=parent_outcome,
         candidate_outcome=candidate_outcome,
+        config_fingerprint=config_fingerprint,
     )
     atomic_write_json(paired_path, paired)
 
@@ -748,6 +774,7 @@ def _paired_admission_payload(
     parent_outcome: HarnessEpisodeOutcome,
     candidate_outcome: HarnessEpisodeOutcome,
     max_case_regression: float | None = None,
+    config_fingerprint: str | None = None,
     created_at: str | None = None,
 ) -> dict[str, Any]:
     """Build paired evidence; rubric validation owns promotion decisions."""
@@ -778,6 +805,7 @@ def _paired_admission_payload(
         "case_id": case_id,
         "parent_harness_id": parent.harness_id,
         "candidate_harness_id": candidate.harness_id,
+        "config_fingerprint": config_fingerprint,
         "parent_score": parent_score,
         "candidate_score": candidate_score,
         "parent_infrastructure_ok": parent_outcome.infrastructure_ok,
@@ -849,7 +877,19 @@ def _run_harness_admission_case(
         )
         if manifest_path.is_file():
             manifest = read_json(manifest_path)
-            if manifest.get("config_fingerprint") != config.fingerprint:
+            state_harness_id = None
+            if state_path.is_file():
+                state_harness_id = read_json(state_path).get("champion_harness_id")
+            profile_harness_id = None
+            profile_path = case_dir / "harness_profile.json"
+            if profile_path.is_file():
+                profile_harness_id = read_json(profile_path).get("harness_id")
+            resume_mismatch = (
+                manifest.get("config_fingerprint") != config.fingerprint
+                or state_harness_id not in {None, harness.harness_id}
+                or profile_harness_id not in {None, harness.harness_id}
+            )
+            if resume_mismatch:
                 retry_index = 1
                 while (case_dir.parent / f"{case_dir.name}.config-retry-{retry_index}").exists():
                     retry_index += 1
@@ -1212,7 +1252,13 @@ def _build_llm_dynamic_gradient(
             "to improve game quality on this benchmark. Avoid repeating a recently "
             "rejected proposal unless new evidence justifies it. "
             "Do not choose an element for another engine or any visual/image/video tool "
-            "when text_only is true. Return JSON only with diagnosis, category, element_id."
+            "when text_only is true. The selected element must be executable and behavior-changing: "
+            "it must alter the agent's edit/verify workflow, require observable runtime or gameplay "
+            "evidence, and name the concrete artifact/log/state evidence it will produce. Never select "
+            "a cosmetic rename, metadata-only change, duplicate description, or empty wrapper. "
+            "For gcbench specifically, require real demo input replay, gameplay state progression, "
+            "and verifier runtime logs before accepting a candidate. Return JSON only with diagnosis, "
+            "category, element_id."
         ),
         "schema": {
             "diagnosis": "short evidence-grounded reason",
@@ -1231,7 +1277,9 @@ def _build_llm_dynamic_gradient(
                 "role": "system",
                 "content": (
                     "You are the harness-improvement agent. Make one cautious AgentX-style "
-                    "local mutation. Output a single JSON object and no prose."
+                    "local mutation. The mutation must change executable harness behavior and "
+                    "must be verifiable through deep gameplay evidence, not only profile metadata. "
+                    "Output a single JSON object and no prose."
                 ),
             },
             {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},

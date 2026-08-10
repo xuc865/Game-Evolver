@@ -165,6 +165,13 @@ class ProviderLaunchTests(unittest.TestCase):
         self.assertEqual(len(task_refs), len(pool))
         self.assertIn("../../../../gcbench/tasks/puzzle-sokoban-dungeon", task_refs)
 
+    def test_produce_supervisor_runs_one_epoch_per_pool_task(self) -> None:
+        source = (ROOT / "experiments" / "scripts" / "bootstrap_produce_run.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("--max-epochs 20", source)
+        self.assertIn('len(json.load(open(sys.argv[1])))', source)
+
     def test_text_only_switch_removes_every_visual_harness_path(self) -> None:
         bootstrap_path = ROOT / "experiments" / "scripts" / "bootstrap_produce_run.py"
         spec = importlib.util.spec_from_file_location("bootstrap_text_only", bootstrap_path)

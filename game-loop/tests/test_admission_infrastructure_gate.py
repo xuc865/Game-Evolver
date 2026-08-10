@@ -169,7 +169,7 @@ class AdmissionInfrastructureGateTests(unittest.TestCase):
                     engine=engine,
                     runner=SimpleNamespace(),
                     outer_dir=root / "outer",
-                    config=SimpleNamespace(),
+                    config=SimpleNamespace(fingerprint="fp"),
                     source_config=root / "config.json",
                     task_source=root / "task",
                     seed_artifact=root / "seed",
@@ -228,7 +228,7 @@ class AdmissionInfrastructureGateTests(unittest.TestCase):
                     engine=engine,
                     runner=SimpleNamespace(),
                     outer_dir=root / "outer",
-                    config=SimpleNamespace(),
+                    config=SimpleNamespace(fingerprint="fp"),
                     source_config=root / "config.json",
                     task_source=root / "task",
                     seed_artifact=root / "seed",
@@ -237,7 +237,7 @@ class AdmissionInfrastructureGateTests(unittest.TestCase):
                     run_id_prefix="t",
                 )
 
-            self.assertTrue((root / "case-1.incomplete-retry-1").is_dir())
+            self.assertTrue((root / "case-1.pair-retry-1").is_dir())
             self.assertEqual(calls, [case_dir / "parent", case_dir / "candidate"])
             self.assertTrue(result["parent"].infrastructure_ok)
             self.assertTrue(result["candidate"].infrastructure_ok)

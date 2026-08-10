@@ -44,7 +44,8 @@ class AgentXRuntimeTests(unittest.TestCase):
             ),
             proposer_harness=_profile("outer"),
         )
-        self.assertIn("context_compiler", gradient.target_tags)
+        self.assertIn("context", gradient.target_tags)
+        self.assertIn("usage_driven", gradient.target_tags)
 
 
 if __name__ == "__main__":
