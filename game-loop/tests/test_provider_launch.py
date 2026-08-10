@@ -217,6 +217,33 @@ class ProviderLaunchTests(unittest.TestCase):
             self.assertEqual(result.return_code, 0)
             self.assertEqual(popen.call_args.kwargs["env"]["CODEX_API_KEY"], "runtime-value")
 
+    def test_backend_config_routes_provider_even_when_shell_has_stale_base(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            tmp_path = Path(raw)
+            process = Mock()
+            process.wait.return_value = 0
+            backend = CommandBackend(
+                BackendConfig(
+                    command=("true",),
+                    cwd=tmp_path,
+                    env={
+                        "CODEX_API_BASE": "http://29.163.228.59:8080/v1",
+                        "CODEX_MODEL": "Qwen3.6-27B",
+                    },
+                )
+            )
+            prepared = PreparedTask("test", tmp_path, {})
+            stale = {
+                "CODEX_API_BASE": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "CODEX_MODEL": "qwen3.6-27b",
+            }
+            with patch.dict(os.environ, stale, clear=False):
+                with patch("game_loop.backends.command.subprocess.Popen", return_value=process) as popen:
+                    result = backend.run(prepared, tmp_path)
+            self.assertEqual(result.return_code, 0)
+            self.assertEqual(popen.call_args.kwargs["env"]["CODEX_API_BASE"], "http://29.163.228.59:8080/v1")
+            self.assertEqual(popen.call_args.kwargs["env"]["CODEX_MODEL"], "Qwen3.6-27B")
+
     def test_daemon_template_owns_descendants_and_rejects_stale_pid(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             tmp_path = Path(raw)

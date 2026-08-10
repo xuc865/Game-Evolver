@@ -35,10 +35,14 @@ class CommandBackend:
         error = None
         return_code = -1
         with log_path.open("wb") as log:
+            env = {**os.environ, **self.config.env}
+            for key in self.config.env:
+                if SECRET_ASSIGNMENT.fullmatch(f"{key}=x") and key in os.environ:
+                    env[key] = os.environ[key]
             process = subprocess.Popen(
                 command,
                 cwd=self.config.cwd,
-                env={**self.config.env, **os.environ},
+                env=env,
                 stdout=log,
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
