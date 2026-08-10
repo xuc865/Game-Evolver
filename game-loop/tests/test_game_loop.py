@@ -2820,6 +2820,7 @@ class GameLoopTests(unittest.TestCase):
             init.assert_called_once()
             evolve.assert_called_once()
             self.assertTrue((case_dir.parent / "parent.seed-infra-retry-1").is_dir())
+            self.assertFalse((case_dir.parent / "parent.incomplete-retry-1").exists())
             self.assertTrue(outcome.infrastructure_ok)
             self.assertEqual(outcome.final_score, 0.42)
 

@@ -851,6 +851,10 @@ def _run_harness_admission_case(
     frozen for the entire episode.
     """
     def archive_incomplete_case_dir() -> None:
+        # A seed-infrastructure retry recreates an empty case directory before
+        # falling through to init; there is no incomplete episode to archive.
+        if not case_dir.exists() or not any(case_dir.iterdir()):
+            return
         retry_index = 1
         while (case_dir.parent / f"{case_dir.name}.incomplete-retry-{retry_index}").exists():
             retry_index += 1
