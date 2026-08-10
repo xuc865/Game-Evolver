@@ -143,15 +143,13 @@ def _daemon_child() -> None:
 def cmd_start() -> int:
     root = _repo_root()
     run_dir = _run_dir()
+    owned = _owned_process_tree(run_dir)
     existing = _read_pid(run_dir / "daemon.pid")
-    if existing is not None and existing in _owned_process_tree(run_dir):
+    if existing is not None and existing in owned:
         print(f"[daemon] already running pid={existing}")
         return 0
-    if existing is not None and _pid_alive(existing):
-        print(f"[daemon] already running pid={existing} (process table unavailable)")
-        return 0
     business_pid = _read_json_pid(run_dir / ".supervisor.pid")
-    if business_pid is not None and _pid_alive(business_pid):
+    if business_pid is not None and business_pid in owned:
         print(f"[daemon] already running business pid={business_pid}")
         return 0
     subprocess.run([sys.executable, str(Path(__file__).resolve()), "--daemon-child"], cwd=root, check=True)

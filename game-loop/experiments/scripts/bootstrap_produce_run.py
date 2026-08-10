@@ -336,18 +336,27 @@ _log_signal() {
     "$$" >> "$RUN_DIR/supervisor.log"
 }
 
+_pid_belongs_to_run() {
+  local pid="${1:-}"
+  [[ -n "$pid" ]] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  local command
+  command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+  [[ "$command" == *"$RUN_DIR"* ]]
+}
+
 if [[ "${1:-}" != "--foreground" && "${1:-}" != "--watch" ]]; then
   mkdir -p "$RUN_DIR"
   if [[ -f "$RUN_DIR/supervisor.pid" ]]; then
     existing_pid="$(cat "$RUN_DIR/supervisor.pid" 2>/dev/null || true)"
-    if [[ -n "$existing_pid" ]] && kill -0 "$existing_pid" 2>/dev/null; then
+    if _pid_belongs_to_run "$existing_pid"; then
       echo "[supervisor] already running PID=$existing_pid (not starting another)"
       exit 0
     fi
   fi
   if [[ -f "$RUN_DIR/.supervisor.pid" ]]; then
     business_pid="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("pid", ""))' "$RUN_DIR/.supervisor.pid" 2>/dev/null || true)"
-    if [[ -n "$business_pid" ]] && kill -0 "$business_pid" 2>/dev/null; then
+    if _pid_belongs_to_run "$business_pid"; then
       echo "[supervisor] already running business PID=$business_pid (not starting another)"
       exit 0
     fi

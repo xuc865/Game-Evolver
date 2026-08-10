@@ -297,6 +297,38 @@ class ProviderLaunchTests(unittest.TestCase):
             with patch.object(module, "_process_table", return_value=table):
                 self.assertEqual(module._owned_process_tree(tmp_path), [101, 100])
 
+    def test_daemon_start_ignores_reused_business_pid(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            tmp_path = Path(raw)
+            daemon_path = ROOT / "experiments" / "scripts" / "run_experiment_daemon.py"
+            spec = importlib.util.spec_from_file_location(
+                "run_experiment_daemon_reused_pid",
+                daemon_path,
+            )
+            self.assertIsNotNone(spec)
+            assert spec is not None and spec.loader is not None
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            (tmp_path / ".supervisor.pid").write_text('{"pid": 100}\n', encoding="utf-8")
+            table = {100: (1, "python unrelated_service.py")}
+            with patch.object(module, "_run_dir", return_value=tmp_path):
+                with patch.object(module, "_repo_root", return_value=ROOT):
+                    with patch.object(module, "_process_table", return_value=table):
+                        with patch.object(module, "_pid_alive", return_value=True):
+                            with patch("subprocess.run") as run:
+                                run.return_value.returncode = 0
+                                self.assertEqual(module.cmd_start(), 0)
+            self.assertGreaterEqual(run.call_count, 2)
+
+    def test_supervisor_template_rejects_reused_pidfiles(self) -> None:
+        source = (ROOT / "experiments" / "scripts" / "bootstrap_produce_run.py").read_text(
+            encoding="utf-8"
+        )
+        supervisor = source.split("START_SUPERVISOR_SH =", 1)[1].split("WATCHDOG_SH =", 1)[0]
+        self.assertIn("_pid_belongs_to_run()", supervisor)
+        self.assertIn('[[ "$command" == *"$RUN_DIR"* ]]', supervisor)
+        self.assertNotIn('kill -0 "$business_pid" 2>/dev/null; then', supervisor)
+
     def test_bootstrap_uses_versioned_daemon_template(self) -> None:
         source = (ROOT / "experiments" / "scripts" / "bootstrap_produce_run.py").read_text(
             encoding="utf-8"
