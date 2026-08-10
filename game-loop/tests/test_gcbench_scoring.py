@@ -74,10 +74,29 @@ class GameCraftBenchScoringTests(unittest.TestCase):
 
     def test_export_judge_env_rejects_missing_api_key(self) -> None:
         script = ROOT / "scripts/gcbench_e2e/export_judge_env.sh"
-        completed = subprocess.run(["bash", "-c", f"source '{script}'"], capture_output=True,
-                                   text=True, env={"PATH": "/usr/bin:/bin", "GAMECRAFT_BENCH_JUDGE": "openai"})
+        completed = subprocess.run(
+            ["bash", "-c", f"source '{script}'"],
+            capture_output=True,
+            text=True,
+            env={
+                "PATH": "/usr/bin:/bin",
+                "GAMECRAFT_BENCH_JUDGE": "openai",
+                "GAMECRAFT_BENCH_JUDGE_OPENAI_BASE_URL": "https://judge.example/v1",
+            },
+        )
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("requires OPENAI_API_KEY", completed.stderr)
+
+    def test_export_judge_env_uses_default_keyless_glm_judge(self) -> None:
+        script = ROOT / "scripts/gcbench_e2e/export_judge_env.sh"
+        completed = subprocess.run(
+            ["bash", "-c", f"source '{script}'; printf '%s %s %s\\n' \"$OPENAI_API_KEY\" \"$OPENAI_BASE_URL\" \"$GAMECRAFT_BENCH_JUDGE_MODEL\""],
+            capture_output=True,
+            text=True,
+            env={"PATH": "/usr/bin:/bin"},
+        )
+        self.assertEqual(completed.returncode, 0)
+        self.assertIn("EMPTY http://29.116.237.75:8080/v1 GLM-5.2-W4AFP8-node1", completed.stdout)
 
     def test_export_judge_env_allows_explicit_stub(self) -> None:
         script = ROOT / "scripts/gcbench_e2e/export_judge_env.sh"
