@@ -873,6 +873,29 @@ def _run_harness_admission_case(
             run_ref=str(case_dir.resolve()),
         )
 
+    def seed_evaluation_needs_retry() -> bool:
+        """Detect a persisted seed-judge outage that must be re-evaluated.
+
+        A seed verifier runs during init, before the episode controller starts.
+        Resuming only cmd_evolve would otherwise preserve the old 402/timeout
+        forever even after the judge service becomes healthy.
+        """
+        if not evaluate_seed:
+            return False
+        if not state_path.is_file():
+            return False
+        try:
+            state = read_json(state_path)
+        except (OSError, ValueError, TypeError):
+            return False
+        evaluation = state.get("champion_evaluation", {})
+        constraints = evaluation.get("constraints", {})
+        evaluator = evaluation.get("evaluator", {})
+        return (
+            constraints.get("infrastructure_ok") is False
+            or bool(evaluator.get("infrastructure_failure", False))
+        )
+
     if case_dir.exists() and any(case_dir.iterdir()):
         state_path = case_dir / "state.json"
         manifest_path = case_dir / "manifest.json"
@@ -917,13 +940,27 @@ def _run_harness_admission_case(
         if resumable_files_present:
             st = json.loads(state_path.read_text(encoding="utf-8"))
             status = str(st.get("status") or "")
-            if status == "completed":
+            if seed_evaluation_needs_retry():
+                retry_index = 1
+                while (case_dir.parent / f"{case_dir.name}.seed-infra-retry-{retry_index}").exists():
+                    retry_index += 1
+                archived = case_dir.parent / f"{case_dir.name}.seed-infra-retry-{retry_index}"
+                case_dir.rename(archived)
+                print(
+                    f"[{case_id}] archived stale seed infrastructure episode to "
+                    f"{archived.name}; re-running seed verifier"
+                )
+                case_dir.mkdir(parents=True, exist_ok=True)
+                resumable_files_present = False
+            if not resumable_files_present:
+                pass
+            elif status == "completed":
                 return load_episode_outcome(
                     case_id=case_id,
                     harness_id=harness.harness_id,
                     run_dir=case_dir,
                 )
-            if status in _ADMISSION_RESUMABLE_STATUSES:
+            elif status in _ADMISSION_RESUMABLE_STATUSES:
                 _maybe_clear_stale_run_lock(case_dir)
                 owner_path = case_dir / ".loop.lock" / "owner.json"
                 if owner_path.is_file():
