@@ -628,7 +628,6 @@ def _run_paired_harness_admission_case(
                     candidate=candidate,
                     parent_outcome=parent_outcome,
                     candidate_outcome=candidate_outcome,
-                    max_case_regression=engine.config.max_case_regression,
                     created_at=str(existing.get("created_at") or utc_now()),
                 )
                 if existing != normalized:
@@ -695,7 +694,6 @@ def _run_paired_harness_admission_case(
             candidate=candidate,
             parent_outcome=parent_outcome,
             candidate_outcome=candidate_outcome,
-            max_case_regression=engine.config.max_case_regression,
         )
         atomic_write_json(paired_path, paired)
         print(
@@ -728,7 +726,6 @@ def _run_paired_harness_admission_case(
         candidate=candidate,
         parent_outcome=parent_outcome,
         candidate_outcome=candidate_outcome,
-        max_case_regression=engine.config.max_case_regression,
     )
     atomic_write_json(paired_path, paired)
 
@@ -747,11 +744,12 @@ def _paired_admission_payload(
     candidate: HarnessProfile,
     parent_outcome: HarnessEpisodeOutcome,
     candidate_outcome: HarnessEpisodeOutcome,
-    max_case_regression: float,
+    max_case_regression: float | None = None,
     created_at: str | None = None,
 ) -> dict[str, Any]:
-    """Build promotion evidence, excluding evaluator infrastructure failures."""
+    """Build paired evidence; rubric validation owns promotion decisions."""
 
+    del max_case_regression  # Compatibility with older callers and snapshots.
     parent_score = parent_outcome.final_score
     candidate_score = candidate_outcome.final_score
     infrastructure_ok = (
@@ -765,7 +763,9 @@ def _paired_admission_payload(
         reason = "paired admission score missing"
     else:
         delta = candidate_score - parent_score
-        passed = delta >= -max_case_regression
+        # Benchmark score deltas remain diagnostic only. Hard/soft rubric
+        # monotonicity is evaluated by HarnessRubricValidator.
+        passed = True
         reason = (
             f"cand={candidate_score:.4f} parent={parent_score:.4f} "
             f"delta={delta:.4f}"

@@ -15,7 +15,8 @@
     "timeout_seconds": 1800,
     "env": {
       "CODEX_API_BASE": "http://29.116.237.135:8080/v1",
-      "CODEX_MODEL": "Kimi-K2.7-Code"
+      "CODEX_MODEL": "Kimi-K2.7-Code",
+      "GAME_LOOP_BACKBONE_PROVIDER": "kimi"
     }
   },
   "method": {
@@ -140,8 +141,6 @@
       "mutation_width": 1,
       "replay_min_cases": 2,
       "rubric_validation_sample_size": 2,
-      "promotion_delta_min": 0.05,
-      "max_case_regression": 0.05,
       "loop_role": "outer",
       "require_rubric_validation": true,
       "dynamic_rubric_generation": true,

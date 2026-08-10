@@ -655,10 +655,6 @@ class HarnessEvolutionEngine:
             reasons.append(
                 f"usable replay pairs {len(deltas)} < required {self.config.replay_min_cases}"
             )
-        if median_delta is None or median_delta < self.config.promotion_delta_min:
-            reasons.append("paired median improvement is below the promotion threshold")
-        if deltas and min(deltas) < -self.config.max_case_regression:
-            reasons.append("at least one replay case exceeds the regression limit")
         if rubric_validation is not None and not rubric_validation.get("accepted", True):
             reasons.extend(str(item) for item in rubric_validation.get("reasons", []))
         accepted = not reasons

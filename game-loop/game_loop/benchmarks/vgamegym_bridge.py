@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 
 from game_loop.runtime import GameTask, OpenGameRuntime, OpenGameRuntimeConfig
+from .runtime_config import runtime_config_from_environment
 from game_loop.utils import atomic_write_json, read_json
 
 from .vgamegym_eval import infrastructure_failure, normalize_official_result
@@ -106,7 +107,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--instruction-file", type=Path, required=True)
     parser.add_argument("--task-root", type=Path, required=True)
     parser.add_argument("--output-manifest", type=Path, required=True)
-    parser.add_argument("--runtime-config-json", required=True)
+    parser.add_argument("--runtime-config-json")
+    parser.add_argument("--backbone-provider")
     parser.add_argument(
         "--evaluator-command-json",
         default=os.environ.get("VGAMEGYM_EVALUATOR_COMMAND_JSON", "[]"),
@@ -114,8 +116,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout", type=int, default=7200)
     parser.add_argument("--evaluator-timeout", type=int, default=1800)
     args = parser.parse_args(argv)
-    config = OpenGameRuntimeConfig.from_dict(json.loads(args.runtime_config_json))
-    config = OpenGameRuntimeConfig.from_dict({**config.to_dict(), "timeout_seconds": args.timeout})
+    config = runtime_config_from_environment(
+        provider=args.backbone_provider,
+        timeout_seconds=args.timeout,
+    )
+    if args.runtime_config_json:
+        config = OpenGameRuntimeConfig.from_dict(json.loads(args.runtime_config_json))
+        config = OpenGameRuntimeConfig.from_dict(
+            {**config.to_dict(), "timeout_seconds": args.timeout}
+        )
     evaluator_command = json.loads(args.evaluator_command_json)
     if not isinstance(evaluator_command, list) or not all(
         isinstance(item, str) for item in evaluator_command

@@ -71,7 +71,7 @@ class EpisodeIsolation:
             source = skills_source.resolve()
             if not source.is_dir():
                 raise ValueError(f"skills_source must be a directory: {source}")
-            shutil.copytree(source, skill_target)
+            _copy_skills_source(source, skill_target)
         else:
             skill_target.mkdir()
         if system_prompt is not None:
@@ -106,3 +106,14 @@ class EpisodeIsolation:
             "cache_home": str(self.cache_home),
             "data_home": str(self.data_home),
         }
+
+
+def _copy_skills_source(source: Path, destination: Path) -> None:
+    """Materialize named upstream bundles without nesting their category tree."""
+
+    if (source / "router" / "SKILL.md").is_file() and (source / "skills").is_dir():
+        from game_loop.baselines.awesome_gamedev_skills import materialize_skills_source
+
+        materialize_skills_source(source, destination)
+        return
+    shutil.copytree(source, destination)

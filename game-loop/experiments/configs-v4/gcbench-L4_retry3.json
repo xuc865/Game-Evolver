@@ -21,7 +21,8 @@
     "timeout_seconds": 1800,
     "env": {
       "CODEX_API_BASE": "http://29.116.237.135:8080/v1",
-      "CODEX_MODEL": "Kimi-K2.7-Code"
+      "CODEX_MODEL": "Kimi-K2.7-Code",
+      "GAME_LOOP_BACKBONE_PROVIDER": "kimi"
     }
   },
   "method": {

@@ -25,9 +25,10 @@ def normalize_official_result(raw: dict[str, Any], *, raw_result_ref: Path) -> d
                 f"V-GameGym {modality} evaluator result is missing",
                 raw_result_ref=raw_result_ref,
             )
-        if value.get("error"):
+        error = str(value.get("error", "")).strip()
+        if error and error not in {"No screenshots found", "Video file does not exist"}:
             return infrastructure_failure(
-                f"V-GameGym {modality} judge failed: {value['error']}",
+                f"V-GameGym {modality} judge failed: {error}",
                 raw_result_ref=raw_result_ref,
             )
         if value.get("total_score") is None:
@@ -42,6 +43,8 @@ def normalize_official_result(raw: dict[str, Any], *, raw_result_ref: Path) -> d
                 raw_result_ref=raw_result_ref,
             )
         objectives[modality] = score / 100.0
+        if error:
+            diagnostics.append(f"{modality}: {error}")
     if not run_ok:
         diagnostics.append("generated Pygame artifact did not execute successfully")
     primary = sum(objectives.values()) / len(objectives)

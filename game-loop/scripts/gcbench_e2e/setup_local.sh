@@ -8,16 +8,20 @@ GAMECRAFT_COMMIT="21028dfa726b10e340f102961aba21ca8016499b"
 VENV="${GAMECRAFT_VENV:-$PROJECT_ROOT/.venvs/gamecraft-bench}"
 IMAGE="${GAMECRAFT_IMAGE:-harness-game/gamecraft-bench-e2e:21028df}"
 MODE="local"
+SOURCE_MODE="pinned_git"
 
 command -v git >/dev/null || { echo "git is required" >&2; exit 2; }
 command -v python3 >/dev/null || { echo "python3 is required" >&2; exit 2; }
 
-if [ ! -d "$GAMECRAFT_ROOT/.git" ]; then
-  bash "$SCRIPT_DIR/setup.sh"
-fi
-test -d "$GAMECRAFT_ROOT/.git"
-test "$(git -C "$GAMECRAFT_ROOT" rev-parse HEAD)" = "$GAMECRAFT_COMMIT"
 test -f "$GAMECRAFT_ROOT/gamecraft_bench/verifier/cli.py"
+if [ -d "$GAMECRAFT_ROOT/.git" ]; then
+  test "$(git -C "$GAMECRAFT_ROOT" rev-parse HEAD)" = "$GAMECRAFT_COMMIT"
+else
+  # The harness repository may vendor the official verifier as a source tree
+  # instead of a nested Git checkout. It is runnable, but its revision cannot
+  # be proven by this local doctor.
+  SOURCE_MODE="source_tree_unpinned"
+fi
 
 PY312=""
 for candidate in python3.12 python3.13 uv; do
@@ -66,5 +70,6 @@ echo "GAMECRAFT_MODE=$MODE"
 echo "GAMECRAFT_VENV=$VENV"
 echo "GAMECRAFT_ROOT=$GAMECRAFT_ROOT"
 echo "GAMECRAFT_COMMIT=$GAMECRAFT_COMMIT"
+echo "GAMECRAFT_SOURCE_MODE=$SOURCE_MODE"
 echo "GAMECRAFT_IMAGE=$IMAGE"
 echo "GameCraftBench official environment doctor: OK"

@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import multiprocessing as mp
 import os
+import queue
 import shutil
 import sys
 import tempfile
 from pathlib import Path
 
 from game_loop.runtime import GameTask, OpenGameRuntime, OpenGameRuntimeConfig
+from .runtime_config import runtime_config_from_environment
 
 
 def _ensure_gdbench_import_stubs() -> None:
@@ -51,7 +54,7 @@ def doctor(
     workspace = agent_workspace.expanduser().resolve()
     private_source = private_task_source.expanduser().resolve()
     instruction = instruction_file.expanduser().resolve()
-    godot = os.environ.get("GODOT_EXEC_PATH", "godot")
+    godot = os.environ.get("GODOT_EXEC_PATH") or _default_godot_path(root)
     godot_resolved = shutil.which(godot) or (
         str(Path(godot).expanduser().resolve())
         if Path(godot).expanduser().is_file()
@@ -79,6 +82,18 @@ def doctor(
     }
 
 
+def _default_godot_path(gdbench_root: Path) -> str:
+    start = gdbench_root.resolve()
+    for root in (start, *start.parents):
+        for candidate in (
+            root / "scripts" / "gdbench_e2e" / "godot_docker.sh",
+            root / "game-loop" / "scripts" / "gdbench_e2e" / "godot_docker.sh",
+        ):
+            if candidate.is_file():
+                return str(candidate)
+    return "godot"
+
+
 def run_bridge(
     *,
     runtime: OpenGameRuntime,
@@ -88,6 +103,7 @@ def run_bridge(
     task_name: str,
     instruction_file: Path,
     output_manifest: Path,
+    evaluator_timeout: int = 900,
 ) -> int:
     root = gdbench_root.resolve()
     workspace = agent_workspace.resolve()
@@ -143,11 +159,16 @@ def run_bridge(
             # override here so the validation-only bridge works with a pinned
             # engine that is not globally symlinked.
             runner.godot_path = os.environ.get(
-                "GODOT_EXEC_PATH", getattr(runner, "godot_path", "godot")
+                "GODOT_EXEC_PATH",
+                _default_godot_path(root),
             )
             runner.tasks_dir = tasks_dir
             runner.results_dir = evaluation_root / "results"
-            native = runner.run_benchmark(task_name)
+            native = _run_official_validation_with_timeout(
+                runner=runner,
+                task_name=task_name,
+                timeout_seconds=evaluator_timeout,
+            )
             result.update(native)
             result["solver_success"] = True
 
@@ -185,17 +206,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--task-name", required=True)
     parser.add_argument("--instruction-file", type=Path, required=True)
     parser.add_argument("--output-manifest", type=Path, required=True)
-    runtime = parser.add_mutually_exclusive_group(required=True)
+    runtime = parser.add_mutually_exclusive_group(required=False)
     runtime.add_argument("--runtime-config-json")
     runtime.add_argument("--runtime-profile", type=Path)
+    parser.add_argument("--backbone-provider")
     parser.add_argument("--timeout", type=int, default=7200)
+    parser.add_argument("--evaluator-timeout", type=int, default=900)
     parser.add_argument("--doctor", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
     config_value = (
         json.loads(args.runtime_config_json)
         if args.runtime_config_json is not None
-        else json.loads(args.runtime_profile.expanduser().read_text(encoding="utf-8"))
+        else (
+            json.loads(args.runtime_profile.expanduser().read_text(encoding="utf-8"))
+            if args.runtime_profile is not None
+            else None
+        )
     )
     report = doctor(
         gdbench_root=args.gdbench_root,
@@ -206,8 +233,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.doctor or args.dry_run:
         print(json.dumps({**report, "mode": "dry-run" if args.dry_run else "doctor"}, indent=2))
         return 0 if report["ok"] else 2
-    config = OpenGameRuntimeConfig.from_dict(config_value)
-    config = OpenGameRuntimeConfig.from_dict({**config.to_dict(), "timeout_seconds": args.timeout})
+    config = (
+        OpenGameRuntimeConfig.from_dict(config_value)
+        if config_value is not None
+        else runtime_config_from_environment(
+            provider=args.backbone_provider,
+            timeout_seconds=args.timeout,
+        )
+    )
+    if config_value is not None:
+        config = OpenGameRuntimeConfig.from_dict(
+            {**config.to_dict(), "timeout_seconds": args.timeout}
+        )
     return run_bridge(
         runtime=OpenGameRuntime(config),
         gdbench_root=args.gdbench_root.expanduser(),
@@ -216,6 +253,7 @@ def main(argv: list[str] | None = None) -> int:
         task_name=args.task_name,
         instruction_file=args.instruction_file.expanduser(),
         output_manifest=args.output_manifest.expanduser(),
+        evaluator_timeout=args.evaluator_timeout,
     )
 
 
@@ -242,6 +280,60 @@ def _copy_public_artifact(source: Path, target: Path) -> None:
         destination = target / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, destination)
+
+
+def _official_validation_worker(runner: object, task_name: str, result_queue: mp.Queue) -> None:
+    try:
+        result_queue.put({"ok": True, "result": runner.run_benchmark(task_name)})
+    except BaseException as exc:
+        result_queue.put({"ok": False, "error": str(exc)})
+
+
+def _run_official_validation_with_timeout(
+    *,
+    runner: object,
+    task_name: str,
+    timeout_seconds: int,
+) -> dict[str, object]:
+    context = mp.get_context("fork") if hasattr(mp, "get_context") else mp
+    result_queue: mp.Queue = context.Queue()
+    process = context.Process(
+        target=_official_validation_worker,
+        args=(runner, task_name, result_queue),
+    )
+    process.start()
+    process.join(timeout_seconds)
+    if process.is_alive():
+        process.terminate()
+        process.join(10)
+        if process.is_alive():
+            process.kill()
+            process.join(5)
+        return {
+            "task_name": task_name,
+            "success": False,
+            "message": f"Validation timed out after {timeout_seconds}s",
+        }
+    try:
+        payload = result_queue.get_nowait()
+    except queue.Empty:
+        return {
+            "task_name": task_name,
+            "success": False,
+            "message": "Validation ended without a result",
+        }
+    if payload.get("ok"):
+        result = payload.get("result")
+        return result if isinstance(result, dict) else {
+            "task_name": task_name,
+            "success": False,
+            "message": "Validation returned a non-object result",
+        }
+    return {
+        "task_name": task_name,
+        "success": False,
+        "message": f"Error running validation: {payload.get('error', 'unknown error')}",
+    }
 
 
 if __name__ == "__main__":

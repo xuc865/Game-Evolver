@@ -62,14 +62,24 @@ class ProviderLaunchTests(unittest.TestCase):
     def test_internal_provider_is_real_without_api_key(self) -> None:
         providers = [
         ("http://29.116.237.135:8080/v1", "Kimi-K2.7-Code"),
-        ("http://29.116.237.5:8080/v1", "GLM-5.2-W4AFP8-node6"),
-        ("http://29.116.237.141:8080/v1", "Qwen3.6-27B"),
+        ("http://29.116.237.75:8080/v1", "GLM-5.2-W4AFP8-node1"),
         ]
         for base, model in providers:
             with self.subTest(model=model):
                 env = {"CODEX_API_BASE": base, "CODEX_MODEL": model}
                 self.assertEqual(_provider_policy("game_loop_validate_agent_env", env).returncode, 0)
                 self.assertEqual(_provider_policy("game_loop_should_stub_agent", env).returncode, 1)
+
+    def test_dashscope_qwen_requires_runtime_secret(self) -> None:
+        env = {
+            "CODEX_API_BASE": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "CODEX_MODEL": "qwen3.6-27b",
+            "GAME_LOOP_AGENT_REQUIRES_API_KEY": "1",
+        }
+        missing = _provider_policy("game_loop_validate_agent_env", env)
+        self.assertNotEqual(missing.returncode, 0)
+        env["CODEX_API_KEY"] = "runtime-secret"
+        self.assertEqual(_provider_policy("game_loop_validate_agent_env", env).returncode, 0)
 
     def test_stub_requires_explicit_switch(self) -> None:
         completed = _provider_policy(

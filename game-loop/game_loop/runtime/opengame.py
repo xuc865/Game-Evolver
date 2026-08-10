@@ -310,9 +310,16 @@ class OpenGameRuntime:
         diagnostics: list[str] = []
         if result.error:
             diagnostics.append(result.error)
+        provider_error = _looks_like_provider_error(result.result_text)
+        if provider_error:
+            diagnostics.append(result.result_text)
         if not artifact.exists():
             diagnostics.append(f"expected artifact is missing: {task.artifact_relpath}")
-        status = "completed" if result.return_code == 0 and artifact.exists() else "failed"
+        status = (
+            "completed"
+            if result.return_code == 0 and artifact.exists() and not provider_error
+            else "failed"
+        )
         trajectory.record("runtime_finished", "harness", {
             "return_code": result.return_code,
             "status": status,
@@ -393,3 +400,13 @@ def _workspace_artifact(workspace: Path, relative: str) -> Path:
     except ValueError as exc:
         raise ValueError("artifact path escaped the episode workspace") from exc
     return artifact
+
+
+def _looks_like_provider_error(text: str) -> bool:
+    lowered = text.strip().casefold()
+    return (
+        lowered.startswith("[api error:")
+        or "access denied" in lowered
+        or '"type":"arrearage"' in lowered
+        or '"code":"arrearage"' in lowered
+    )

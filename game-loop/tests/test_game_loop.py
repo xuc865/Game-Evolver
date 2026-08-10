@@ -795,7 +795,7 @@ class GameLoopTests(unittest.TestCase):
             self.assertEqual(engine.champion().harness_id, result.candidate_harness_id)
             self.assertAlmostEqual(result.median_delta, 0.04)
 
-    def test_harness_outer_epoch_rejects_budget_mismatch_and_case_regression(self):
+    def test_harness_outer_epoch_rejects_budget_mismatch_but_ignores_score_regression(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             config = write_config(
@@ -826,7 +826,39 @@ class GameLoopTests(unittest.TestCase):
             )
             self.assertFalse(result.accepted)
             self.assertTrue(any("budgets differ" in reason for reason in result.reasons))
-            self.assertTrue(any("regression limit" in reason for reason in result.reasons))
+            self.assertFalse(any("regression limit" in reason for reason in result.reasons))
+
+    def test_harness_epoch_can_promote_without_benchmark_score_gain(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config = write_config(root, candidates=1, level="L4", max_probe_calls=2)
+            engine = HarnessEvolutionEngine(root / "outer", config.method.harness_evolution)
+            parent = engine.initialize()
+            candidate = engine.propose(
+                parent_id=parent.harness_id,
+                gradient=HarnessSemanticGradient("candidate", ("ImproveObjective",)),
+                epoch=1,
+            )
+            outcomes = [
+                HarnessEpisodeOutcome("a", parent.harness_id, 1.0, True, 3, 3),
+                HarnessEpisodeOutcome("b", parent.harness_id, 1.0, True, 3, 3),
+            ]
+            candidate_outcomes = [
+                HarnessEpisodeOutcome("a", candidate.harness_id, 0.2, True, 3, 3),
+                HarnessEpisodeOutcome("b", candidate.harness_id, 0.2, True, 3, 3),
+            ]
+
+            result = engine.assess_epoch(
+                epoch=1,
+                parent=parent,
+                candidate=candidate,
+                parent_outcomes=outcomes,
+                candidate_outcomes=candidate_outcomes,
+                rubric_validation={"accepted": True, "reasons": []},
+            )
+
+            self.assertTrue(result.accepted)
+            self.assertEqual(result.median_delta, -0.8)
 
     def test_command_replay_runner_builds_isolated_matched_episode_commands(self):
         with tempfile.TemporaryDirectory() as td:

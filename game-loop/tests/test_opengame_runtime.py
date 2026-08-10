@@ -256,7 +256,7 @@ class OpenGameRuntimeTests(unittest.TestCase):
             "deepseek": "DEEPSEEK_API_KEY",
             "kimi": None,
             "glm": None,
-            "qwen": None,
+            "qwen": "DASHSCOPE_API_KEY",
         }
         for provider, credential_env in cases.items():
             with self.subTest(provider=provider), tempfile.TemporaryDirectory() as td:

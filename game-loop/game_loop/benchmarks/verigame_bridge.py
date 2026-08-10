@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 
 from game_loop.runtime import GameTask, OpenGameRuntime, OpenGameRuntimeConfig
+from .runtime_config import runtime_config_from_environment
 from game_loop.utils import atomic_write_json
 
 from .ggv_contract import CommandGGVWorker, GGVWorker, run_paper_compatible_ggv
@@ -102,7 +103,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--instruction-file", type=Path, required=True)
     parser.add_argument("--task-root", type=Path, required=True)
     parser.add_argument("--output-manifest", type=Path, required=True)
-    parser.add_argument("--runtime-config-json", required=True)
+    parser.add_argument("--runtime-config-json")
+    parser.add_argument("--backbone-provider")
     parser.add_argument(
         "--worker-command-json",
         default=os.environ.get("GAMEGEN_VERIFIER_WORKER_COMMAND_JSON", ""),
@@ -111,8 +113,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--worker-timeout", type=int, default=1800)
     args = parser.parse_args(argv)
 
-    config = OpenGameRuntimeConfig.from_dict(json.loads(args.runtime_config_json))
-    config = OpenGameRuntimeConfig.from_dict({**config.to_dict(), "timeout_seconds": args.timeout})
+    config = runtime_config_from_environment(
+        provider=args.backbone_provider,
+        timeout_seconds=args.timeout,
+    )
+    if args.runtime_config_json:
+        config = OpenGameRuntimeConfig.from_dict(json.loads(args.runtime_config_json))
+        config = OpenGameRuntimeConfig.from_dict(
+            {**config.to_dict(), "timeout_seconds": args.timeout}
+        )
     worker: GGVWorker | None = None
     if args.worker_command_json:
         command = json.loads(args.worker_command_json)

@@ -15,6 +15,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 REPO_ROOT = ROOT.parent
 SMOKE = ROOT / "experiments" / "smoke"
 GCBENCH = REPO_ROOT / "gcbench"
@@ -24,6 +26,7 @@ VGAME_PYTHON = VGAME / ".venv" / "bin" / "python"
 GGV = ROOT / "third_party" / "GameGen-Verifier"
 OPENGAME_PROFILE = ROOT / "experiments" / "inner-agent" / "opengame-profile.local.json"
 BACKBONES = ROOT / "experiments" / "inner-agent" / "backbones"
+AWESOME_SKILLS_BASELINE = ROOT / "experiments" / "baselines" / "awesome-gamedev-agent-skills.runtime.json"
 
 
 @dataclass
@@ -91,8 +94,27 @@ def phase_provider_doctor(report: SmokeReport, *, require_credentials: bool) -> 
     )
     ok = completed.returncode == 0
     if not ok and not require_credentials:
-        ok = "deepseek" in completed.stdout and completed.returncode == 1
-    report.add(PhaseResult("provider_doctor", ok, completed.stdout[-800:]))
+        try:
+            payload = json.loads(completed.stdout)
+            providers = payload.get("providers", [])
+            ok = (
+                completed.returncode == 1
+                and any(
+                    item.get("credential_required") and not item.get("credential_present")
+                    for item in providers
+                )
+            )
+        except json.JSONDecodeError:
+            ok = False
+    report.add(PhaseResult(
+        "provider_doctor",
+        ok,
+        completed.stdout[-800:] + (
+            "\ncredential-required providers may be unready in preflight; "
+            "run with their secret environment for a real smoke."
+            if ok and completed.returncode != 0 else ""
+        ),
+    ))
 
 
 def phase_provider_smokes(report: SmokeReport, providers: list[str]) -> None:
@@ -132,7 +154,11 @@ def phase_opengame_doctor(report: SmokeReport) -> None:
 def phase_gcbench_environment(report: SmokeReport) -> None:
     script = ROOT / "scripts" / "gcbench_e2e" / "setup_local.sh"
     completed = _run(["bash", str(script)])
-    report.add(PhaseResult("gcbench_environment", completed.returncode == 0, completed.stdout[-800:]))
+    report.add(PhaseResult(
+        "gcbench_environment",
+        completed.returncode == 0,
+        (completed.stdout + completed.stderr)[-1200:],
+    ))
 
 
 def phase_gdbench_environment(report: SmokeReport) -> None:
@@ -218,25 +244,31 @@ def phase_agentx_nested(report: SmokeReport) -> None:
     report.add(PhaseResult("agentx_nested", completed.returncode == 0, completed.stderr[-300:]))
 
 
-def _runtime_profile(provider: str) -> dict:
+def _runtime_profile(provider: str, *, awesome_skills: bool = False) -> dict:
     from game_loop.runtime.profile import merge_runtime_profile
     from game_loop.utils import read_json
 
     return merge_runtime_profile(
         opengame_profile=read_json(OPENGAME_PROFILE),
+        baseline_profile=(
+            None if not awesome_skills else read_json(AWESOME_SKILLS_BASELINE)
+        ),
         backbone_profile=read_json(BACKBONES / f"{provider}.json"),
     ).to_dict()
 
 
-def phase_benchmark_e2e(report: SmokeReport, *, provider: str, quick: bool) -> None:
+def phase_benchmark_e2e(
+    report: SmokeReport, *, provider: str, quick: bool, awesome_skills: bool = False
+) -> None:
     failures: list[str] = []
     passes: list[str] = []
     env = {}
     if token := os.environ.get("DEEPSEEK_API_KEY"):
         env["DEEPSEEK_API_KEY"] = token
     env.setdefault("GAMECRAFT_BENCH_JUDGE", "stub")
-    runtime_json = json.dumps(_runtime_profile(provider))
-    out_root = ROOT / ".smoke" / "comprehensive-e2e" / provider
+    runtime_json = json.dumps(_runtime_profile(provider, awesome_skills=awesome_skills))
+    run_label = provider + ("-awesome-skills" if awesome_skills else "")
+    out_root = ROOT / ".smoke" / "comprehensive-e2e" / run_label
     out_root.mkdir(parents=True, exist_ok=True)
 
     # gcbench
@@ -356,8 +388,6 @@ def phase_benchmark_e2e(report: SmokeReport, *, provider: str, quick: bool) -> N
                 str(ROOT / "scripts" / "gdbench_prepare_task.py"),
                 "--gdbench-root",
                 str(GDBENCH),
-                "--task-name",
-                "task_0002",
                 "--output-dir",
                 td,
             ]
@@ -366,6 +396,7 @@ def phase_benchmark_e2e(report: SmokeReport, *, provider: str, quick: bool) -> N
             failures.append(f"gdbench_prepare: {prepared.stderr[-300:]}")
         else:
             task_dir = Path(prepared.stdout.strip())
+            task_name = task_dir.name
             gdbench_manifest = out_root / "gdbench_execution.json"
             gdbench_cmd = [
                 sys.executable,
@@ -378,7 +409,7 @@ def phase_benchmark_e2e(report: SmokeReport, *, provider: str, quick: bool) -> N
                 "--private-task-source",
                 str(task_dir),
                 "--task-name",
-                "task_0002",
+                task_name,
                 "--instruction-file",
                 str(SMOKE / "gdbench" / "instruction.txt"),
                 "--output-manifest",
@@ -411,6 +442,7 @@ def run_smoke(
     quick: bool = True,
     skip_e2e: bool = False,
     skip_provider_smokes: bool = False,
+    awesome_skills: bool = False,
     download_dataset: bool = True,
     require_credentials: bool = False,
     output: Path | None = None,
@@ -429,7 +461,12 @@ def run_smoke(
     if not skip_provider_smokes:
         phase_provider_smokes(report, providers or ["deepseek", "kimi", "glm", "qwen"])
     if not skip_e2e:
-        phase_benchmark_e2e(report, provider=provider, quick=quick)
+        phase_benchmark_e2e(
+            report,
+            provider=provider,
+            quick=quick,
+            awesome_skills=awesome_skills,
+        )
     if output is not None:
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps(report.to_dict(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -445,6 +482,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--skip-provider-smokes", action="store_true")
     parser.add_argument("--no-download", action="store_true")
     parser.add_argument("--require-credentials", action="store_true")
+    parser.add_argument("--awesome-skills", action="store_true")
     parser.add_argument("--output", type=Path, default=ROOT / ".smoke" / "comprehensive-smoke-report.json")
     args = parser.parse_args(argv)
     report = run_smoke(
@@ -454,6 +492,7 @@ def main(argv: list[str] | None = None) -> int:
         skip_provider_smokes=args.skip_provider_smokes,
         download_dataset=not args.no_download,
         require_credentials=args.require_credentials,
+        awesome_skills=args.awesome_skills,
         output=args.output,
     )
     print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))

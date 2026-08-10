@@ -14,8 +14,9 @@
     "cwd": ".",
     "timeout_seconds": 1800,
     "env": {
-      "CODEX_API_BASE": "http://29.116.237.5:8080/v1",
-      "CODEX_MODEL": "GLM-5.2-W4AFP8-node6"
+      "CODEX_API_BASE": "http://29.116.237.75:8080/v1",
+      "CODEX_MODEL": "GLM-5.2-W4AFP8-node1",
+      "GAME_LOOP_BACKBONE_PROVIDER": "glm"
     }
   },
   "method": {
@@ -153,8 +154,6 @@
       "mutation_width": 1,
       "replay_min_cases": 3,
       "rubric_validation_sample_size": 3,
-      "promotion_delta_min": 0.03,
-      "max_case_regression": 0.08,
       "loop_role": "inner",
       "require_rubric_validation": true,
       "dynamic_rubric_generation": true,

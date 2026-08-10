@@ -72,14 +72,22 @@ class GameDevBenchAdapter(BenchmarkAdapter):
         validation = value.get("validation") if isinstance(value.get("validation"), dict) else value
         success = bool(validation.get("success", False))
         message = str(validation.get("message", value.get("message", ""))).strip()
+        solver = value.get("solver", {}) if isinstance(value.get("solver"), dict) else {}
         infrastructure_markers = (
             "project.godot not found",
             "validation timed out",
             "error running validation",
             "no validation result found",
+            "opengame failed",
         )
-        feasible = success or not any(marker in message.lower() for marker in infrastructure_markers)
-        solver = value.get("solver", {}) if isinstance(value.get("solver"), dict) else {}
+        solver_success = bool(solver.get("success", True))
+        feasible = (
+            success
+            or (
+                solver_success
+                and not any(marker in message.lower() for marker in infrastructure_markers)
+            )
+        )
         return EvaluationResult(
             primary_score=1.0 if success else 0.0,
             feasible=feasible,

@@ -8,6 +8,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 
 def _requirement(task_root: Path) -> str:
@@ -84,9 +85,19 @@ def run(
         max_retry_attempts=2,
     )
     evaluator = GameEvaluator(config)
+    text_model = os.environ.get("VGAMEGYM_TEXT_MODEL", "").strip()
+    vl_model = os.environ.get("VGAMEGYM_VL_MODEL", "").strip()
+    if text_model:
+        evaluator.text_client = _override_openai_model(evaluator.text_client, text_model)
+    if vl_model:
+        evaluator.vl_client = _override_openai_model(evaluator.vl_client, vl_model)
     result = evaluator.evaluate_single_game(
         int(game_id), {"requirement": requirement, "generated_code": code}
     )
+    if result is None:
+        cached_result = config.output_path / f"game_{int(game_id)}_evaluation.json"
+        if cached_result.is_file():
+            result = json.loads(cached_result.read_text(encoding="utf-8"))
     if not isinstance(result, dict):
         raise RuntimeError("official V-GameGym evaluator did not return a result")
     result["run_ok"] = True
@@ -96,6 +107,38 @@ def run(
         json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
     return result
+
+
+class _ModelOverrideCompletions:
+    def __init__(self, completions: Any, model: str):
+        self._completions = completions
+        self._model = model
+
+    def create(self, *args: Any, **kwargs: Any) -> Any:
+        kwargs["model"] = self._model
+        return self._completions.create(*args, **kwargs)
+
+
+class _ModelOverrideChat:
+    def __init__(self, chat: Any, model: str):
+        self._chat = chat
+        self.completions = _ModelOverrideCompletions(chat.completions, model)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._chat, name)
+
+
+class _ModelOverrideClient:
+    def __init__(self, client: Any, model: str):
+        self._client = client
+        self.chat = _ModelOverrideChat(client.chat, model)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._client, name)
+
+
+def _override_openai_model(client: Any, model: str) -> Any:
+    return _ModelOverrideClient(client, model)
 
 
 def _resolve_game_file(game_file: Path | None, artifact_dir: Path | None) -> Path:

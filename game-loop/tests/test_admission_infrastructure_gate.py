@@ -60,6 +60,22 @@ class AdmissionInfrastructureGateTests(unittest.TestCase):
         self.assertTrue(paired["passed"])
         self.assertEqual(paired["delta"], 0.0)
 
+    def test_score_regression_is_diagnostic_not_admission_failure(self):
+        parent = SimpleNamespace(harness_id="parent")
+        candidate = SimpleNamespace(harness_id="candidate")
+        paired = _paired_admission_payload(
+            case_id="case-1",
+            parent=parent,
+            candidate=candidate,
+            parent_outcome=HarnessEpisodeOutcome("case-1", "parent", 1.0, True, 1, 1),
+            candidate_outcome=HarnessEpisodeOutcome("case-1", "candidate", 0.2, True, 1, 1),
+            max_case_regression=0.08,
+            created_at="fixed",
+        )
+
+        self.assertTrue(paired["passed"])
+        self.assertEqual(paired["delta"], -0.8)
+
     def test_persisted_evaluator_failure_marks_loaded_outcome_as_infrastructure(self):
         with tempfile.TemporaryDirectory() as td:
             run_dir = Path(td)

@@ -9,20 +9,27 @@ Outputs:
 from __future__ import annotations
 
 import json
+import sys
 from copy import deepcopy
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from game_loop.config import AppConfig
 from game_loop.experiment_presets import build_method_section
 
-ROOT = Path(__file__).resolve().parents[1]
 V4_DIR = ROOT / "experiments" / "configs-v4"
 ABL_DIR = ROOT / "experiments" / "configs-ablation"
 
 MODELS = {
     "kimi": {"CODEX_API_BASE": "http://29.116.237.135:8080/v1", "CODEX_MODEL": "Kimi-K2.7-Code"},
-    "qwen3.6-27b": {"CODEX_API_BASE": "http://29.116.237.141:8080/v1", "CODEX_MODEL": "Qwen3.6-27B"},
-    "glm5.2": {"CODEX_API_BASE": "http://29.116.237.5:8080/v1", "CODEX_MODEL": "GLM-5.2-W4AFP8-node6"},
+    "qwen3.6-27b": {
+        "CODEX_API_BASE": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "CODEX_MODEL": "qwen3.6-27b",
+    },
+    "glm5.2": {"CODEX_API_BASE": "http://29.116.237.75:8080/v1", "CODEX_MODEL": "GLM-5.2-W4AFP8-node1"},
     "deepseek_v4": {"CODEX_API_BASE": "https://api.deepseek.com", "CODEX_MODEL": "deepseek-v4-flash"},
 }
 
@@ -62,13 +69,77 @@ BACKEND_CMDS = {
         "{gcbench_root}",
         "{breakdown_path}",
     ],
-    "gdbench": ["bash", "scripts/run_chat_agent_direct.sh"],
+    "gdbench": [
+        "python3",
+        "-m",
+        "game_loop.benchmarks.gdbench_bridge",
+        "--gdbench-root",
+        "{gdbench_root}",
+        "--agent-workspace",
+        "{agent_workspace}",
+        "--private-task-source",
+        "{private_task_source}",
+        "--task-name",
+        "{task_name}",
+        "--instruction-file",
+        "{instruction_file}",
+        "--output-manifest",
+        "{output_manifest}",
+        "--evaluator-timeout",
+        "180",
+    ],
     "swebench": ["python3", "-m", "game_loop.benchmarks.swebench_bridge"],
     "nl2repo": ["python3", "-m", "game_loop.benchmarks.nl2repo_bridge"],
     "terminalbench": ["python3", "-m", "game_loop.benchmarks.terminalbench_bridge"],
     "weavebench": ["python3", "-m", "game_loop.benchmarks.weavebench_bridge"],
-    "verigame": ["python3", "-m", "game_loop.benchmarks.verigame_bridge"],
-    "vgamegym": ["python3", "-m", "game_loop.benchmarks.vgamegym_bridge"],
+    "verigame": [
+        "python3",
+        "-m",
+        "game_loop.benchmarks.verigame_bridge",
+        "--agent-workspace",
+        "{agent_workspace}",
+        "--instruction-file",
+        "{instruction_file}",
+        "--task-root",
+        "{task_root}",
+        "--output-manifest",
+        "{output_manifest}",
+        "--worker-command-json",
+        json.dumps(
+            [
+                "python3",
+                str(ROOT / "scripts" / "ggv_contract_worker.py"),
+            ]
+        ),
+    ],
+    "vgamegym": [
+        str(ROOT.parent / ".venv" / "bin" / "python"),
+        "-m",
+        "game_loop.benchmarks.vgamegym_bridge",
+        "--agent-workspace",
+        "{agent_workspace}",
+        "--instruction-file",
+        "{instruction_file}",
+        "--task-root",
+        "{task_root}",
+        "--output-manifest",
+        "{output_manifest}",
+        "--evaluator-command-json",
+        json.dumps(
+            [
+                str(ROOT.parent / ".venv" / "bin" / "python"),
+                str(ROOT / "scripts" / "run_vgamegym_official_evaluator.py"),
+                "--official-root",
+                str(ROOT.parent / "third_party" / "VGameGym"),
+                "--task-root",
+                "{{task_root}}",
+                "--artifact-dir",
+                "{{artifact_dir}}",
+                "--raw-output",
+                "{{raw_output}}",
+            ]
+        ),
+    ],
 }
 
 TIMEOUTS = {
@@ -129,6 +200,22 @@ def make_config(
     env: dict[str, str] = {}
     if model_key and model_key in MODELS:
         env.update(MODELS[model_key])
+        env["GAME_LOOP_BACKBONE_PROVIDER"] = {
+            "kimi": "kimi",
+            "qwen3.6-27b": "qwen",
+            "glm5.2": "glm",
+            "deepseek_v4": "deepseek",
+        }[model_key]
+    if bench == "vgamegym":
+        env.setdefault(
+            "VGAMEGYM_VL_BASE_URL",
+            "http://29.116.237.141:8080/v1",
+        )
+        env.setdefault(
+            "VGAMEGYM_TEXT_BASE_URL",
+            "http://29.116.237.135:8080/v1",
+        )
+        env.setdefault("VGAMEGYM_TEXT_MODEL", "Kimi-K2.7-Code")
 
     method = build_method_section(
         bench,
@@ -155,6 +242,10 @@ def make_config(
     }
     if ablation_level is not None:
         config["experiment"]["ablation_level"] = ablation_level
+    # These values are supplied by the backend runner and are intentionally
+    # not model-specific config fields.  Keeping them in the command template
+    # makes every prepared task, including epoch-0 baselines, use the same
+    # bridge contract.
     return config
 
 

@@ -6,6 +6,7 @@ Reads configuration from environment variables:
   CODEX_API_KEY     — API key
   CODEX_THINKING    — "on"/"off"/"medium"/"high" (controls thinking parameter)
   GAME_LOOP_SKILLS_INDEX — path to awesome-gamedev-skills-index.txt
+  GAME_LOOP_SKILLS_ROOT — optional checkout root for loading selected skill bodies
 
 Supports tool calling (function calling), skill index loading, extra
 instructions, and evolution directives.
@@ -100,6 +101,15 @@ class LocalChatAgent:
                 parts.append(content)
             except OSError:
                 pass
+        skills_root = os.environ.get("GAME_LOOP_SKILLS_ROOT", "").strip()
+        if skills_root:
+            parts.append("\n## Skills Source\n")
+            parts.append(
+                "The indexed skills are available at "
+                f"`{skills_root}`. Before applying an indexed skill, read its "
+                "`SKILL.md` with a workspace command using the listed relative path. "
+                "Use only the skills relevant to the current task.\n"
+            )
 
         # ── load extra instructions ──
         extra_instruction_path = os.environ.get("EXTRA_INSTRUCTION_PATH", "")

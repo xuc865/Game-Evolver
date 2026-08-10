@@ -15,11 +15,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# ── set skills index path ──
-export GAME_LOOP_SKILLS_INDEX="$ROOT_DIR/awesome-gamedev-skills-index.txt"
+# ── pin the real upstream skills checkout and generated index ──
+export GAME_LOOP_SKILLS_ROOT="${GAME_LOOP_SKILLS_ROOT:-$ROOT_DIR/third_party/awesome-gamedev-agent-skills}"
+export GAME_LOOP_SKILLS_INDEX="${GAME_LOOP_SKILLS_INDEX:-$ROOT_DIR/experiments/baselines/awesome-gamedev-agent-skills-index.md}"
 
 if [[ ! -f "$GAME_LOOP_SKILLS_INDEX" ]]; then
   echo "WARNING: skills index file not found at $GAME_LOOP_SKILLS_INDEX" >&2
+fi
+if [[ ! -f "$GAME_LOOP_SKILLS_ROOT/router/SKILL.md" ]]; then
+  echo "WARNING: skills checkout not found at $GAME_LOOP_SKILLS_ROOT" >&2
 fi
 
 # ── delegate to direct runner ──

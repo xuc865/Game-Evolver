@@ -547,13 +547,10 @@ def _harness_evolution(
     if loop_role == "outer":
         sample_size = rubric_validation_sample_size or 2
         replay_cases = replay_min_cases or 2
-        promo_delta = promotion_delta_min if promotion_delta_min is not None else 0.05
-        regression = max_case_regression if max_case_regression is not None else 0.05
     else:
         sample_size = rubric_validation_sample_size or 3
         replay_cases = replay_min_cases or 3
-        promo_delta = promotion_delta_min if promotion_delta_min is not None else 0.03
-        regression = max_case_regression if max_case_regression is not None else 0.08
+    del promotion_delta_min, max_case_regression
     payload: dict[str, Any] = {
         "modules": deepcopy(modules),
         "tool_interfaces": deepcopy(tool_interfaces),
@@ -563,8 +560,6 @@ def _harness_evolution(
         "mutation_width": 1,
         "replay_min_cases": replay_cases,
         "rubric_validation_sample_size": sample_size,
-        "promotion_delta_min": promo_delta,
-        "max_case_regression": regression,
         "loop_role": loop_role,
         "require_rubric_validation": require_rubric_validation,
         "dynamic_rubric_generation": True,

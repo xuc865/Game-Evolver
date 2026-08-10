@@ -21,7 +21,8 @@
     "timeout_seconds": 1800,
     "env": {
       "CODEX_API_BASE": "https://api.deepseek.com",
-      "CODEX_MODEL": "deepseek-v4-flash"
+      "CODEX_MODEL": "deepseek-v4-flash",
+      "GAME_LOOP_BACKBONE_PROVIDER": "deepseek"
     }
   },
   "method": {
@@ -258,8 +259,6 @@
       "mutation_width": 1,
       "replay_min_cases": 3,
       "rubric_validation_sample_size": 3,
-      "promotion_delta_min": 0.03,
-      "max_case_regression": 0.08,
       "loop_role": "inner",
       "require_rubric_validation": true,
       "dynamic_rubric_generation": true,

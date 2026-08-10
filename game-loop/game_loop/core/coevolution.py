@@ -108,6 +108,26 @@ class CoevolutionEngine:
 
     def initialize(self, *, seed: ArtifactRecord, evaluation: EvaluationResult) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
+        self._write_initial_archives(seed=seed, evaluation=evaluation, overwrite=True)
+
+    def ensure_initialized(
+        self,
+        *,
+        seed: ArtifactRecord,
+        evaluation: EvaluationResult,
+    ) -> None:
+        """Repair an interrupted initialization without discarding archives."""
+
+        self.root.mkdir(parents=True, exist_ok=True)
+        self._write_initial_archives(seed=seed, evaluation=evaluation, overwrite=False)
+
+    def _write_initial_archives(
+        self,
+        *,
+        seed: ArtifactRecord,
+        evaluation: EvaluationResult,
+        overwrite: bool,
+    ) -> None:
         specimens: dict[str, dict[str, Any]] = {}
         for family in self.method.probe_families:
             probe_id = _probe_id(family.family_id, family.gene.name, family.gene.initial)
@@ -131,7 +151,7 @@ class CoevolutionEngine:
                 },
                 "created_at": utc_now(),
             }
-        atomic_write_json(self.probe_archive_path, {
+        probe_archive = {
             "schema_version": "1.0",
             "policy": "bounded-parameter-coevolution-v1",
             "policy_options": {
@@ -142,8 +162,8 @@ class CoevolutionEngine:
             "events": [],
             "processed_attempts": [],
             "updated_at": utc_now(),
-        })
-        atomic_write_json(self.game_archive_path, {
+        }
+        game_archive = {
             "schema_version": "1.0",
             "games": {
                 seed.artifact_id: {
@@ -169,14 +189,22 @@ class CoevolutionEngine:
             },
             "processed_attempts": [],
             "updated_at": utc_now(),
-        })
-        atomic_write_json(self.interaction_matrix_path, {
+        }
+        interaction_matrix = {
             "schema_version": "1.0",
             "games": {},
             "pair_events": [],
             "processed_attempts": [],
             "updated_at": utc_now(),
-        })
+        }
+        initial = (
+            (self.probe_archive_path, probe_archive),
+            (self.game_archive_path, game_archive),
+            (self.interaction_matrix_path, interaction_matrix),
+        )
+        for path, payload in initial:
+            if overwrite or not path.is_file():
+                atomic_write_json(path, payload)
 
     def active_catalog(self) -> tuple[FixedProbeConfig, ...]:
         archive = read_json(self.probe_archive_path)

@@ -27,6 +27,10 @@ if [[ -z "${CODEX_MODEL:-}" ]]; then
   echo "ERROR: CODEX_MODEL is required" >&2
   exit 1
 fi
+if [[ "${CODEX_API_BASE:-}" == "https://dashscope.aliyuncs.com/compatible-mode/v1" \
+  && -z "${CODEX_API_KEY:-}" && -n "${DASHSCOPE_API_KEY:-}" ]]; then
+  export CODEX_API_KEY="$DASHSCOPE_API_KEY"
+fi
 
 # ── harness text injection ──
 HARNESS_TEXT="${HARNESS_TEXT:-You are operating inside a game-loop harness. Follow the harness instructions precisely.}"

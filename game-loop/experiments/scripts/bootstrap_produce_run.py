@@ -48,8 +48,8 @@ MODELS: dict[str, dict[str, str]] = {
     "qwen": {
         "run_name": "gcbench-produce-qwen",
         "config": "gcbench-L4_qwen3.6-27b_produce.json",
-        "codex_api_base": "http://29.116.237.141:8080/v1",
-        "codex_model": "Qwen3.6-27B",
+        "codex_api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "codex_model": "qwen3.6-27b",
         "api_key_var": "CODEX_API_KEY",
         "api_key_required": "0",
         "max_output_tokens": "512",
@@ -66,8 +66,8 @@ MODELS: dict[str, dict[str, str]] = {
     "glm": {
         "run_name": "gcbench-produce-glm",
         "config": "gcbench-L4_glm5.2_produce.json",
-        "codex_api_base": "http://29.116.237.5:8080/v1",
-        "codex_model": "GLM-5.2-W4AFP8-node6",
+        "codex_api_base": "http://29.116.237.75:8080/v1",
+        "codex_model": "GLM-5.2-W4AFP8-node1",
         "api_key_var": "CODEX_API_KEY",
         "api_key_required": "0",
         "max_output_tokens": "8192",
@@ -284,7 +284,12 @@ def bootstrap(model_key: str, *, reset: bool = True) -> Path:
                     lines.append(item)
         else:
             for item in root_lines:
-                if item.startswith("DEEPSEEK_") or item.startswith("OPENAI_"):
+                if (
+                    item.startswith("DEEPSEEK_")
+                    or item.startswith("OPENAI_")
+                    or item.startswith("DASHSCOPE_")
+                    or item.startswith("QWEN_")
+                ):
                     lines.append(item)
         env_local.write_text("\n".join(lines) + "\n", encoding="utf-8")
 

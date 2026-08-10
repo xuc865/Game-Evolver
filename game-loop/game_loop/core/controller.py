@@ -270,6 +270,15 @@ class LoopController:
         task_source = Path(str(manifest["task_source"]))
         with RunLock(self.run_dir):
             state = self.load_state()
+            if self.coevolution is not None:
+                seed = self.store.get(state.seed_artifact_id)
+                seed_evaluation = EvaluationResult.from_dict(
+                    read_json(self.run_dir / "seed_evaluation.json")
+                )
+                self.coevolution.ensure_initialized(
+                    seed=seed,
+                    evaluation=seed_evaluation,
+                )
             if state.status == "completed":
                 return state
             if state.status == "paused_infrastructure":

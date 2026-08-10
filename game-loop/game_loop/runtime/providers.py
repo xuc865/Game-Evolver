@@ -99,14 +99,14 @@ PROVIDERS: dict[str, BackboneProviderSpec] = {
         "deployment-provided OpenAI-compatible endpoint", False, True,
     ),
     "glm": BackboneProviderSpec(
-        "glm", "http://29.116.237.5:8080/v1", "GLM-5.2-W4AFP8-node6",
+        "glm", "http://29.116.237.75:8080/v1", "GLM-5.2-W4AFP8-node1",
         ("ZAI_API_KEY", "GLM_API_KEY", "BIGMODEL_API_KEY"), "GLM_BASE_URL", "GLM_MODEL",
         "deployment-provided OpenAI-compatible endpoint", False, True,
     ),
     "qwen": BackboneProviderSpec(
-        "qwen", "http://29.116.237.141:8080/v1", "Qwen3.6-27B",
+        "qwen", "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen3.6-27b",
         ("DASHSCOPE_API_KEY", "QWEN_API_KEY"), "QWEN_BASE_URL", "QWEN_MODEL",
-        "deployment-provided OpenAI-compatible endpoint", False, True,
+        "DashScope OpenAI-compatible API", True,
     ),
 }
 

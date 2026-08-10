@@ -20,11 +20,34 @@ def load_backbone_profile(path: Path) -> dict[str, Any]:
 def merge_runtime_profile(
     *,
     opengame_profile: Mapping[str, Any],
+    baseline_profile: Mapping[str, Any] | None = None,
     backbone_profile: Mapping[str, Any] | None = None,
 ) -> OpenGameRuntimeConfig:
-    """Merge a pinned OpenGame SDK profile with an optional backbone provider."""
+    """Merge a pinned OpenGame SDK profile with baseline and backbone overlays."""
 
     merged = deepcopy(dict(opengame_profile))
+    if baseline_profile:
+        for key in (
+            "system_prompt",
+            "system_prompt_path",
+            "skills_source",
+            "permission_mode",
+            "max_session_turns",
+            "timeout_seconds",
+            "runtime_id",
+        ):
+            if key in baseline_profile and baseline_profile[key] is not None:
+                merged[key] = baseline_profile[key]
+        merged.setdefault("settings", {})
+        merged["settings"] = {
+            **dict(merged.get("settings", {})),
+            **dict(baseline_profile.get("settings", {})),
+        }
+        merged.setdefault("environment", {})
+        merged["environment"] = {
+            **dict(merged.get("environment", {})),
+            **dict(baseline_profile.get("environment", {})),
+        }
     if backbone_profile:
         provider = backbone_profile.get("backbone_provider")
         if provider:

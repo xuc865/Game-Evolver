@@ -19,6 +19,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# DashScope is OpenAI-compatible but its native credential name is
+# DASHSCOPE_API_KEY. Normalize it before the common launcher validates inputs.
+if [[ "${CODEX_API_BASE:-}" == "https://dashscope.aliyuncs.com/compatible-mode/v1" \
+  && -z "${CODEX_API_KEY:-}" && -n "${DASHSCOPE_API_KEY:-}" ]]; then
+  export CODEX_API_KEY="$DASHSCOPE_API_KEY"
+fi
+
 # ── validate required environment variables ──
 # shellcheck disable=SC1091
 source "$ROOT_DIR/scripts/provider_env.sh"
@@ -38,8 +45,23 @@ fi
 PYTHON="${PYTHON:-python3}"
 
 # ── export skills index if set ──
+if [[ "${GAME_LOOP_USE_AWESOME_GAMEDEV_SKILLS:-0}" == "1" ]]; then
+  export GAME_LOOP_SKILLS_ROOT="${GAME_LOOP_SKILLS_ROOT:-$ROOT_DIR/third_party/awesome-gamedev-agent-skills}"
+  export GAME_LOOP_SKILLS_INDEX="${GAME_LOOP_SKILLS_INDEX:-$ROOT_DIR/experiments/baselines/awesome-gamedev-agent-skills-index.md}"
+  if [[ ! -f "$GAME_LOOP_SKILLS_ROOT/router/SKILL.md" ]]; then
+    echo "ERROR: awesome-gamedev-agent-skills checkout missing at $GAME_LOOP_SKILLS_ROOT" >&2
+    exit 1
+  fi
+  if [[ ! -f "$GAME_LOOP_SKILLS_INDEX" ]]; then
+    echo "ERROR: awesome-gamedev skills index missing at $GAME_LOOP_SKILLS_INDEX" >&2
+    exit 1
+  fi
+fi
 if [[ -n "${GAME_LOOP_SKILLS_INDEX:-}" ]]; then
   export GAME_LOOP_SKILLS_INDEX
+fi
+if [[ -n "${GAME_LOOP_SKILLS_ROOT:-}" ]]; then
+  export GAME_LOOP_SKILLS_ROOT
 fi
 
 # ── run the agent ──
