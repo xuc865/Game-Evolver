@@ -136,6 +136,7 @@ def run_smoke(*, model: str, output_root: Path, awesome_skills: bool, execute: b
                 str(output_root / bench / "episode"),
                 "--run-id-prefix",
                 "epoch0",
+                "--baseline-only",
             ]
             completed = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, check=False)
             case["execution_return_code"] = completed.returncode

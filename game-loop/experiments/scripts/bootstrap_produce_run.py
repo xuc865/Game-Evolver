@@ -48,8 +48,8 @@ MODELS: dict[str, dict[str, str]] = {
     "qwen": {
         "run_name": "gcbench-produce-qwen",
         "config": "gcbench-L4_qwen3.6-27b_produce.json",
-        "codex_api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "codex_model": "qwen3.6-27b",
+        "codex_api_base": "http://29.163.228.59:8080/v1",
+        "codex_model": "Qwen3.6-27B",
         "api_key_var": "CODEX_API_KEY",
         "api_key_required": "0",
         "max_output_tokens": "512",
@@ -123,6 +123,8 @@ def ensure_produce_config(model_key: str, spec: dict[str, str]) -> Path:
     cfg = json.loads(src.read_text(encoding="utf-8"))
     cfg["backend"]["timeout_seconds"] = 3600
     cfg["backend"].setdefault("env", {})
+    cfg["backend"]["env"]["CODEX_API_BASE"] = spec["codex_api_base"]
+    cfg["backend"]["env"]["CODEX_MODEL"] = spec["codex_model"]
     cfg["backend"]["env"]["GAME_LOOP_CHAT_MAX_TURNS"] = "60"
     cfg["backend"]["env"]["GAME_LOOP_CHAT_MAX_OUTPUT_TOKENS"] = spec["max_output_tokens"]
     cfg["backend"]["env"]["GAME_LOOP_CHAT_API_MAX_RETRIES"] = spec["api_retries"]

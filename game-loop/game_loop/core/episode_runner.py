@@ -23,6 +23,7 @@ def run_frozen_harness_episode(
     run_id_prefix: str,
     init_handler,
     evolve_handler,
+    run_evolve: bool = True,
 ) -> HarnessEpisodeOutcome:
     """Run one init+evolve episode with a frozen harness profile."""
 
@@ -56,12 +57,13 @@ def run_frozen_harness_episode(
             harness_profile=profile_path,
         )
     )
-    evolve_handler(
-        argparse.Namespace(
-            run_dir=case_dir,
-            config=config_path,
+    if run_evolve:
+        evolve_handler(
+            argparse.Namespace(
+                run_dir=case_dir,
+                config=config_path,
+            )
         )
-    )
     return load_episode_outcome(
         case_id=case_id,
         harness_id=harness.harness_id,

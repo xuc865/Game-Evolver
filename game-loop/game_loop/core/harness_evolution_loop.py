@@ -183,6 +183,7 @@ def run_public_bench_eval(
     init_handler: Callable[..., Any],
     evolve_handler: Callable[..., Any],
     run_id_prefix: str = "public",
+    run_evolve: bool = True,
 ) -> dict[str, Any]:
     """On-demand official benchmark evaluation for a specific harness profile."""
     run_dir = run_dir.resolve()
@@ -198,6 +199,7 @@ def run_public_bench_eval(
         run_id_prefix=run_id_prefix,
         init_handler=init_handler,
         evolve_handler=evolve_handler,
+        run_evolve=run_evolve,
     )
     return {
         "eval_kind": "official_public_benchmark",

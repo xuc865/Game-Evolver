@@ -26,8 +26,8 @@ ABL_DIR = ROOT / "experiments" / "configs-ablation"
 MODELS = {
     "kimi": {"CODEX_API_BASE": "http://29.116.237.135:8080/v1", "CODEX_MODEL": "Kimi-K2.7-Code"},
     "qwen3.6-27b": {
-        "CODEX_API_BASE": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "CODEX_MODEL": "qwen3.6-27b",
+        "CODEX_API_BASE": "http://29.163.228.59:8080/v1",
+        "CODEX_MODEL": "Qwen3.6-27B",
     },
     "glm5.2": {"CODEX_API_BASE": "http://29.116.237.75:8080/v1", "CODEX_MODEL": "GLM-5.2-W4AFP8-node1"},
     "deepseek_v4": {"CODEX_API_BASE": "https://api.deepseek.com", "CODEX_MODEL": "deepseek-v4-flash"},

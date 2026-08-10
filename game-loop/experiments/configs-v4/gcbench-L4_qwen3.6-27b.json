@@ -20,8 +20,8 @@
     "cwd": ".",
     "timeout_seconds": 1800,
     "env": {
-      "CODEX_API_BASE": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-      "CODEX_MODEL": "qwen3.6-27b",
+      "CODEX_API_BASE": "http://29.163.228.59:8080/v1",
+      "CODEX_MODEL": "Qwen3.6-27B",
       "GAME_LOOP_BACKBONE_PROVIDER": "qwen"
     }
   },

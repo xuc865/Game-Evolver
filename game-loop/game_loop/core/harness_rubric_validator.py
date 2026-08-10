@@ -454,6 +454,8 @@ class LLMRubricJudge:
             "temperature": 0.0,
             "max_tokens": 1800,
         }
+        if "qwen" in resolved.model.casefold() or "glm" in resolved.model.casefold():
+            payload["chat_template_kwargs"] = {"enable_thinking": False}
         errors: list[str] = []
         parsed: dict[str, Any] | None = None
         attempts = 3

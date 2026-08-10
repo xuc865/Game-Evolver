@@ -104,9 +104,9 @@ PROVIDERS: dict[str, BackboneProviderSpec] = {
         "deployment-provided OpenAI-compatible endpoint", False, True,
     ),
     "qwen": BackboneProviderSpec(
-        "qwen", "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen3.6-27b",
+        "qwen", "http://29.163.228.59:8080/v1", "Qwen3.6-27B",
         ("DASHSCOPE_API_KEY", "QWEN_API_KEY"), "QWEN_BASE_URL", "QWEN_MODEL",
-        "DashScope OpenAI-compatible API", True,
+        "deployment-provided OpenAI-compatible endpoint", False, True,
     ),
 }
 
@@ -131,12 +131,15 @@ def smoke_provider(provider_id: str, *, timeout_seconds: int = 60) -> dict[str, 
     doctor = resolved.doctor()
     if not doctor["ready"]:
         return {**doctor, "real_request": False, "ok": False, "error": "provider is not ready"}
-    payload = json.dumps({
+    payload_body: dict[str, object] = {
         "model": resolved.model,
         "messages": [{"role": "user", "content": "Reply with exactly OK."}],
-        "max_tokens": 8,
+        "max_tokens": 32,
         "stream": False,
-    }).encode("utf-8")
+    }
+    if "qwen" in resolved.model.casefold() or "glm" in resolved.model.casefold():
+        payload_body["chat_template_kwargs"] = {"enable_thinking": False}
+    payload = json.dumps(payload_body).encode("utf-8")
     request = urllib.request.Request(
         resolved.base_url + "/chat/completions",
         data=payload,

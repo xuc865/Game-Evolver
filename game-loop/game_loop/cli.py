@@ -214,6 +214,7 @@ def build_parser() -> argparse.ArgumentParser:
     eval_public.add_argument("--run-dir", type=Path, required=True)
     eval_public.add_argument("--seed-score", type=float, default=0.0)
     eval_public.add_argument("--run-id-prefix", default="public")
+    eval_public.add_argument("--baseline-only", action="store_true")
 
     return parser
 
@@ -811,6 +812,16 @@ def _run_harness_admission_case(
     if case_dir.exists() and any(case_dir.iterdir()):
         state_path = case_dir / "state.json"
         manifest_path = case_dir / "manifest.json"
+        coevolution_paths = (
+            case_dir / "coevolution" / "game_archive.json",
+            case_dir / "coevolution" / "interaction_matrix.json",
+            case_dir / "coevolution" / "probe_archive.json",
+        )
+        resumable_files_present = (
+            state_path.is_file()
+            and manifest_path.is_file()
+            and all(path.is_file() for path in coevolution_paths)
+        )
         if manifest_path.is_file():
             manifest = read_json(manifest_path)
             if manifest.get("config_fingerprint") != config.fingerprint:
@@ -825,7 +836,9 @@ def _run_harness_admission_case(
                 )
                 case_dir.mkdir(parents=True, exist_ok=True)
                 state_path = case_dir / "state.json"
-        if state_path.is_file():
+                manifest_path = case_dir / "manifest.json"
+                resumable_files_present = False
+        if resumable_files_present:
             st = json.loads(state_path.read_text(encoding="utf-8"))
             status = str(st.get("status") or "")
             if status == "completed":
@@ -858,7 +871,15 @@ def _run_harness_admission_case(
                     harness_id=harness.harness_id,
                     run_dir=case_dir,
                 )
-        shutil.rmtree(case_dir)
+        retry_index = 1
+        while (case_dir.parent / f"{case_dir.name}.incomplete-retry-{retry_index}").exists():
+            retry_index += 1
+        archived = case_dir.parent / f"{case_dir.name}.incomplete-retry-{retry_index}"
+        case_dir.rename(archived)
+        print(
+            f"[{case_id}] archived incomplete episode to "
+            f"{archived.name}; replaying"
+        )
 
     case_dir.mkdir(parents=True, exist_ok=True)
     profile_staging = outer_dir / "harness_profiles" / f"{case_id}.json"
@@ -1585,6 +1606,7 @@ def cmd_harness_eval_public(args: argparse.Namespace) -> int:
         init_handler=cmd_init,
         evolve_handler=cmd_evolve,
         run_id_prefix=args.run_id_prefix,
+        run_evolve=not bool(args.baseline_only),
     )
     atomic_write_json(args.run_dir / "public_eval.json", payload)
     print(json.dumps(payload, ensure_ascii=False, indent=2))

@@ -20,8 +20,9 @@
     "cwd": ".",
     "timeout_seconds": 3600,
     "env": {
-      "CODEX_API_BASE": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-      "CODEX_MODEL": "qwen3.6-27b",
+      "CODEX_API_BASE": "http://29.163.228.59:8080/v1",
+      "CODEX_MODEL": "Qwen3.6-27B",
+      "GAME_LOOP_BACKBONE_PROVIDER": "qwen",
       "GAME_LOOP_CHAT_MAX_TURNS": "60",
       "GAME_LOOP_CHAT_MAX_OUTPUT_TOKENS": "512",
       "GAME_LOOP_CHAT_API_MAX_RETRIES": "10",
