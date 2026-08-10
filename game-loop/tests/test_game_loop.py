@@ -2542,6 +2542,49 @@ class GameLoopTests(unittest.TestCase):
             self.assertTrue(outcome.infrastructure_ok)
             self.assertEqual(outcome.final_score, 0.25)
 
+    def test_admission_case_does_not_evolve_after_incomplete_init(self):
+        from game_loop.cli import _run_harness_admission_case
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config = write_config(root, candidates=1, level="L4", max_probe_calls=2)
+            source_config = root / "config.json"
+            engine = HarnessEvolutionEngine(root / "outer", config.method.harness_evolution)
+            harness = engine.initialize()
+            case_dir = root / "case" / "parent"
+            task = root / "task"; task.mkdir()
+            seed = root / "seed"; seed.mkdir()
+
+            def fake_init(args):
+                args.run_dir.mkdir(parents=True, exist_ok=True)
+                (args.run_dir / "state.json").write_text(json.dumps({
+                    "status": "running",
+                    "champion_harness_id": harness.harness_id,
+                    "champion_evaluation": {"primary_score": 0.0, "feasible": False},
+                }))
+                return 0
+
+            with patch("game_loop.cli.cmd_init", side_effect=fake_init), \
+                    patch("game_loop.cli.cmd_evolve") as evolve:
+                outcome = _run_harness_admission_case(
+                    case_id="case-1",
+                    case_dir=case_dir,
+                    harness=harness,
+                    runner=Mock(),
+                    outer_dir=root / "outer",
+                    config=config,
+                    source_config=source_config,
+                    task_source=task,
+                    seed_artifact=seed,
+                    seed_score=0.0,
+                    epoch=1,
+                    run_id_prefix="t",
+                )
+
+            evolve.assert_not_called()
+            self.assertFalse(outcome.infrastructure_ok)
+            self.assertTrue((case_dir.parent / "parent.incomplete-retry-1").is_dir())
+
 
 if __name__ == "__main__":
     unittest.main()

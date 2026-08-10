@@ -809,6 +809,17 @@ def _run_harness_admission_case(
     Uses the game-loop init + evolve pipeline with the given harness profile
     frozen for the entire episode.
     """
+    def archive_incomplete_case_dir() -> None:
+        retry_index = 1
+        while (case_dir.parent / f"{case_dir.name}.incomplete-retry-{retry_index}").exists():
+            retry_index += 1
+        archived = case_dir.parent / f"{case_dir.name}.incomplete-retry-{retry_index}"
+        case_dir.rename(archived)
+        print(
+            f"[{case_id}] archived incomplete episode to "
+            f"{archived.name}; replaying"
+        )
+
     if case_dir.exists() and any(case_dir.iterdir()):
         state_path = case_dir / "state.json"
         manifest_path = case_dir / "manifest.json"
@@ -871,15 +882,7 @@ def _run_harness_admission_case(
                     harness_id=harness.harness_id,
                     run_dir=case_dir,
                 )
-        retry_index = 1
-        while (case_dir.parent / f"{case_dir.name}.incomplete-retry-{retry_index}").exists():
-            retry_index += 1
-        archived = case_dir.parent / f"{case_dir.name}.incomplete-retry-{retry_index}"
-        case_dir.rename(archived)
-        print(
-            f"[{case_id}] archived incomplete episode to "
-            f"{archived.name}; replaying"
-        )
+        archive_incomplete_case_dir()
 
     case_dir.mkdir(parents=True, exist_ok=True)
     profile_staging = outer_dir / "harness_profiles" / f"{case_id}.json"
@@ -901,7 +904,20 @@ def _run_harness_admission_case(
         cold_start=False,
         harness_profile=profile_staging,
     )
-    cmd_init(init_args)
+    init_rc = cmd_init(init_args)
+    if init_rc not in (None, 0) or not (case_dir / "manifest.json").is_file():
+        if case_dir.exists() and any(case_dir.iterdir()):
+            archive_incomplete_case_dir()
+        return HarnessEpisodeOutcome(
+            case_id=case_id,
+            harness_id=harness.harness_id,
+            final_score=None,
+            feasible=False,
+            model_calls=0,
+            evaluator_queries=0,
+            infrastructure_ok=False,
+            run_ref=str(case_dir.resolve()),
+        )
     atomic_write_json(case_dir / "harness_profile.json", harness.to_dict())
     shutil.copy2(config_path, case_dir / "config.snapshot.json")
 
@@ -910,7 +926,18 @@ def _run_harness_admission_case(
         run_dir=case_dir,
         config=config_path,
     )
-    cmd_evolve(evolve_args)
+    evolve_rc = cmd_evolve(evolve_args)
+    if evolve_rc not in (None, 0):
+        return HarnessEpisodeOutcome(
+            case_id=case_id,
+            harness_id=harness.harness_id,
+            final_score=None,
+            feasible=False,
+            model_calls=0,
+            evaluator_queries=0,
+            infrastructure_ok=False,
+            run_ref=str(case_dir.resolve()),
+        )
 
     # ── load outcome ──
     return load_episode_outcome(
