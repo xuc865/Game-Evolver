@@ -651,6 +651,11 @@ class LLMRubricJudge:
             hard_rubrics=hard_rubrics,
             soft_rubrics=soft_rubrics,
         )
+        compact_prompt = self._build_compact_prompt(
+            evidence=evidence,
+            hard_rubrics=hard_rubrics,
+            soft_rubrics=soft_rubrics,
+        )
         import urllib.error
         import urllib.request
 
@@ -687,9 +692,19 @@ class LLMRubricJudge:
         parsed: dict[str, Any] | None = None
         attempts = 3
         for attempt in range(attempts):
+            request_payload = dict(payload)
+            request_payload["messages"] = [
+                payload["messages"][0],
+                {
+                    "role": "user",
+                    "content": prompt if attempt == 0 else compact_prompt,
+                },
+            ]
+            if attempt > 0:
+                request_payload["max_tokens"] = 1200
             request = urllib.request.Request(
                 resolved.base_url + "/chat/completions",
-                data=json.dumps(payload).encode("utf-8"),
+                data=json.dumps(request_payload).encode("utf-8"),
                 method="POST",
                 headers={
                     "Authorization": f"Bearer {resolved.api_key or 'EMPTY'}",
@@ -735,7 +750,7 @@ class LLMRubricJudge:
                     pass
                 errors.append(f"HTTPError {exc.code}: {body[:200]}")
                 if exc.code in (400, 422):
-                    payload.pop("response_format", None)
+                    request_payload.pop("response_format", None)
             except (
                 urllib.error.URLError,
                 TimeoutError,
@@ -746,7 +761,7 @@ class LLMRubricJudge:
             ) as exc:
                 parsed = None
                 errors.append(f"{type(exc).__name__}: {exc}")
-                payload.pop("response_format", None)
+                request_payload.pop("response_format", None)
         if parsed is None:
             fallback = HeuristicRubricJudge().score(
                 evidence=evidence,
@@ -815,6 +830,28 @@ class LLMRubricJudge:
             f"File inventory sample:\n{list(evidence.file_inventory)[:25]}\n\n"
             f"Hard rubrics (0/1):\n{hard_lines}\n\n"
             f"Soft rubrics (0..1):\n{soft_lines}\n"
+        )
+
+    def _build_compact_prompt(
+        self,
+        *,
+        evidence: DeepPlaytestEvidence,
+        hard_rubrics: Sequence[HarnessRubricCriterion],
+        soft_rubrics: Sequence[HarnessRubricCriterion],
+    ) -> str:
+        """Retry prompt that preserves evidence signals without long narration."""
+        hard_template = {item.rubric_id: 0 for item in hard_rubrics}
+        soft_template = {item.rubric_id: 0.0 for item in soft_rubrics}
+        return (
+            "Return ONLY valid JSON. Judge only the supplied evidence. "
+            "Do not explain or use markdown. Missing evidence means 0.\n"
+            f"Schema: {json.dumps({'hard': hard_template, 'soft': soft_template})}\n"
+            f"Benchmark={evidence.benchmark_id}; task={evidence.task_source}\n"
+            f"Probes={json.dumps(list(evidence.probes), ensure_ascii=False)[:1200]}\n"
+            f"Process={json.dumps(evidence.process_evidence, ensure_ascii=False)[:1200]}\n"
+            f"Inventory={json.dumps(list(evidence.file_inventory)[:15], ensure_ascii=False)}\n"
+            f"Hard={json.dumps([item.description for item in hard_rubrics], ensure_ascii=False)}\n"
+            f"Soft={json.dumps([item.description for item in soft_rubrics], ensure_ascii=False)}"
         )
 
 
