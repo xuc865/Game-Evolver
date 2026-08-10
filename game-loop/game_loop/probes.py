@@ -58,6 +58,7 @@ class FixedCommandProbeRunner:
                 )
                 calls += 1
                 return_code = completed.returncode
+                log_path.parent.mkdir(parents=True, exist_ok=True)
                 log_path.write_text(
                     (completed.stdout or "") + (completed.stderr or ""),
                     encoding="utf-8",
@@ -77,6 +78,11 @@ class FixedCommandProbeRunner:
             except Exception as exc:
                 status = "failed"
                 diagnostics = [str(exc)]
+                try:
+                    log_path.parent.mkdir(parents=True, exist_ok=True)
+                    log_path.write_text(f"probe infrastructure failure: {exc}\n", encoding="utf-8")
+                except OSError:
+                    pass
             results.append(
                 ProbeResult(
                     probe_id=probe.probe_id,

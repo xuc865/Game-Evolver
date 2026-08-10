@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 import zipfile
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -1590,6 +1591,37 @@ class GameLoopTests(unittest.TestCase):
             self.assertTrue(suite.results[0].passed)
             self.assertEqual(suite.results[0].score, 0.75)
             self.assertEqual(suite.results[0].diagnostics, ["ok"])
+
+    def test_fixed_probe_recreates_log_dir_after_probe_side_effect(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            output_dir = root / "probe-output"
+            config = write_config(root, candidates=1, level="L1", max_probe_calls=2)
+            probe = replace(
+                config.method.fixed_probes[0],
+                probe_id="delete_log_dir",
+                cwd=root,
+                command=(
+                    "/usr/bin/env",
+                    "python3",
+                    "-c",
+                    (
+                        "import json, pathlib, shutil, sys; "
+                        "shutil.rmtree(pathlib.Path(sys.argv[1]) / 'delete_log_dir'); "
+                        "print(json.dumps({'passed': True, 'score': 1.0}))"
+                    ),
+                    str(output_dir),
+                ),
+            )
+            suite = FixedCommandProbeRunner().run_suite(
+                [probe],
+                context={"artifact_dir": str(root)},
+                output_dir=output_dir,
+                phase="parent",
+            )
+
+            self.assertTrue(suite.results[0].passed)
+            self.assertTrue((output_dir / "delete_log_dir" / "probe.log").is_file())
 
     def test_gcbench_components_and_breakdown_normalization(self):
         with tempfile.TemporaryDirectory() as td:
