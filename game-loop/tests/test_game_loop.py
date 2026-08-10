@@ -2011,6 +2011,39 @@ class GameLoopTests(unittest.TestCase):
         self.assertEqual(urlopen.call_count, 2)
         self.assertEqual(urlopen.call_args.kwargs["timeout"], 42)
 
+    def test_chat_agent_has_a_total_timeout_across_retries(self):
+        import socket
+        from game_loop.chat_agent import LocalChatAgent
+
+        agent = LocalChatAgent.__new__(LocalChatAgent)
+        agent.api_base = "http://example.test/v1"
+        agent.model = "test-model"
+        agent.api_key = ""
+        agent.thinking_mode = ""
+        clock = {"calls": 0}
+
+        def monotonic():
+            clock["calls"] += 1
+            return 100.0 if clock["calls"] == 1 else (121.0 if clock["calls"] >= 8 else 101.0)
+
+        with patch.dict(
+            os.environ,
+            {
+                "GAME_LOOP_CHAT_API_MAX_RETRIES": "10",
+                "GAME_LOOP_CHAT_API_TIMEOUT_SECONDS": "10",
+                "GAME_LOOP_CHAT_API_TOTAL_TIMEOUT_SECONDS": "20",
+            },
+            clear=False,
+        ), patch(
+            "game_loop.chat_agent.urllib.request.urlopen",
+            side_effect=socket.timeout("slow upstream"),
+        ), patch(
+            "game_loop.chat_agent.time.monotonic",
+            side_effect=monotonic,
+        ), patch("game_loop.chat_agent.time.sleep"):
+            with self.assertRaisesRegex(RuntimeError, "total timeout"):
+                agent._call_api([{"role": "user", "content": "ping"}])
+
     def test_chat_agent_normalizes_truncated_tool_arguments_before_replay(self):
         from game_loop.chat_agent import LocalChatAgent
 

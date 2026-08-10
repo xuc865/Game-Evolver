@@ -276,11 +276,23 @@ class LocalChatAgent:
 
         max_retries = max(1, int(os.environ.get("GAME_LOOP_CHAT_API_MAX_RETRIES", "8")))
         api_timeout = max(10, int(os.environ.get("GAME_LOOP_CHAT_API_TIMEOUT_SECONDS", "180")))
+        total_timeout = max(
+            api_timeout,
+            int(os.environ.get("GAME_LOOP_CHAT_API_TOTAL_TIMEOUT_SECONDS", "600")),
+        )
+        deadline = time.monotonic() + total_timeout
         for attempt in range(max_retries):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError(
+                    f"API call exceeded total timeout of {total_timeout}s"
+                )
             data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(url, data=data, headers=headers, method="POST")
             try:
-                with urllib.request.urlopen(req, timeout=api_timeout) as resp:
+                with urllib.request.urlopen(
+                    req, timeout=max(1, min(api_timeout, int(remaining)))
+                ) as resp:
                     body = resp.read().decode("utf-8")
                     return json.loads(body)
             except (
@@ -289,15 +301,19 @@ class LocalChatAgent:
                 TimeoutError,
                 socket.timeout,
             ) as exc:
-                if attempt < max_retries - 1:
+                if attempt < max_retries - 1 and time.monotonic() < deadline:
                     self._tighten_unstable_provider_payload(payload)
-                    wait = min(30, 2 ** (attempt + 1))
+                    wait = min(30, 2 ** (attempt + 1), max(0, deadline - time.monotonic()))
                     print(
                         f"[chat_agent] stream/read error, retrying in {wait}s: {exc}",
                         file=sys.stderr,
                     )
                     time.sleep(wait)
                     continue
+                if time.monotonic() >= deadline:
+                    raise RuntimeError(
+                        f"API call exceeded total timeout of {total_timeout}s: {exc}"
+                    ) from exc
                 raise RuntimeError(f"API stream error: {exc}") from exc
             except urllib.error.HTTPError as exc:
                 error_body = ""
@@ -305,22 +321,34 @@ class LocalChatAgent:
                     error_body = exc.read().decode("utf-8")
                 except Exception:
                     pass
-                if attempt < max_retries - 1 and exc.code in (429, 500, 502, 503, 504):
+                if (
+                    attempt < max_retries - 1
+                    and exc.code in (429, 500, 502, 503, 504)
+                    and time.monotonic() < deadline
+                ):
                     self._tighten_unstable_provider_payload(payload)
-                    wait = min(30, 2 ** (attempt + 1))
+                    wait = min(30, 2 ** (attempt + 1), max(0, deadline - time.monotonic()))
                     print(f"[chat_agent] API error {exc.code}, retrying in {wait}s: {error_body[:200]}",
                           file=sys.stderr)
                     time.sleep(wait)
                     continue
+                if time.monotonic() >= deadline:
+                    raise RuntimeError(
+                        f"API call exceeded total timeout of {total_timeout}s: {error_body[:500]}"
+                    ) from exc
                 raise RuntimeError(f"API error {exc.code}: {error_body[:500]}") from exc
             except urllib.error.URLError as exc:
-                if attempt < max_retries - 1:
+                if attempt < max_retries - 1 and time.monotonic() < deadline:
                     self._tighten_unstable_provider_payload(payload)
-                    wait = min(30, 2 ** (attempt + 1))
+                    wait = min(30, 2 ** (attempt + 1), max(0, deadline - time.monotonic()))
                     print(f"[chat_agent] URL error, retrying in {wait}s: {exc}",
                           file=sys.stderr)
                     time.sleep(wait)
                     continue
+                if time.monotonic() >= deadline:
+                    raise RuntimeError(
+                        f"API call exceeded total timeout of {total_timeout}s: {exc}"
+                    ) from exc
                 raise RuntimeError(f"connection error: {exc}") from exc
 
         raise RuntimeError("API call failed after max retries")
