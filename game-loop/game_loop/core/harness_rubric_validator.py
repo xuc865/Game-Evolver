@@ -696,8 +696,11 @@ class LLMRubricJudge:
         errors: list[str] = []
         parsed: dict[str, Any] | None = None
         attempts = 3
+        supports_response_format = True
         for attempt in range(attempts):
             request_payload = dict(payload)
+            if not supports_response_format:
+                request_payload.pop("response_format", None)
             request_payload["messages"] = [
                 payload["messages"][0],
                 {
@@ -753,9 +756,17 @@ class LLMRubricJudge:
                     body = exc.read().decode("utf-8", errors="replace")
                 except Exception:
                     pass
-                errors.append(f"HTTPError {exc.code}: {body[:200]}")
+                errors.append(
+                    f"HTTPError {exc.code} provider={self.provider_id} "
+                    f"base_url={resolved.base_url} model={resolved.model}: {body[:200]}"
+                )
                 if exc.code in (400, 422):
-                    request_payload.pop("response_format", None)
+                    # Some OpenAI-compatible gateways reject response_format
+                    # even though the underlying model accepts plain chat.
+                    # Persist this decision for the following retry; mutating
+                    # request_payload alone is lost when the next request is
+                    # rebuilt.
+                    supports_response_format = False
             except (
                 urllib.error.URLError,
                 TimeoutError,
@@ -765,8 +776,12 @@ class LLMRubricJudge:
                 IndexError,
             ) as exc:
                 parsed = None
-                errors.append(f"{type(exc).__name__}: {exc}")
-                request_payload.pop("response_format", None)
+                errors.append(
+                    f"{type(exc).__name__} provider={self.provider_id} "
+                    f"base_url={resolved.base_url} model={resolved.model}: {exc}"
+                )
+                if isinstance(exc, urllib.error.HTTPError) and exc.code in (400, 422):
+                    supports_response_format = False
         if parsed is None:
             fallback = HeuristicRubricJudge().score(
                 evidence=evidence,

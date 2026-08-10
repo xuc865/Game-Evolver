@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+import urllib.error
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -182,6 +183,49 @@ class HarnessRubricValidatorTests(unittest.TestCase):
         self.assertEqual(scores.hard["launches_without_crash"], 1.0)
         self.assertEqual(scores.soft["gameplay_responsiveness"], 0.75)
         self.assertEqual(urlopen_mock.call_count, 3)
+
+    @patch("game_loop.runtime.providers.BackboneProviderSpec.resolve")
+    @patch("urllib.request.urlopen")
+    def test_llm_judge_removes_unsupported_response_format_after_400(
+        self, urlopen_mock, resolve_mock
+    ):
+        resolved = unittest.mock.Mock()
+        resolved.doctor.return_value = {"ready": True}
+        resolved.model = "judge-model"
+        resolved.base_url = "http://judge.local/v1"
+        resolved.api_key = ""
+        resolve_mock.return_value = resolved
+
+        class _Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return json.dumps({
+                    "choices": [{"message": {"content": json.dumps({
+                        "hard": {"launches_without_crash": 1},
+                        "soft": {"gameplay_responsiveness": 0.75},
+                    })}}]
+                }).encode("utf-8")
+
+        first = urllib.error.HTTPError(
+            "http://judge.local/v1/chat/completions", 400, "bad format", {}, None
+        )
+        first.read = lambda: b"response_format is unsupported"
+        urlopen_mock.side_effect = [first, _Response()]
+        scores = LLMRubricJudge(provider_id="deepseek").score(
+            evidence=_synthetic_evidence(passed=True),
+            hard_rubrics=DEFAULT_HARD_RUBRICS[:1],
+            soft_rubrics=DEFAULT_SOFT_RUBRICS[:1],
+        )
+
+        self.assertTrue(scores.infrastructure_ok)
+        self.assertEqual(urlopen_mock.call_count, 2)
+        retry_payload = json.loads(urlopen_mock.call_args_list[1].args[0].data)
+        self.assertNotIn("response_format", retry_payload)
 
     @patch("game_loop.runtime.providers.BackboneProviderSpec.resolve")
     @patch("urllib.request.urlopen")
