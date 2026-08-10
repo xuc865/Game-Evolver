@@ -20,19 +20,60 @@ class BackboneProviderSpec:
     official_docs: str
     requires_credential: bool = True
     allow_http: bool = False
+    fallback_base_url: str | None = None
+    fallback_model: str | None = None
+    fallback_credential_envs: tuple[str, ...] = ()
 
     def resolve(self, environment: Mapping[str, str] | None = None) -> "ResolvedBackbone":
         env = os.environ if environment is None else environment
         credential_env = next((name for name in self.credential_envs if env.get(name)), None)
+        # Backends historically use *_API_BASE while the provider registry
+        # predates that convention and stores *_BASE_URL. Prefer the explicit
+        # provider-specific API setting before the generic CODEX endpoint;
+        # otherwise a GLM/Kimi/Qwen HTTP endpoint can accidentally replace the
+        # DeepSeek rubric judge endpoint and make the judge look unready.
+        provider_prefix = self.provider_id.upper()
+        provider_base = (
+            env.get(self.base_url_env)
+            or env.get(f"{provider_prefix}_API_BASE")
+            or env.get("CODEX_API_BASE")
+            or self.base_url
+        )
+        provider_model = (
+            env.get(self.model_env)
+            or env.get(f"{provider_prefix}_API_MODEL")
+            or env.get(f"{provider_prefix}_MODEL")
+            or env.get("CODEX_MODEL")
+            or self.model
+        )
         return ResolvedBackbone(
             provider_id=self.provider_id,
-            base_url=str(env.get(self.base_url_env, self.base_url)).rstrip("/"),
-            model=str(env.get(self.model_env, self.model)),
+            # Experiment backends historically expose CODEX_API_BASE/CODEX_MODEL.
+            base_url=str(provider_base).rstrip("/"),
+            model=str(provider_model),
             credential_env=credential_env,
             api_key=None if credential_env is None else str(env[credential_env]),
             official_docs=self.official_docs,
             requires_credential=self.requires_credential,
             allow_http=self.allow_http,
+            fallback_base_url=(
+                None
+                if self.fallback_base_url is None
+                else str(env.get(f"{self.provider_id.upper()}_FALLBACK_BASE_URL", self.fallback_base_url)).rstrip("/")
+            ),
+            fallback_model=(
+                None
+                if self.fallback_model is None
+                else str(env.get(f"{self.provider_id.upper()}_FALLBACK_MODEL", self.fallback_model))
+            ),
+            fallback_credential_env=next(
+                (name for name in self.fallback_credential_envs if env.get(name)), None
+            ),
+            fallback_api_key=(
+                None
+                if not next((name for name in self.fallback_credential_envs if env.get(name)), None)
+                else str(env[next(name for name in self.fallback_credential_envs if env.get(name))])
+            ),
         )
 
 
@@ -46,6 +87,10 @@ class ResolvedBackbone:
     official_docs: str
     requires_credential: bool
     allow_http: bool
+    fallback_base_url: str | None = None
+    fallback_model: str | None = None
+    fallback_credential_env: str | None = None
+    fallback_api_key: str | None = None
 
     def doctor(self) -> dict[str, object]:
         parsed = urlparse(self.base_url)
@@ -86,6 +131,17 @@ class ResolvedBackbone:
         })
         return env
 
+    def fallback_inject(self, environment: Mapping[str, str]) -> dict[str, str] | None:
+        if not all((self.fallback_base_url, self.fallback_model, self.fallback_api_key)):
+            return None
+        env = dict(environment)
+        env.update({
+            "OPENAI_API_KEY": self.fallback_api_key,
+            "OPENAI_BASE_URL": self.fallback_base_url,
+            "OPENAI_MODEL": self.fallback_model,
+        })
+        return env
+
 
 PROVIDERS: dict[str, BackboneProviderSpec] = {
     "deepseek": BackboneProviderSpec(
@@ -94,19 +150,21 @@ PROVIDERS: dict[str, BackboneProviderSpec] = {
         "https://api-docs.deepseek.com/quick_start/pricing",
     ),
     "kimi": BackboneProviderSpec(
-        "kimi", "http://29.116.237.135:8080/v1", "Kimi-K2.7-Code",
+        "kimi", "http://29.116.237.75:8080/v1", "Kimi-K2.7-Code",
         ("MOONSHOT_API_KEY", "KIMI_API_KEY"), "KIMI_BASE_URL", "KIMI_MODEL",
         "deployment-provided OpenAI-compatible endpoint", False, True,
     ),
     "glm": BackboneProviderSpec(
-        "glm", "http://29.116.237.75:8080/v1", "GLM-5.2-W4AFP8-node1",
+        "glm", "http://11.213.4.72:80/v1", "GLM-5.2-W4AFP8",
         ("ZAI_API_KEY", "GLM_API_KEY", "BIGMODEL_API_KEY"), "GLM_BASE_URL", "GLM_MODEL",
         "deployment-provided OpenAI-compatible endpoint", False, True,
+        "https://openrouter.ai/api/v1", "z-ai/glm-5.2", ("OPENROUTER_API_KEY",),
     ),
     "qwen": BackboneProviderSpec(
         "qwen", "http://29.163.228.59:8080/v1", "Qwen3.6-27B",
         ("DASHSCOPE_API_KEY", "QWEN_API_KEY"), "QWEN_BASE_URL", "QWEN_MODEL",
         "deployment-provided OpenAI-compatible endpoint", False, True,
+        "https://openrouter.ai/api/v1", "qwen/qwen3.6-27b", ("OPENROUTER_API_KEY",),
     ),
     "claude": BackboneProviderSpec(
         "claude", "https://xmcode.shop/v1", "claude-sonnet-4-6",

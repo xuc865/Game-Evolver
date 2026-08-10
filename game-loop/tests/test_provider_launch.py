@@ -13,6 +13,7 @@ from game_loop.backends.command import CommandBackend
 from game_loop.config import BackendConfig
 from game_loop.core.models import PreparedTask
 from game_loop.gcbench_runtime import sanitize_public_instruction, stage_local_runtime_overlay
+from game_loop.runtime.providers import load_provider
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,6 +32,18 @@ def _provider_policy(script: str, env: dict[str, str]) -> subprocess.CompletedPr
 
 
 class ProviderLaunchTests(unittest.TestCase):
+    def test_rubric_provider_api_base_is_not_overridden_by_backbone_endpoint(self) -> None:
+        resolved = load_provider("deepseek").resolve({
+            "DEEPSEEK_API_KEY": "runtime-secret",
+            "DEEPSEEK_API_BASE": "https://api.deepseek.com",
+            "DEEPSEEK_MODEL": "deepseek-v4-flash",
+            "CODEX_API_BASE": "http://29.116.237.75:8080/v1",
+            "CODEX_MODEL": "GLM-5.2-W4AFP8-node1",
+        })
+        self.assertEqual(resolved.base_url, "https://api.deepseek.com")
+        self.assertEqual(resolved.model, "deepseek-v4-flash")
+        self.assertTrue(resolved.doctor()["ready"])
+
     def test_text_only_removes_visual_tool_from_prompt_and_workspace(self) -> None:
         instruction = (
             "# Task\n\nKeep authored visuals.\n\n"
