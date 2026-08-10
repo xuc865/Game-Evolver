@@ -150,12 +150,12 @@ PROVIDERS: dict[str, BackboneProviderSpec] = {
         "https://api-docs.deepseek.com/quick_start/pricing",
     ),
     "kimi": BackboneProviderSpec(
-        "kimi", "http://29.116.237.75:8080/v1", "Kimi-K2.7-Code",
+        "kimi", "http://29.116.237.135:8080/v1", "Kimi-K2.7-Code",
         ("MOONSHOT_API_KEY", "KIMI_API_KEY"), "KIMI_BASE_URL", "KIMI_MODEL",
         "deployment-provided OpenAI-compatible endpoint", False, True,
     ),
     "glm": BackboneProviderSpec(
-        "glm", "http://11.213.4.72:80/v1", "GLM-5.2-W4AFP8",
+        "glm", "http://29.116.237.75:8080/v1", "GLM-5.2-W4AFP8-node1",
         ("ZAI_API_KEY", "GLM_API_KEY", "BIGMODEL_API_KEY"), "GLM_BASE_URL", "GLM_MODEL",
         "deployment-provided OpenAI-compatible endpoint", False, True,
         "https://openrouter.ai/api/v1", "z-ai/glm-5.2", ("OPENROUTER_API_KEY",),
