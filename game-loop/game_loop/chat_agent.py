@@ -206,7 +206,9 @@ class LocalChatAgent:
                 "ok": False,
                 "error": (
                     f"deliverable gate active ({count}/3 demos): this tool is temporarily "
-                    "blocked; write a valid demo_outputs/*.json trace first"
+                    "blocked; your next tool call MUST be write_file for a valid "
+                    "demo_outputs/*.json trace. Do not run commands or inspect more "
+                    "files until all 3 demo traces exist."
                 ),
             }),
         }
@@ -660,10 +662,10 @@ class LocalChatAgent:
             if raw_demo_gate is None
             else raw_demo_gate.strip().lower() in {"1", "true", "yes", "on"}
         )
-        # Early reminders allow normal implementation work; from turn 45 on,
+        # Early reminders allow normal implementation work; from turn 40 on,
         # repeat the gate every turn so the session cannot silently spend its
         # entire remaining budget while omitting benchmark deliverables.
-        demo_gate_turns = {10, 25, *range(45, 60)}
+        demo_gate_turns = {10, 25, *range(40, max_turns)}
 
         for turn in range(max_turns):
             turns = turn + 1
@@ -719,7 +721,7 @@ class LocalChatAgent:
                 demo_count = self._demo_trace_count(workspace) if require_gcbench_demos else 3
                 if (
                     require_gcbench_demos
-                    and turns >= 45
+                    and turns >= 40
                     and demo_count < 3
                     and not self._is_demo_write_tool_call(tc)
                 ):

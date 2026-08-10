@@ -2138,6 +2138,48 @@ class GameLoopTests(unittest.TestCase):
         error = LocalChatAgent._demo_gate_tool_error(blocked, 1)
         self.assertIn("temporarily blocked", json.loads(error["content"])["error"])
 
+    def test_demo_gate_starts_at_turn_40_and_rejects_non_demo_tools(self):
+        from game_loop.chat_agent import LocalChatAgent
+
+        agent = LocalChatAgent.__new__(LocalChatAgent)
+        agent.system_prompt = "test"
+        calls = 0
+
+        def fake_call(_messages, _tools):
+            nonlocal calls
+            calls += 1
+            return {"choices": [{
+                "message": {
+                    "role": "assistant",
+                    "tool_calls": [{
+                        "id": f"call-{calls}",
+                        "type": "function",
+                        "function": {
+                            "name": "run_command",
+                            "arguments": '{"command":"true"}',
+                        },
+                    }],
+                },
+            }]}
+
+        agent._call_api = fake_call
+        with tempfile.TemporaryDirectory() as raw, patch.dict(
+            os.environ,
+            {"GAME_LOOP_REQUIRE_GCB_DEMOS": "1"},
+            clear=False,
+        ):
+            workspace = Path(raw)
+            (workspace / "game" / "demo_outputs").mkdir(parents=True)
+            result = agent.run("build", workspace, tools=[], max_turns=41)
+
+        self.assertEqual(result["turns"], 41)
+        blocked = [
+            item for item in result["messages"]
+            if item.get("role") == "tool"
+            and "deliverable gate active" in item.get("content", "")
+        ]
+        self.assertEqual(len(blocked), 2)
+
     def test_chat_agent_run_command_timeout_kills_child_process_group(self):
         from game_loop.chat_agent import LocalChatAgent
 
