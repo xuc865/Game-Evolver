@@ -44,6 +44,7 @@ def _model_report(root: Path, model: str, dataset_ids: list[str]) -> dict[str, A
     missing = sorted(dataset_set - set(task_dirs))
     extra = sorted(set(task_dirs) - dataset_set)
     statuses: Counter[str] = Counter()
+    failure_kinds: Counter[str] = Counter()
     incomplete: list[str] = []
     scored: list[dict[str, float]] = []
 
@@ -56,7 +57,10 @@ def _model_report(root: Path, model: str, dataset_ids: list[str]) -> dict[str, A
             incomplete.append(task_id)
             continue
         status = str(read_json(status_path).get("status", "unknown"))
+        failure_kind = str(read_json(status_path).get("generation_failure_kind", ""))
         statuses[status] += 1
+        if failure_kind:
+            failure_kinds[failure_kind] += 1
         if status not in TERMINAL_STATUSES:
             incomplete.append(task_id)
             continue
@@ -92,6 +96,7 @@ def _model_report(root: Path, model: str, dataset_ids: list[str]) -> dict[str, A
         "attempted_tasks": attempted,
         "valid_scored_tasks": len(scored),
         "status_counts": dict(sorted(statuses.items())),
+        "generation_failure_kinds": dict(sorted(failure_kinds.items())),
         "missing_task_ids": missing,
         "extra_task_ids": extra,
         "incomplete_task_ids": sorted(set(incomplete)),

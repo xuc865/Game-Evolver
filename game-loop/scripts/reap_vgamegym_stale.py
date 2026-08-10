@@ -19,6 +19,12 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
+import sys
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from game_loop.utils import atomic_write_json
+
 
 def _elapsed_seconds(value: str) -> int:
     parts = [int(item) for item in value.strip().split(":")]
@@ -75,6 +81,39 @@ def _pid_alive(pid: int) -> bool:
         os.kill(pid, 0)
     except OSError:
         return False
+    return True
+
+
+def _pid_owns_task(pid: int, task: Path, root: Path, owner_started_at: str | None) -> bool:
+    """Verify the lock owner is the current formal worker, not a reused PID."""
+    try:
+        rows = subprocess.check_output(
+            ["ps", "-p", str(pid), "-o", "lstart=,command="], text=True
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return False
+    if not rows:
+        return False
+    # `lstart` is five whitespace-separated fields; the command follows it.
+    fields = rows.split(None, 5)
+    if len(fields) < 6:
+        return False
+    process_started, command = " ".join(fields[:5]), fields[5]
+    if not command or str(root.resolve()) not in command:
+        return False
+    if "run_vgamegym_full_awesome.py" not in command:
+        return False
+    model = task.resolve().parent.name
+    if f"--model {model}" not in command and f"--model '{model}'" not in command:
+        return False
+    if owner_started_at:
+        try:
+            owner_ts = datetime.fromisoformat(owner_started_at).timestamp()
+            process_ts = datetime.strptime(process_started, "%a %b %d %H:%M:%S %Y").timestamp()
+            if abs(process_ts - owner_ts) > 5:
+                return False
+        except (ValueError, TypeError, OverflowError):
+            return False
     return True
 
 
@@ -163,14 +202,17 @@ def main() -> int:
             continue
         lock = task / ".worker.lock"
         owner = lock / "owner.json"
+        owner_started_at = None
         try:
-            owner_pid = int(json.loads(owner.read_text(encoding="utf-8")).get("pid", 0))
+            owner_value = json.loads(owner.read_text(encoding="utf-8"))
+            owner_pid = int(owner_value.get("pid", 0))
+            owner_started_at = owner_value.get("started_at")
         except (OSError, TypeError, ValueError, json.JSONDecodeError):
             owner_pid = 0
         # The worker may still be waiting for a child we just reaped. Let it
         # observe the child exit and finalize the task itself; removing its
         # lock here could cause duplicate work in the same shard.
-        if _pid_alive(owner_pid):
+        if _pid_alive(owner_pid) and _pid_owns_task(owner_pid, task, root, owner_started_at):
             continue
         if lock.is_dir():
             shutil.rmtree(lock, ignore_errors=True)
@@ -190,7 +232,7 @@ def main() -> int:
             ),
             "updated_at": datetime.now().astimezone().isoformat(),
         })
-        status_path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        atomic_write_json(status_path, value)
     return 0
 
 

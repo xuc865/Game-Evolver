@@ -138,6 +138,58 @@ def _find_artifact(episode_dir: Path) -> Path | None:
     return candidates[0] if len(candidates) == 1 else None
 
 
+def _provider_infrastructure_failure(submission: Any) -> bool:
+    text = " ".join(
+        str(value)
+        for value in (
+            getattr(submission, "result_text", ""),
+            *(getattr(submission, "diagnostics", ()) or ()),
+        )
+    ).casefold()
+    return any(marker in text for marker in (
+        "[api error:",
+        "insufficient balance",
+        "connection error",
+        "502 terminated",
+        "503 service unavailable",
+        "504 gateway",
+        "empty response text",
+    ))
+
+
+def _write_provider_block(root: Path, model: str, task_id: str, submission: Any) -> None:
+    text = " ".join(
+        str(value)
+        for value in (
+            getattr(submission, "result_text", ""),
+            *(getattr(submission, "diagnostics", ()) or ()),
+        )
+    )
+    block = root / "provider_blocked.json"
+    streak_file = root / "provider_failure_streak.json"
+    previous = read_json(block) if block.is_file() else (
+        read_json(streak_file) if streak_file.is_file() else {}
+    )
+    consecutive = int(previous.get("consecutive_failures", 0)) + 1
+    # One empty stream or transient gateway failure should be retried by the
+    # normal task budget. Pause only after repeated failures from both routes.
+    if consecutive < 3:
+        atomic_write_json(streak_file, {
+            "model": model, "task_id": task_id,
+            "consecutive_failures": consecutive, "reason": text[-2000:],
+            "updated_at": utc_now(),
+        })
+        return
+    atomic_write_json(block, {
+        "model": model,
+        "task_id": task_id,
+        "reason": text[-2000:],
+        "consecutive_failures": consecutive,
+        "created_at": utc_now(),
+    })
+    streak_file.unlink(missing_ok=True)
+
+
 def _score_artifact(*, task_dir: Path, artifact: Path, task_id: str, timeout: int) -> dict[str, Any]:
     eval_dir = task_dir / "evaluation"
     raw = eval_dir / "official_raw.json"
@@ -238,11 +290,17 @@ def run_model(*, model: str, output_root: Path, limit: int | None, evaluator_tim
     rows = _read_dataset(DATASET)
     model_root = (output_root / model).resolve()
     model_root.mkdir(parents=True, exist_ok=True)
+    # A provider breaker is shared by all shards and supervisor passes. It is
+    # checked in the worker too, so an older supervisor cannot keep spending
+    # requests after a real provider outage has been detected.
+    if (model_root / "provider_blocked.json").is_file():
+        return 75
     # Keep primary and fallback attempts bounded independently. Qwen/GLM can
     # establish a stream and then stall after an early tool call; a 300-second
     # provider attempt leaves enough time for the OpenRouter fallback before
     # the supervisor's 750-second process-level guard intervenes.
-    config = runtime_config_from_environment(provider=model, timeout_seconds=300)
+    provider_timeout = 180 if model in {"qwen", "glm"} else 300
+    config = runtime_config_from_environment(provider=model, timeout_seconds=provider_timeout)
     # This overlay is deliberately local to the formal VGameGym runner. The
     # shared OpenGame profile is also used by unrelated benchmark workflows.
     config = type(config).from_dict({
@@ -250,6 +308,16 @@ def run_model(*, model: str, output_root: Path, limit: int | None, evaluator_tim
         "core_tools": list(VGAMEGYM_CORE_TOOLS),
         "exclude_tools": ["todo_write", "task", "save_memory", "web_fetch", "classify_game_type", "generate_gdd", "generate_game_assets", "generate_tilemap"],
     })
+    if model in {"qwen", "glm"}:
+        # The shared OpenGame profile asks for 32768 output tokens. The
+        # OpenRouter fallback currently rejects that reservation with HTTP 402
+        # even when the actual response would be much shorter. Keep this
+        # budget local to the formal VGameGym runner.
+        settings = json.loads(json.dumps(config.settings))
+        generation_config = settings.setdefault("model", {}).setdefault("generationConfig", {})
+        sampling_params = generation_config.setdefault("samplingParams", {})
+        sampling_params["max_tokens"] = min(int(sampling_params.get("max_tokens", 12000)), 12000)
+        config = type(config).from_dict({**config.to_dict(), "settings": settings})
     runtime = OpenGameRuntime(config)
     atomic_write_json(model_root / "run_manifest.json", {
         "schema_version": "vgamegym-full-awesome-v1", "model": model,
@@ -260,6 +328,10 @@ def run_model(*, model: str, output_root: Path, limit: int | None, evaluator_tim
     if shard_count > 1:
         selected = selected[shard_index::shard_count]
     for index, row in enumerate(selected):
+        # Stop an already-running shard promptly after another request detects
+        # a provider outage. The supervisor will probe and resume later.
+        if (model_root / "provider_blocked.json").is_file():
+            return 75
         task_id = str(row["id"])
         task_dir = _task_dir(model_root, task_id)
         status_path = task_dir / "status.json"
@@ -321,11 +393,14 @@ def run_model(*, model: str, output_root: Path, limit: int | None, evaluator_tim
         episode = task_dir / "generation"
         artifact = _find_artifact(episode)
         generation_status = str(existing.get("generation_status", "pending"))
+        generation_failure_kind = str(existing.get("generation_failure_kind", ""))
         # Older runs exhausted the per-pass retry loop but did not persist a
         # cumulative counter. Treat their terminal generation_failed status as
         # exhausted; otherwise every supervisor restart retries the same prefix
         # forever and the full dataset is never covered.
-        if "generation_attempts_total" in existing:
+        if generation_failure_kind == "provider_infrastructure_failure":
+            generation_attempts_total = 0
+        elif "generation_attempts_total" in existing:
             generation_attempts_total = int(existing["generation_attempts_total"])
         elif existing.get("status") == "generation_failed":
             generation_attempts_total = max(1, generation_retries)
@@ -372,9 +447,25 @@ def run_model(*, model: str, output_root: Path, limit: int | None, evaluator_tim
                     submission = runtime.run(task, episode_dir=episode)
                     artifact = _find_artifact(episode)
                     generation_status = "generated" if artifact is not None else "generation_failed"
+                    generation_failure_kind = (
+                        "provider_infrastructure_failure"
+                        if artifact is None and _provider_infrastructure_failure(submission)
+                        else "model_generation_failure"
+                    )
+                    if generation_failure_kind == "provider_infrastructure_failure":
+                        _write_provider_block(model_root, model, task_id, submission)
+                    elif artifact is not None:
+                        (model_root / "provider_failure_streak.json").unlink(missing_ok=True)
                     atomic_write_json(task_dir / "submission.json", submission.to_dict())
                 except Exception as exc:
                     generation_status = "generation_failed"
+                    generation_failure_kind = (
+                        "provider_infrastructure_failure"
+                        if any(marker in repr(exc).casefold() for marker in (
+                            "api error", "insufficient balance", "connection error", "502", "503", "504", "empty response text"
+                        ))
+                        else "model_generation_failure"
+                    )
                     atomic_write_json(task_dir / "generation_error.json", {
                         "error": repr(exc), "attempt": generation_attempts_total,
                         "created_at": utc_now(),
@@ -385,14 +476,22 @@ def run_model(*, model: str, output_root: Path, limit: int | None, evaluator_tim
                 if generation_attempt + 1 < remaining_attempts:
                     time.sleep(min(60, 5 * (2 ** generation_attempt)))
         if artifact is None:
+            terminal_generation_status = (
+                "provider_infrastructure_failure"
+                if generation_failure_kind == "provider_infrastructure_failure"
+                else "generation_failed"
+            )
             atomic_write_json(status_path, {
                 "task_id": task_id, "index": index,
-                "status": "generation_failed",
+                "status": terminal_generation_status,
                 "generation_status": "generation_failed",
+                "generation_failure_kind": generation_failure_kind or "model_generation_failure",
                 "generation_attempts_total": generation_attempts_total,
                 "updated_at": utc_now(),
             })
             _release_task_lock(lock)
+            if terminal_generation_status == "provider_infrastructure_failure":
+                return 75
             continue
         result = infrastructure_failure("evaluator was not attempted")
         remaining_evaluator_attempts = max(0, max(1, evaluator_retries) - evaluator_attempts_total)

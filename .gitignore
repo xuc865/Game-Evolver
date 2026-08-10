@@ -27,6 +27,7 @@ game-loop/.tools/
 # Repository-local benchmark execution state (keep configs, omit live runs).
 game-loop/experiments/runs/
 game-loop/experiments/public-chain*/
+game-loop/experiments/matrix-*/
 game-loop/experiments/tau-*-run*/
 game-loop/experiments/terminal-harbor-*/
 game-loop/experiments/terminalbench-*/
