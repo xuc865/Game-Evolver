@@ -86,6 +86,7 @@ def main() -> int:
     first_tau_simulation = next(
         (item for item in tau_simulations if isinstance(item, dict)), {}
     )
+    first_tau_reward_info = first_tau_simulation.get("reward_info")
     nl2repo = read_json(run_root / "nl2repo-manifest.json")
     results[0]["evidence"] = {
         key: terminal.get(key)
@@ -97,8 +98,9 @@ def main() -> int:
             if isinstance(tau_info.get("agent_info"), dict) else None
         ),
         "reward": (
-            first_tau_simulation.get("reward_info", {}).get("reward")
-            if first_tau_simulation else tau_manifest.get("reward")
+            first_tau_reward_info.get("reward")
+            if isinstance(first_tau_reward_info, dict)
+            else tau_manifest.get("reward")
         ),
         "result_path": str(tau_raw_path) if tau_raw_path.is_file() else "",
     }
