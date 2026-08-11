@@ -23,6 +23,14 @@ def main() -> int:
         timeout = 900.0
     if timeout < 0:
         timeout = 0.0
+    try:
+        command_timeout = float(
+            os.environ.get("GAMECRAFT_BENCH_JUDGE_COMMAND_TIMEOUT_SECONDS", "1200")
+        )
+    except ValueError:
+        command_timeout = 1200.0
+    if command_timeout < 1:
+        command_timeout = 1.0
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with lock_path.open("a+") as lock_file:
         deadline = time.monotonic() + timeout
@@ -39,7 +47,17 @@ def main() -> int:
                     # The caller treats this as an infrastructure failure.
                     return 75
                 time.sleep(min(1.0, max(0.05, deadline - time.monotonic())))
-        return subprocess.call(command)
+        try:
+            return subprocess.run(command, timeout=command_timeout, check=False).returncode
+        except subprocess.TimeoutExpired:
+            print(
+                f"[judge-lock] command timeout after {command_timeout:.0f}s",
+                file=sys.stderr,
+            )
+            # The verifier's nonzero exit is translated by the caller into an
+            # infrastructure failure; releasing the lock is essential so the
+            # next formal admission can make progress.
+            return 124
 
 
 if __name__ == "__main__":
