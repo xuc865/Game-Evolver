@@ -202,6 +202,18 @@ def _write_provider_block(root: Path, model: str, task_id: str, submission: Any)
     streak_file.unlink(missing_ok=True)
 
 
+def _provider_block_is_stale(root: Path, *, max_age_seconds: int = 300) -> bool:
+    """Allow a paused provider to resume after a cooldown; probe failures re-block it."""
+    block = root / "provider_blocked.json"
+    if not block.is_file():
+        return False
+    try:
+        age = time.time() - block.stat().st_mtime
+    except OSError:
+        return False
+    return age >= max_age_seconds
+
+
 def _score_artifact(*, task_dir: Path, artifact: Path, task_id: str, timeout: int) -> dict[str, Any]:
     eval_dir = task_dir / "evaluation"
     raw = eval_dir / "official_raw.json"
@@ -316,7 +328,11 @@ def run_model(*, model: str, output_root: Path, limit: int | None, evaluator_tim
     # checked in the worker too, so an older supervisor cannot keep spending
     # requests after a real provider outage has been detected.
     if (model_root / "provider_blocked.json").is_file():
-        return 75
+        if _provider_block_is_stale(model_root):
+            (model_root / "provider_blocked.json").unlink(missing_ok=True)
+            (model_root / "provider_failure_streak.json").unlink(missing_ok=True)
+        else:
+            return 75
     if model in {"qwen", "glm"} and (model_root / "fallback_unavailable.json").is_file():
         # Provider resolution happens inside each runtime call from this
         # process environment. Removing the exhausted credential disables only

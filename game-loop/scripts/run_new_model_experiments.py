@@ -17,6 +17,7 @@ import os
 import subprocess
 import sys
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -100,6 +101,53 @@ def load_done_ids(out_dir: Path) -> set[str]:
         except Exception:
             pass
     return done
+
+
+def historical_run_dir(prefix: str, bench: str, run_id: str) -> Path | None:
+    candidates = sorted(
+        (
+            run_root / run_id
+            for run_root in RUNS.glob(f"{prefix}_{bench}-resume-*")
+            if (run_root / run_id).is_dir()
+        ),
+        key=lambda path: path.parent.name,
+        reverse=True,
+    )
+    return candidates[0] if candidates else None
+
+
+@contextmanager
+def model_queue_lock(model: str):
+    lock_dir = RUNS / "provider-queue-locks" / model
+    lock_dir.parent.mkdir(parents=True, exist_ok=True)
+    while True:
+        try:
+            lock_dir.mkdir()
+            (lock_dir / "owner.json").write_text(
+                json.dumps({"pid": os.getpid(), "created_at": time.time()}) + "\n",
+                encoding="utf-8",
+            )
+            break
+        except FileExistsError:
+            owner = rj(lock_dir / "owner.json")
+            pid = int(owner.get("pid", 0) or 0)
+            alive = False
+            if pid > 0:
+                try:
+                    os.kill(pid, 0)
+                    alive = True
+                except OSError:
+                    pass
+            if not alive:
+                import shutil
+                shutil.rmtree(lock_dir, ignore_errors=True)
+                continue
+            time.sleep(15)
+    try:
+        yield
+    finally:
+        import shutil
+        shutil.rmtree(lock_dir, ignore_errors=True)
 
 
 def _case_is_solidly_done(case: dict) -> bool:
@@ -228,7 +276,7 @@ def run_queue(model: str, bench: str, *, awesome_skills: bool = False) -> None:
     for idx, (task, run_id) in enumerate(queue_list, 1):
         if (out_dir / "STOP").exists():
             break
-        run_dir = out_dir / run_id
+        run_dir = historical_run_dir(prefix, bench, run_id) or (out_dir / run_id)
         log_path = out_dir / f"{run_id}.log"
         started = time.strftime("%Y-%m-%dT%H:%M:%S%z")
         with (out_dir / "runner.log").open("a", encoding="utf-8") as rl:
@@ -246,11 +294,12 @@ def run_queue(model: str, bench: str, *, awesome_skills: bool = False) -> None:
                      "--config", str(effective_cfg), "--run-id", run_id],
                     log_path, append=False,
                 )
-            rcs["bench_rc"] = run_to_log(
-                [PYTHON, "-m", "game_loop", "evolve",
-                 "--run-dir", run_dir, "--config", str(effective_cfg)],
-                log_path, append=True,
-            )
+            with model_queue_lock(model):
+                rcs["bench_rc"] = run_to_log(
+                    [PYTHON, "-m", "game_loop", "evolve",
+                     "--run-dir", run_dir, "--config", str(effective_cfg)],
+                    log_path, append=True,
+                )
         except Exception as exc:
             with log_path.open("a", encoding="utf-8") as log:
                 log.write(f"\n[runner_exception] {exc}\n")
