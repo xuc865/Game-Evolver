@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Resumable full-dataset V-GameGym evaluation for the awesome-skills arm.
+"""Resumable full-dataset V-GameGym evaluation for a model/skills arm.
 
 Generation is performed once per task and the resulting artifact is retained
 even when the OpenGame process times out. Evaluator retries reuse that artifact
@@ -34,7 +34,7 @@ DATASET = ROOT / "third_party" / "SKYLENAGE-GameCodeGym" / "gamegym_testset" / "
 OFFICIAL_ROOT = ROOT / "third_party" / "SKYLENAGE-GameCodeGym"
 OFFICIAL_PYTHON = OFFICIAL_ROOT / ".venv" / "bin" / "python"
 DEFAULT_OUT = ROOT / "experiments" / "vgamegym-full-awesome"
-MODELS = ("kimi", "qwen", "glm", "deepseek")
+MODELS = ("kimi", "qwen", "glm", "deepseek", "claude", "gpt55")
 _ACTIVE_LOCKS: set[Path] = set()
 
 # VGameGym generation is a single-artifact task. Keeping the tool surface
@@ -165,6 +165,18 @@ def _write_provider_block(root: Path, model: str, task_id: str, submission: Any)
             *(getattr(submission, "diagnostics", ()) or ()),
         )
     )
+    if "requires more credits" in text.casefold():
+        # The primary deployment may still be healthy. Persist only the
+        # exhausted OpenRouter route and keep later tasks on the primary.
+        atomic_write_json(root / "fallback_unavailable.json", {
+            "model": model,
+            "provider": "openrouter",
+            "task_id": task_id,
+            "reason": text[-2000:],
+            "created_at": utc_now(),
+        })
+        (root / "provider_failure_streak.json").unlink(missing_ok=True)
+        return
     block = root / "provider_blocked.json"
     streak_file = root / "provider_failure_streak.json"
     previous = read_json(block) if block.is_file() else (
@@ -286,20 +298,39 @@ def _summary(root: Path, model: str, total: int) -> dict[str, Any]:
     }
 
 
-def run_model(*, model: str, output_root: Path, limit: int | None, evaluator_timeout: int, evaluator_retries: int, retry_generation: bool, generation_retries: int = 3, shard_index: int = 0, shard_count: int = 1) -> int:
+def run_model(*, model: str, output_root: Path, limit: int | None, evaluator_timeout: int, evaluator_retries: int, retry_generation: bool, generation_retries: int = 3, shard_index: int = 0, shard_count: int = 1, awesome_skills: bool = True) -> int:
     rows = _read_dataset(DATASET)
     model_root = (output_root / model).resolve()
     model_root.mkdir(parents=True, exist_ok=True)
+    canonical_shards_path = output_root.resolve() / ".canonical_shard_count"
+    if limit is None and canonical_shards_path.is_file():
+        canonical_shards = int(canonical_shards_path.read_text(encoding="utf-8").strip())
+        if shard_count != canonical_shards:
+            print(
+                f"refusing non-canonical full run: shard_count={shard_count}, "
+                f"expected={canonical_shards}",
+                flush=True,
+            )
+            return 76
     # A provider breaker is shared by all shards and supervisor passes. It is
     # checked in the worker too, so an older supervisor cannot keep spending
     # requests after a real provider outage has been detected.
     if (model_root / "provider_blocked.json").is_file():
         return 75
+    if model in {"qwen", "glm"} and (model_root / "fallback_unavailable.json").is_file():
+        # Provider resolution happens inside each runtime call from this
+        # process environment. Removing the exhausted credential disables only
+        # OpenRouter fallback; the local primary remains unchanged.
+        os.environ.pop("OPENROUTER_API_KEY", None)
     # Keep primary and fallback attempts bounded independently. Qwen/GLM can
     # establish a stream and then stall after an early tool call; a 300-second
     # provider attempt leaves enough time for the OpenRouter fallback before
     # the supervisor's 750-second process-level guard intervenes.
-    provider_timeout = 180 if model in {"qwen", "glm"} else 300
+    provider_timeout = 300
+    if awesome_skills:
+        os.environ["GAME_LOOP_USE_AWESOME_GAMEDEV_SKILLS"] = "1"
+    else:
+        os.environ.pop("GAME_LOOP_USE_AWESOME_GAMEDEV_SKILLS", None)
     config = runtime_config_from_environment(provider=model, timeout_seconds=provider_timeout)
     # This overlay is deliberately local to the formal VGameGym runner. The
     # shared OpenGame profile is also used by unrelated benchmark workflows.
@@ -310,19 +341,20 @@ def run_model(*, model: str, output_root: Path, limit: int | None, evaluator_tim
     })
     if model in {"qwen", "glm"}:
         # The shared OpenGame profile asks for 32768 output tokens. The
-        # OpenRouter fallback currently rejects that reservation with HTTP 402
-        # even when the actual response would be much shorter. Keep this
-        # budget local to the formal VGameGym runner.
+        # OpenRouter fallback currently rejects large reservations with HTTP
+        # 402 even when the actual response would be much shorter. Keep this
+        # budget local to the formal VGameGym runner and below the observed
+        # available credit ceiling.
         settings = json.loads(json.dumps(config.settings))
         generation_config = settings.setdefault("model", {}).setdefault("generationConfig", {})
         sampling_params = generation_config.setdefault("samplingParams", {})
-        sampling_params["max_tokens"] = min(int(sampling_params.get("max_tokens", 12000)), 12000)
+        sampling_params["max_tokens"] = min(int(sampling_params.get("max_tokens", 8000)), 8000)
         config = type(config).from_dict({**config.to_dict(), "settings": settings})
     runtime = OpenGameRuntime(config)
     atomic_write_json(model_root / "run_manifest.json", {
         "schema_version": "vgamegym-full-awesome-v1", "model": model,
         "dataset": str(DATASET.resolve()), "dataset_tasks": len(rows),
-        "awesome_skills": True, "runtime": config.to_dict(redact_environment=True), "started_at": utc_now(),
+        "awesome_skills": awesome_skills, "runtime": config.to_dict(redact_environment=True), "started_at": utc_now(),
     })
     selected = rows if limit is None else rows[:max(0, limit)]
     if shard_count > 1:
@@ -394,6 +426,11 @@ def run_model(*, model: str, output_root: Path, limit: int | None, evaluator_tim
         artifact = _find_artifact(episode)
         generation_status = str(existing.get("generation_status", "pending"))
         generation_failure_kind = str(existing.get("generation_failure_kind", ""))
+        generation_error = read_json(task_dir / "generation_error.json") if (task_dir / "generation_error.json").is_file() else {}
+        workspace_collision = "episode directory must be new or empty" in str(generation_error.get("error", "")).casefold()
+        previous_submission = read_json(task_dir / "submission.json") if (task_dir / "submission.json").is_file() else {}
+        previous_diagnostics = " ".join(str(item) for item in previous_submission.get("diagnostics", []))
+        legacy_session_timeout = "opengame sdk timed out after 180s" in previous_diagnostics.casefold()
         # Older runs exhausted the per-pass retry loop but did not persist a
         # cumulative counter. Treat their terminal generation_failed status as
         # exhausted; otherwise every supervisor restart retries the same prefix
@@ -407,6 +444,13 @@ def run_model(*, model: str, output_root: Path, limit: int | None, evaluator_tim
         elif existing.get("status") == "running":
             generation_attempts_total = int(existing.get("generation_attempt", 0))
         else:
+            generation_attempts_total = 0
+        # A concurrent legacy shard could leave a terminal failure after
+        # calling runtime.run with a non-empty episode directory. Once that
+        # shard is stopped, this is safe to retry from a clean episode; it is
+        # distinct from a genuine model/provider failure and must not reset
+        # the normal cumulative retry budget.
+        if (workspace_collision or legacy_session_timeout) and retry_generation:
             generation_attempts_total = 0
         if artifact is None and episode.exists():
             shutil.rmtree(episode)
@@ -455,6 +499,7 @@ def run_model(*, model: str, output_root: Path, limit: int | None, evaluator_tim
                     if generation_failure_kind == "provider_infrastructure_failure":
                         _write_provider_block(model_root, model, task_id, submission)
                     elif artifact is not None:
+                        (task_dir / "generation_error.json").unlink(missing_ok=True)
                         (model_root / "provider_failure_streak.json").unlink(missing_ok=True)
                     atomic_write_json(task_dir / "submission.json", submission.to_dict())
                 except Exception as exc:
@@ -520,6 +565,7 @@ def run_model(*, model: str, output_root: Path, limit: int | None, evaluator_tim
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", choices=MODELS, required=True)
+    parser.add_argument("--baseline", action="store_true", help="Disable awesome-gamedev skills for this run")
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--limit", type=int, default=None, help="Development-only bounded run; omit for all 2218 tasks.")
     parser.add_argument("--evaluator-timeout", type=int, default=1800)
@@ -531,7 +577,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.shard_count < 1 or not 0 <= args.shard_index < args.shard_count:
         parser.error("--shard-index must be within --shard-count")
-    return run_model(model=args.model, output_root=args.output_root, limit=args.limit, evaluator_timeout=args.evaluator_timeout, evaluator_retries=args.evaluator_retries, retry_generation=args.retry_generation, generation_retries=args.generation_retries, shard_index=args.shard_index, shard_count=args.shard_count)
+    return run_model(model=args.model, output_root=args.output_root, limit=args.limit, evaluator_timeout=args.evaluator_timeout, evaluator_retries=args.evaluator_retries, retry_generation=args.retry_generation, generation_retries=args.generation_retries, shard_index=args.shard_index, shard_count=args.shard_count, awesome_skills=not args.baseline)
 
 
 if __name__ == "__main__":

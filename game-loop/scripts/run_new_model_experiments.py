@@ -130,14 +130,15 @@ def run_to_log(cmd: list, log_path: Path, append: bool = True) -> int:
         return rc
 
 
-def run_queue(model: str, bench: str) -> None:
+def run_queue(model: str, bench: str, *, awesome_skills: bool = False) -> None:
     qid = queue_id(model, bench)
     cfg = config_for(bench, model)
     if not cfg.is_file():
         print(f"  SKIP {qid}: missing config {cfg}")
         return
 
-    prefix = f"new_model_{MODEL_CONFIG_SUFFIX[model]}"
+    arm = "awesome" if awesome_skills else "baseline"
+    prefix = f"new_model_{arm}_{MODEL_CONFIG_SUFFIX[model]}"
     ts = time.strftime("%Y%m%d-%H%M%S")
     out_dir = RUNS / f"{prefix}_{bench}-resume-{ts}"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -151,6 +152,14 @@ def run_queue(model: str, bench: str) -> None:
     # create an isolated effective config instead of mutating those files.
     effective_cfg = out_dir / "config.json"
     config_value = json.loads(cfg.read_text(encoding="utf-8"))
+    if awesome_skills:
+        config_value.setdefault("backend", {}).setdefault("env", {})[
+            "GAME_LOOP_USE_AWESOME_GAMEDEV_SKILLS"
+        ] = "1"
+    else:
+        config_value.setdefault("backend", {}).setdefault("env", {}).pop(
+            "GAME_LOOP_USE_AWESOME_GAMEDEV_SKILLS", None
+        )
     evolution = config_value.setdefault("evolution", {})
     evolution["max_generations"] = 1
     evolution["candidates_per_generation"] = 1
@@ -210,7 +219,7 @@ def run_queue(model: str, bench: str) -> None:
         json.dumps(summary, indent=2, ensure_ascii=False) + "\n"
     )
     (out_dir / "runner.log").write_text(
-        f"{prefix}_{bench} OUT={out_dir}\nMODEL={model}\nCONFIG={cfg}\n"
+        f"{prefix}_{bench} OUT={out_dir}\nMODEL={model}\nARM={arm}\nCONFIG={cfg}\n"
         f"PLANNED_COUNT={len(queue_list)}\n"
         f"SKIP_LOOP_EVOLVE={os.environ.get('SKIP_LOOP_EVOLVE', '0')}\n",
         encoding="utf-8",
@@ -289,21 +298,23 @@ def run_queue(model: str, bench: str) -> None:
     print(f"[{qid}] finished: done={summary['completed_count']}, queued={len(queue_list)}")
 
 
-def launch_all() -> None:
+def launch_all(*, models: list[str], awesome_skills: bool = False) -> None:
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
     env["SKIP_LOOP_EVOLVE"] = env.get("SKIP_LOOP_EVOLVE", "1")
     pids: list[tuple[str, int]] = []
-    for model in MODELS:
+    arm = "awesome" if awesome_skills else "baseline"
+    for model in models:
         for bench in BENCHES:
             qid = queue_id(model, bench)
             cfg = config_for(bench, model)
             if not cfg.is_file():
                 print(f"  SKIP {qid}: missing config")
                 continue
-            log_file = RUNS / f"new_model_{MODEL_CONFIG_SUFFIX[model]}_{bench}-launcher.log"
+            log_file = RUNS / f"new_model_{arm}_{MODEL_CONFIG_SUFFIX[model]}_{bench}-launcher.log"
+            queue_arg = f"{model}_{bench}" + ("_awesome" if awesome_skills else "")
             proc = subprocess.Popen(
-                [sys.executable, "-u", str(__file__), "--queue", qid],
+                [sys.executable, "-u", str(__file__), "--queue", queue_arg],
                 stdout=open(log_file, "a"),
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
@@ -315,13 +326,14 @@ def launch_all() -> None:
     print(f"\nLaunched {len(pids)} queues.")
 
 
-def dry_run() -> None:
-    for model in MODELS:
+def dry_run(*, models: list[str], awesome_skills: bool = False) -> None:
+    arm = "awesome" if awesome_skills else "baseline"
+    for model in models:
         for bench in BENCHES:
             qid = queue_id(model, bench)
             cfg = config_for(bench, model)
             tasks = discover_tasks(bench)
-            prefix = f"new_model_{MODEL_CONFIG_SUFFIX[model]}"
+            prefix = f"new_model_{arm}_{MODEL_CONFIG_SUFFIX[model]}"
             done: set[str] = set()
             for d in RUNS.iterdir():
                 if d.is_dir() and d.name.startswith(f"{prefix}_{bench}-resume-"):
@@ -341,18 +353,22 @@ def main(argv: list[str] | None = None) -> int:
                         help="Queue ID: {model}_{bench} e.g. glm5.2_gcbench")
     parser.add_argument("--launch-all", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--model", action="append", dest="models", choices=MODELS)
+    parser.add_argument("--awesome-skills", action="store_true")
     args = parser.parse_args(argv)
 
     if args.dry_run:
-        dry_run()
+        dry_run(models=args.models or MODELS, awesome_skills=args.awesome_skills)
         return 0
 
     if args.launch_all:
-        launch_all()
+        launch_all(models=args.models or MODELS, awesome_skills=args.awesome_skills)
         return 0
 
     if args.queue:
-        parts = args.queue.split("_", 1)
+        queue_awesome = args.queue.endswith("_awesome")
+        queue_value = args.queue[:-len("_awesome")] if queue_awesome else args.queue
+        parts = queue_value.split("_", 1)
         if len(parts) != 2:
             print(f"Invalid queue ID: {args.queue}. Expected format: {{model}}_{{bench}}")
             return 1
@@ -364,7 +380,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Unknown benchmark: {bench}. Available: {BENCHES}")
             return 1
         os.environ.setdefault("SKIP_LOOP_EVOLVE", "1")
-        run_queue(model, bench)
+        run_queue(model, bench, awesome_skills=args.awesome_skills or queue_awesome)
         return 0
 
     print(__doc__)
