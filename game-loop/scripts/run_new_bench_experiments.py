@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-run_new_bench_experiments.py — Runner for 16 queues: 4 benchmarks × 4 models.
+run_new_bench_experiments.py — Runner for the public general-benchmark baseline matrix.
 
-Benchmarks: swebench, nl2repo, terminalbench, weavebench
-Models:     kimi, qwen3.6-27b, glm5.2, deepseek_v4
+Benchmarks: terminalbench (Terminal-Bench 2.1), taubench, nl2repo
+Models:     kimi, qwen3.6-27b, glm5.2, claude, gpt55, deepseek_v4
 
 Usage:
   python3 run_new_bench_experiments.py --queue kimi_swebench
@@ -20,18 +20,26 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-RUNS = ROOT / ".baseline-agent-runs"
+# The public benchmark bridges enforce the repository's project sandbox under
+# experiments/. Keep this matrix there so the safety boundary remains active.
+RUNS = ROOT / "experiments" / "general-baseline-runs"
 PYTHON = sys.executable
 CFG_DIR = ROOT / "experiments" / "configs-v4"
+SEED_ARTIFACTS = {
+    "terminalbench": ROOT / "experiments" / "general-baseline" / "seed_terminalbench",
+    "nl2repo": ROOT / "experiments" / "general-baseline" / "seed_nl2repo",
+    "taubench": ROOT / "experiments" / "general-baseline" / "seed_taubench",
+}
 
-BENCHES = ["swebench", "nl2repo", "terminalbench", "weavebench"]
-MODELS = ["kimi", "qwen3.6-27b", "glm5.2", "deepseek_v4"]
+BENCHES = ["terminalbench", "taubench", "nl2repo"]
+MODELS = ["kimi", "qwen3.6-27b", "glm5.2", "claude", "gpt55", "deepseek_v4"]
 
 TASK_SOURCES = {
-    "swebench": Path("/Users/wangxucong/Desktop/workspace/harness-game/game-loop/.baseline-agent-runs/swebench_tasks"),
-    "nl2repo": Path("/Users/wangxucong/Desktop/workspace/harness-game/third_party/NL2RepoBench/test_files"),
-    "terminalbench": Path("/Users/wangxucong/Desktop/workspace/harness-game/third_party/terminal-bench/original-tasks"),
-    "weavebench": Path("/Users/wangxucong/Desktop/workspace/harness-game/third_party/WeaveBench/cache/tasks"),
+    "nl2repo": ROOT / "third_party" / "NL2RepoBench" / "NL2RepoBench_src" / "test_files",
+    "terminalbench": ROOT / "third_party" / "terminal-bench-2",
+    # Tau2 creates its official task set internally; this file is the public
+    # instruction anchor required by the evolution engine.
+    "taubench": ROOT / "experiments" / "general-baseline" / "taubench-instruction.md",
 }
 
 MODEL_CONFIG_SUFFIX = {
@@ -39,6 +47,8 @@ MODEL_CONFIG_SUFFIX = {
     "qwen3.6-27b": "qwen",
     "glm5.2": "glm",
     "deepseek_v4": "deepseek",
+    "claude": "claude",
+    "gpt55": "gpt55",
 }
 
 
@@ -55,34 +65,19 @@ def queue_id(model: str, bench: str) -> str:
 
 def discover_tasks(bench: str) -> list[Path]:
     src = TASK_SOURCES.get(bench)
-    if not src or not src.is_dir():
+    if not src or (not src.is_dir() and not src.is_file()):
         return []
     tasks: list[Path] = []
-    if bench == "swebench":
+    if bench == "taubench":
+        return [src]
+    if bench == "nl2repo":
         for d in sorted(src.iterdir()):
-            if d.is_dir() and (d / "task.json").is_file():
-                tasks.append(d)
-    elif bench == "nl2repo":
-        for d in sorted(src.iterdir()):
-            if d.is_dir() and not d.name.startswith("."):
+            if d.is_dir() and (d / "start.md").is_file() and not d.name.startswith("."):
                 tasks.append(d)
     elif bench == "terminalbench":
         for d in sorted(src.iterdir()):
-            if d.is_dir() and not d.name.startswith("."):
+            if d.is_dir() and (d / "instruction.md").is_file() and not d.name.startswith("."):
                 tasks.append(d)
-    elif bench == "weavebench":
-        cache = src.parent / "task_dirs"
-        if cache.is_dir():
-            for domain_dir in sorted(cache.iterdir()):
-                if not domain_dir.is_dir():
-                    continue
-                for task_dir in sorted(domain_dir.iterdir()):
-                    if task_dir.is_dir() and (task_dir / "task.md").is_file():
-                        tasks.append(task_dir)
-        if not tasks:
-            for d in sorted(src.iterdir()):
-                if d.is_dir() and not d.name.startswith("."):
-                    tasks.append(d)
     return tasks
 
 
@@ -98,6 +93,23 @@ def load_done_ids(out_dir: Path) -> set[str]:
         except Exception:
             pass
     return done
+
+
+def historical_run_dir(prefix: str, bench: str, run_id: str) -> Path | None:
+    candidates = sorted(
+        (
+            run_root / run_id
+            for run_root in RUNS.glob(f"{prefix}_{bench}-resume-*")
+            if (run_root / run_id).is_dir()
+        ),
+        key=lambda path: path.parent.name,
+        reverse=True,
+    )
+    for candidate in candidates:
+        state = rj(candidate / "state.json")
+        if state.get("status") in {"initialized", "running"}:
+            return candidate
+    return None
 
 
 def _case_is_solidly_done(case: dict) -> bool:
@@ -139,6 +151,16 @@ def run_queue(model: str, bench: str) -> None:
     ts = time.strftime("%Y%m%d-%H%M%S")
     out_dir = RUNS / f"{prefix}_{bench}-resume-{ts}"
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    effective_cfg = out_dir / "config.json"
+    config_value = json.loads(cfg.read_text(encoding="utf-8"))
+    evolution = config_value.setdefault("evolution", {})
+    evolution["max_generations"] = 1
+    evolution["candidates_per_generation"] = 1
+    effective_cfg.write_text(
+        json.dumps(config_value, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
 
     tasks = discover_tasks(bench)
     done_ids = load_done_ids(out_dir)
@@ -184,7 +206,7 @@ def run_queue(model: str, bench: str) -> None:
     for idx, (task, run_id) in enumerate(queue_list, 1):
         if (out_dir / "STOP").exists():
             break
-        run_dir = out_dir / run_id
+        run_dir = historical_run_dir(prefix, bench, run_id) or (out_dir / run_id)
         log_path = out_dir / f"{run_id}.log"
         started = time.strftime("%Y-%m-%dT%H:%M:%S%z")
         with (out_dir / "runner.log").open("a", encoding="utf-8") as rl:
@@ -198,12 +220,13 @@ def run_queue(model: str, bench: str) -> None:
                     [PYTHON, "-m", "game_loop", "init",
                      "--run-dir", run_dir, "--task-source", str(task),
                      "--cold-start", "--seed-score", "0",
-                     "--config", str(cfg), "--run-id", run_id],
+                     "--seed-artifact", str(SEED_ARTIFACTS[bench]),
+                     "--config", str(effective_cfg), "--run-id", run_id],
                     log_path, append=False,
                 )
             rcs["bench_rc"] = run_to_log(
                 [PYTHON, "-m", "game_loop", "evolve",
-                 "--run-dir", run_dir, "--config", str(cfg)],
+                 "--run-dir", run_dir, "--config", str(effective_cfg)],
                 log_path, append=True,
             )
         except Exception as exc:
@@ -254,7 +277,8 @@ def run_queue(model: str, bench: str) -> None:
 
 
 def launch_all() -> None:
-    """Launch all 16 queues in parallel as background processes."""
+    """Launch all 18 queues in parallel as background processes."""
+    RUNS.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
     env["SKIP_LOOP_EVOLVE"] = env.get("SKIP_LOOP_EVOLVE", "1")
@@ -299,7 +323,7 @@ def dry_run() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     import argparse
-    parser = argparse.ArgumentParser(description="New benchmark experiment runner (4×4)")
+    parser = argparse.ArgumentParser(description="General benchmark baseline runner (6×3)")
     parser.add_argument("--queue", type=str, default=None,
                         help="Queue ID: {model}_{bench} e.g. kimi_swebench")
     parser.add_argument("--launch-all", action="store_true",
@@ -316,17 +340,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.queue:
-        # parse queue ID: {model}_{bench}
-        parts = args.queue.split("_", 1)
-        if len(parts) != 2:
-            print(f"Invalid queue ID: {args.queue}. Expected format: {{model}}_{{bench}}")
-            return 1
-        model, bench = parts
-        if model not in MODELS:
-            print(f"Unknown model: {model}. Available: {MODELS}")
-            return 1
-        if bench not in BENCHES:
-            print(f"Unknown benchmark: {bench}. Available: {BENCHES}")
+        # Parse from the benchmark suffix because deepseek_v4 contains an
+        # underscore and cannot be split at the first underscore.
+        bench = next((b for b in BENCHES if args.queue.endswith("_" + b)), None)
+        model = args.queue[:-(len(bench) + 1)] if bench else ""
+        if not bench or model not in MODELS:
+            print(f"Invalid queue ID: {args.queue}. Expected one of the configured model/benchmark pairs")
             return 1
         os.environ.setdefault("SKIP_LOOP_EVOLVE", "1")
         run_queue(model, bench)

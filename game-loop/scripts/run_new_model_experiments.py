@@ -2,7 +2,7 @@
 """
 run_new_model_experiments.py — Full-task runner for GC/GD/VeriGame model queues.
 
-Benchmarks: gcbench, gdbench, verigame
+Benchmarks: gcbench, gdbench
 Models:     glm5.2, deepseek_v4, kimi, qwen3.6-27b, claude, gpt55
 
 Usage:
@@ -30,7 +30,7 @@ SEED_ARTIFACTS = {
     "verigame": ROOT / "experiments" / "public_baseline_seeds" / "verigame",
 }
 
-BENCHES = ["gcbench", "gdbench", "verigame"]
+BENCHES = ["gcbench", "gdbench"]
 MODELS = ["glm5.2", "deepseek_v4", "kimi", "qwen3.6-27b", "claude", "gpt55"]
 
 TASK_SOURCES = {
@@ -40,10 +40,10 @@ TASK_SOURCES = {
 }
 
 MODEL_CONFIG_SUFFIX = {
-    "glm5.2": "glm",
-    "deepseek_v4": "deepseek",
+    "glm5.2": "glm5.2",
+    "deepseek_v4": "deepseek_v4",
     "kimi": "kimi",
-    "qwen3.6-27b": "qwen",
+    "qwen3.6-27b": "qwen3.6-27b",
     "claude": "claude",
     "gpt55": "gpt55",
 }

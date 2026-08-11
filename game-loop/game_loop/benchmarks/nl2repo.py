@@ -35,7 +35,7 @@ class NL2RepoAdapter(BenchmarkAdapter):
         kind="code_repository",
         ignore_patterns=(
             ".git/**", "task_overlay/**", "sandbox/**",
-            "agent_trajectory.log", "result.json", "*.md",
+            "agent_trajectory.log", "result.json",
             "__pycache__/**", ".pytest_cache/**",
         ),
     )

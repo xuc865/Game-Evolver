@@ -155,6 +155,20 @@ class TerminalBenchAdapter(BenchmarkAdapter):
         manifest = read_json(manifest_path)
         result_dir = Path(str(manifest.get("result_dir", "")))
         result_json = result_dir / "result.json"
+        # The Harbor-backed bridge emits its normalized evaluation directly
+        # in output_manifest. Older bridges returned result_dir/result.json.
+        if not manifest.get("result_dir") and (
+            "passed" in manifest or "reward" in manifest
+        ):
+            collected = Path(prepared.metadata["candidate_dir"]) / "collected_artifact"
+            self.stage_artifact(prepared.root_dir, collected)
+            evaluation = self.parse_evaluation(manifest_path)
+            return CandidateResult(
+                collected,
+                evaluation,
+                None if evaluation.feasible else "TerminalBench evaluator infrastructure did not complete normally",
+                evaluator_queries=1,
+            )
         if not result_dir.is_dir() or not result_json.is_file():
             return CandidateResult(
                 None,
