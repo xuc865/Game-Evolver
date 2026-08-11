@@ -52,25 +52,50 @@ def validate_keypoint_dir(path: Path) -> List[str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate normal keypoint run artifacts.")
-    parser.add_argument("--run-root", required=True)
+    parser.add_argument("--run-root")
+    parser.add_argument("--repo-root")
+    parser.add_argument("--game-name")
+    parser.add_argument("--run-id")
     parser.add_argument("--test-mode", choices=["normal"], required=True)
     parser.add_argument("--expected-count", type=int, default=0)
+    parser.add_argument("--expected-keypoint-count", type=int, default=0)
+    parser.add_argument("--json-output")
     args = parser.parse_args()
 
-    run_root = Path(args.run_root)
+    if args.run_root:
+        run_root = Path(args.run_root)
+    elif args.repo_root and args.game_name and args.run_id:
+        run_root = Path(args.repo_root) / "runs" / args.game_name / args.run_id
+    else:
+        parser.error(
+            "provide --run-root or all of --repo-root, --game-name, and --run-id"
+        )
+    expected_count = args.expected_count or args.expected_keypoint_count
     if not run_root.exists():
         print(f"ERROR: run root not found: {run_root}")
         return 1
 
     keypoint_dirs = sorted(path for path in run_root.glob("keypoint_*") if path.is_dir())
     issues: List[str] = []
-    if args.expected_count and len(keypoint_dirs) < args.expected_count:
-        issues.append(f"{run_root}: expected at least {args.expected_count} keypoint dirs, found {len(keypoint_dirs)}")
+    if expected_count and len(keypoint_dirs) < expected_count:
+        issues.append(f"{run_root}: expected at least {expected_count} keypoint dirs, found {len(keypoint_dirs)}")
     if not keypoint_dirs:
         issues.append(f"{run_root}: no keypoint_* directories found")
 
     for keypoint_dir in keypoint_dirs:
         issues.extend(validate_keypoint_dir(keypoint_dir))
+
+    report = {
+        "status": "FAIL" if issues else "PASS",
+        "run_root": str(run_root.resolve()),
+        "expected_count": expected_count,
+        "validated_count": len(keypoint_dirs),
+        "issues": issues,
+    }
+    if args.json_output:
+        output = Path(args.json_output)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
 
     if issues:
         for issue in issues:

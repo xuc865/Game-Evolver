@@ -33,6 +33,7 @@ class OpenGameRuntimeConfig:
     mcp_servers: dict[str, dict[str, Any]] = field(default_factory=dict)
     max_session_turns: int = -1
     timeout_seconds: int = 3600
+    fallback_on_timeout: bool = True
     node_executable: str = "node"
     sdk_module: str = "@opengame/sdk"
     opengame_executable: str | None = None
@@ -102,6 +103,7 @@ class OpenGameRuntimeConfig:
             mcp_servers={str(k): dict(v) for k, v in value.get("mcp_servers", {}).items()},
             max_session_turns=int(value.get("max_session_turns", -1)),
             timeout_seconds=int(value.get("timeout_seconds", 3600)),
+            fallback_on_timeout=bool(value.get("fallback_on_timeout", True)),
             node_executable=str(value.get("node_executable", "node")),
             sdk_module=str(value.get("sdk_module", "@opengame/sdk")),
             opengame_executable=(
@@ -328,7 +330,12 @@ class OpenGameRuntime:
             or _looks_like_provider_error(result.result_text)
             or not _artifact_exists(artifact)
         )
-        if primary_failed and resolved_provider is not None:
+        primary_timed_out = bool(result.error and " timed out after " in result.error)
+        if (
+            primary_failed
+            and resolved_provider is not None
+            and (self.config.fallback_on_timeout or not primary_timed_out)
+        ):
             fallback_environment = resolved_provider.fallback_inject(environment)
             if fallback_environment is not None:
                 route = "fallback"

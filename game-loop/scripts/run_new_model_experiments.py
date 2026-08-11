@@ -13,6 +13,7 @@ Usage:
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
 import sys
@@ -20,10 +21,13 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
+import fcntl
+
 ROOT = Path(__file__).resolve().parents[1]
 RUNS = ROOT / ".baseline-agent-runs"
 PYTHON = sys.executable
 CFG_DIR = ROOT / "experiments" / "configs-v4"
+PROGRESS_FILE = Path("/Users/wangxucong/Desktop/workspace/progress.txt")
 SEED_ARTIFACTS = {
     "gcbench": ROOT / "experiments" / "seed_artifacts" / "puzzle-sokoban-scaffold",
     "gdbench": ROOT / "experiments" / "seed_artifacts" / "puzzle-sokoban-scaffold",
@@ -166,6 +170,71 @@ def rj(p: Path) -> dict:
         return {}
 
 
+def _preferred_case(current: dict | None, candidate: dict) -> dict:
+    if current is None:
+        return candidate
+    current_completed = current.get("status") == "completed"
+    candidate_completed = candidate.get("status") == "completed"
+    if candidate_completed != current_completed:
+        return candidate if candidate_completed else current
+    if str(candidate.get("completed_at") or "") >= str(current.get("completed_at") or ""):
+        return candidate
+    return current
+
+
+def cumulative_accuracy(prefix: str, bench: str, current_item: dict) -> tuple[float, int]:
+    """Return mean primary score across unique finished tasks; failures score zero."""
+    by_run_id: dict[str, dict] = {}
+    for run_root in RUNS.glob(f"{prefix}_{bench}-resume-*"):
+        summary = rj(run_root / "summary.json")
+        for case in summary.get("cases", []):
+            run_id = str(case.get("run_id") or "")
+            if run_id:
+                by_run_id[run_id] = _preferred_case(by_run_id.get(run_id), case)
+
+    current_run_id = str(current_item.get("run_id") or "")
+    if current_run_id:
+        by_run_id[current_run_id] = _preferred_case(
+            by_run_id.get(current_run_id), current_item
+        )
+
+    total = 0.0
+    for case in by_run_id.values():
+        if case.get("status") != "completed":
+            continue
+        try:
+            score = float(case.get("champion_score") or 0.0)
+        except (TypeError, ValueError):
+            score = 0.0
+        if math.isfinite(score):
+            total += score
+    count = len(by_run_id)
+    return (total / count if count else 0.0), count
+
+
+def append_progress_notice(prefix: str, item: dict) -> None:
+    PROGRESS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with PROGRESS_FILE.open("a", encoding="utf-8") as progress:
+        fcntl.flock(progress.fileno(), fcntl.LOCK_EX)
+        try:
+            accuracy, task_count = cumulative_accuracy(prefix, str(item["bench"]), item)
+            try:
+                score = float(item.get("champion_score") or 0.0)
+            except (TypeError, ValueError):
+                score = 0.0
+            if not math.isfinite(score):
+                score = 0.0
+            progress.write(
+                f"[{item['completed_at']}] task={item['task_name']} "
+                f"model={item['model']} bench={item['bench']} status={item['status']} "
+                f"score={score:.6f} cumulative_accuracy={accuracy * 100:.4f}% "
+                f"mean_score={accuracy:.6f} unique_tasks={task_count}\n"
+            )
+            progress.flush()
+        finally:
+            fcntl.flock(progress.fileno(), fcntl.LOCK_UN)
+
+
 def run_to_log(cmd: list, log_path: Path, append: bool = True) -> int:
     mode = "a" if append else "w"
     with log_path.open(mode, encoding="utf-8") as log:
@@ -277,6 +346,8 @@ def run_queue(model: str, bench: str, *, awesome_skills: bool = False) -> None:
         if (out_dir / "STOP").exists():
             break
         run_dir = historical_run_dir(prefix, bench, run_id) or (out_dir / run_id)
+        state_path = run_dir / "state.json"
+        state_mtime_before = state_path.stat().st_mtime_ns if state_path.is_file() else None
         log_path = out_dir / f"{run_id}.log"
         started = time.strftime("%Y-%m-%dT%H:%M:%S%z")
         with (out_dir / "runner.log").open("a", encoding="utf-8") as rl:
@@ -284,7 +355,7 @@ def run_queue(model: str, bench: str, *, awesome_skills: bool = False) -> None:
 
         rcs = {"init_rc": None, "bench_rc": None}
         try:
-            need_init = not (run_dir / "state.json").is_file()
+            need_init = not state_path.is_file()
             if need_init:
                 rcs["init_rc"] = run_to_log(
                     [PYTHON, "-m", "game_loop", "init",
@@ -338,6 +409,14 @@ def run_queue(model: str, bench: str, *, awesome_skills: bool = False) -> None:
         )
         with (out_dir / "runner.log").open("a", encoding="utf-8") as rl:
             rl.write(f"CASE_SUMMARY={json.dumps({'run_id': run_id, 'status': status, 'score': cr.get('primary_score'), 'stop_reason': stop_reason}, ensure_ascii=False)}\n")
+        state_mtime_after = state_path.stat().st_mtime_ns if state_path.is_file() else None
+        executed_this_run = need_init or state_mtime_after != state_mtime_before
+        try:
+            if executed_this_run:
+                append_progress_notice(prefix, item)
+        except Exception as exc:
+            with (out_dir / "runner.log").open("a", encoding="utf-8") as rl:
+                rl.write(f"PROGRESS_NOTICE_ERROR={exc}\n")
 
     summary["finished_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     summary["completed_count"] = sum(1 for c in summary["cases"] if _case_is_solidly_done(c))

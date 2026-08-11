@@ -15,10 +15,16 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
+
+try:
+    from scripts.general_benchmark_progress import record_task_notice
+except ModuleNotFoundError:
+    from general_benchmark_progress import record_task_notice
 
 ROOT = Path(__file__).resolve().parents[1]
 # The public benchmark bridges enforce the repository's project sandbox under
@@ -109,9 +115,23 @@ def load_done_ids(out_dir: Path) -> set[str]:
     if summary_path.is_file():
         try:
             s = json.loads(summary_path.read_text())
+            bench = s.get("bench")
             for c in s.get("cases", []):
-                if c.get("status") == "completed":
-                    done.add(c.get("run_id", ""))
+                run_id = c.get("run_id", "")
+                if c.get("status") != "completed" or not run_id:
+                    continue
+                if bench == "nl2repo":
+                    manifests = sorted(
+                        (out_dir / run_id).glob(
+                            "generation_*/candidate_*/nl2repo_execution.json"
+                        )
+                    )
+                    if not any(
+                        str(rj(path).get("artifact_ref", "")).strip()
+                        for path in manifests
+                    ):
+                        continue
+                done.add(run_id)
         except Exception:
             pass
     return done
@@ -162,12 +182,35 @@ def run_to_log(cmd: list, log_path: Path, append: bool = True) -> int:
         return rc
 
 
+def terminalbench_docker_ready() -> tuple[bool, str]:
+    docker = shutil.which("docker")
+    if not docker:
+        return False, "docker CLI is not installed"
+    try:
+        completed = subprocess.run(
+            [docker, "info"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, f"docker preflight failed: {exc}"
+    if completed.returncode != 0:
+        return False, "Docker daemon is not running"
+    return True, ""
+
+
 def run_queue(model: str, bench: str) -> None:
     qid = queue_id(model, bench)
     cfg = config_for(bench, model)
     if not cfg.is_file():
         print(f"  SKIP {qid}: missing config {cfg}")
         return
+    if bench == "terminalbench":
+        ready, reason = terminalbench_docker_ready()
+        if not ready:
+            print(f"[{qid}] BLOCKED: {reason}; no tasks were started")
+            return
 
     prefix = f"new_bench_{MODEL_CONFIG_SUFFIX[model]}"
     ts = time.strftime("%Y%m%d-%H%M%S")
@@ -289,6 +332,20 @@ def run_queue(model: str, bench: str) -> None:
         )
         with (out_dir / "runner.log").open("a", encoding="utf-8") as rl:
             rl.write(f"CASE_SUMMARY={json.dumps({'run_id': run_id, 'status': status, 'score': cr.get('primary_score'), 'stop_reason': stop_reason}, ensure_ascii=False)}\n")
+        try:
+            record_task_notice(
+                runs=RUNS,
+                prefix=prefix,
+                model=model,
+                bench=bench,
+                task_name=task.name,
+                run_id=run_id,
+                completed_at=completed,
+                status=status,
+            )
+        except Exception as exc:
+            with (out_dir / "runner.log").open("a", encoding="utf-8") as rl:
+                rl.write(f"PROGRESS_NOTICE_ERROR={exc}\n")
 
     summary["finished_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     summary["completed_count"] = sum(1 for c in summary["cases"] if _case_is_solidly_done(c))

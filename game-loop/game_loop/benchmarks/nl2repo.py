@@ -103,6 +103,12 @@ class NL2RepoAdapter(BenchmarkAdapter):
             shutil.copytree(task_source, repo_dir, dirs_exist_ok=True)
         self.stage_artifact(parent_artifact, repo_dir)
         task_file_src = Path(str(self.options.get("task_file", "")))
+        if not task_file_src.is_file():
+            task_file_src = (
+                task_source / "start.md"
+                if task_source.is_dir()
+                else task_source
+            )
         if task_file_src.is_file():
             shutil.copy2(task_file_src, workspace / "task_file.md")
         harness = feedback.get("agent_harness")
@@ -168,8 +174,18 @@ class NL2RepoAdapter(BenchmarkAdapter):
                 "NL2RepoBench result artifact is missing",
                 evaluator_queries=1,
             )
+        artifact_ref = Path(str(manifest.get("artifact_ref", "")))
+        if not artifact_ref.is_dir():
+            artifact_ref = result_dir / "opengame_episode" / "workspace"
+        if not artifact_ref.is_dir():
+            return CandidateResult(
+                None,
+                None,
+                "NL2RepoBench generated repository artifact is missing",
+                evaluator_queries=1,
+            )
         collected = Path(prepared.metadata["candidate_dir"]) / "collected_artifact"
-        self.stage_artifact(result_dir, collected)
+        self.stage_artifact(artifact_ref, collected)
         evaluation = self.parse_evaluation(result_json)
         return CandidateResult(
             collected,

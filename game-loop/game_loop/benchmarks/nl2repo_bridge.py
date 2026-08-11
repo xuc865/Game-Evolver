@@ -78,11 +78,17 @@ def main(argv: list[str] | None = None) -> int:
         f"rm -rf {shlex.quote('/agent_copy/' + item)}" for item in test_files
     )
     commands = "\n".join(
-        f"(cd /workspace_eval && {cmd}) 2>&1 | tee -a /game_loop_result/pytest_output.txt"
+        (
+            f"(cd /workspace_eval && {cmd}) 2>&1 | "
+            "tee -a /game_loop_result/pytest_output.txt\n"
+            "command_rc=${PIPESTATUS[0]}\n"
+            "if [ \"$command_rc\" -gt \"$overall_rc\" ]; then "
+            "overall_rc=$command_rc; fi"
+        )
         for cmd in test_commands
     )
     script_file.write_text(
-        "#!/usr/bin/env bash\nset -e\n"
+        "#!/usr/bin/env bash\nset -e\nset -o pipefail\n"
         # Official NL2Repo images keep the private reference project and tests
         # in /workspace. Build a separate evaluation tree before overlaying the
         # candidate so the image's private tests are never exposed to OpenGame.
@@ -91,8 +97,8 @@ def main(argv: list[str] | None = None) -> int:
         f"rm -f {remove_configs}\n{remove_tests}\n"
         "cp -a /agent_copy/. /workspace_eval/\n"
         "export PYTHONPATH=/workspace_eval:${PYTHONPATH:-}\n"
-        "set +e\n"
-        f"{commands}\n",
+        "set +e\noverall_rc=0\n"
+        f"{commands}\nexit \"$overall_rc\"\n",
         encoding="utf-8",
     )
     image = f"ghcr.io/multimodal-art-projection/nl2repobench/{args.project_name}:1.0"
@@ -118,12 +124,20 @@ def main(argv: list[str] | None = None) -> int:
     failures = int(failed_matches[-1]) if failed_matches else 0
     errors = int(error_matches[-1]) if error_matches else 0
     reward = min(passed_count / total, 1.0) if total else 0.0
-    infrastructure_error = not output_file.is_file() or return_code < 0 or bool(error)
+    infrastructure_error = (
+        not output_file.is_file()
+        or return_code not in (0, 1)
+        or bool(error)
+    )
+    diagnostics = [error] if error else []
+    if return_code not in (0, 1) and not diagnostics:
+        diagnostics.append(f"pytest exited with code {return_code}")
     result = {"passed": reward >= 1.0 and not infrastructure_error,
               "passed_count": passed_count, "total": total, "failures": failures,
-              "errors": ([error] if error else []) + ([f"{errors} pytest errors"] if errors else []),
+              "errors": diagnostics + ([f"{errors} pytest errors"] if errors else []),
               "reward": reward, "infrastructure_error": infrastructure_error,
-              "project_name": args.project_name, "return_code": return_code}
+              "project_name": args.project_name, "return_code": return_code,
+              "artifact_ref": str(repo_root)}
     (result_dir / "result.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     output_manifest.parent.mkdir(parents=True, exist_ok=True)
     output_manifest.write_text(json.dumps({**result, "result_dir": str(result_dir)}, indent=2) + "\n",

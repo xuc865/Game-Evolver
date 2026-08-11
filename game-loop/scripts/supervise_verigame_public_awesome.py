@@ -19,7 +19,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--log-root", type=Path, required=True)
-    parser.add_argument("--generation-timeout", type=int, default=3600)
+    parser.add_argument("--generation-timeout", type=int, default=1800)
     parser.add_argument("--evaluation-timeout", type=int, default=14400)
     parser.add_argument("--only-keypoints", default="")
     parser.add_argument("--provider", action="append", choices=PROVIDERS)

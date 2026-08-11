@@ -10,5 +10,5 @@ export GAME_LOOP_USE_AWESOME_GAMEDEV_SKILLS=1
 exec /Library/Developer/CommandLineTools/usr/bin/python3 -u scripts/supervise_verigame_public_awesome.py \
   --output-root .baseline-agent-runs/verigame-official-public-awesome-v1 \
   --log-root experiments/full-matrix-launch/verigame-official-public-awesome-v1 \
-  --generation-timeout 3600 \
+  --generation-timeout 1800 \
   --evaluation-timeout 14400

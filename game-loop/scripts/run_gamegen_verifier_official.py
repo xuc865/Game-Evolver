@@ -64,7 +64,7 @@ def run(
         "--backend", backend,
         "--keypoints-md", str(game / "keypoints.md"),
         "--min-keypoints", str(min_keypoints),
-        "--max-workers", "1",
+        "--max-workers", "3",
         "--keypoints-per-session", "1",
     ]
     if model:
@@ -109,9 +109,14 @@ def run(
         "schema_version": "gamegen-verifier-official-v1",
         "implementation": "official-github-reference-implementation",
         "official_repository": "https://github.com/NetX-lab/GameGen-Verifier",
-        "official_commit": subprocess.check_output(
-            ["git", "-C", str(official_root), "rev-parse", "HEAD"], text=True
-        ).strip(),
+        "official_commit": (
+            subprocess.check_output(
+                ["git", "-C", str(official_root), "rev-parse", "HEAD"], text=True
+            ).strip()
+            if (official_root / ".git").exists()
+            else None
+        ),
+        "official_source": "vendored-reference-tree",
         "status": "infrastructure_failure" if incomplete else "completed",
         "primary_score": None if incomplete else passed / len(rows),
         "objectives": {} if incomplete else {"keypoint_pass_rate": passed / len(rows)},

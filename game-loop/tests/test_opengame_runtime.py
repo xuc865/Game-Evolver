@@ -57,6 +57,15 @@ class EmptyThenArtifactRunner:
         return RunnerResult(0, result_text="done")
 
 
+class TimeoutRunner:
+    def __init__(self):
+        self.calls = []
+
+    def run(self, request, *, isolation, environment, timeout_seconds):
+        self.calls.append((request, dict(environment)))
+        return RunnerResult(-9, error=f"OpenGame SDK timed out after {timeout_seconds}s")
+
+
 class PipelineAdapter(BenchmarkAdapter):
     artifact_descriptor = ArtifactDescriptor(kind="pipeline-test")
 
@@ -209,6 +218,27 @@ class OpenGameRuntimeTests(unittest.TestCase):
             self.assertEqual(submission.metadata["provider_route"], "fallback")
             self.assertEqual(len(runner.calls), 2)
             self.assertEqual(runner.calls[1][1]["OPENAI_BASE_URL"], "https://openrouter.ai/api/v1")
+
+    def test_timeout_can_fail_without_provider_fallback(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            runner = TimeoutRunner()
+            task = GameTask("t", "b", "make", str(root / "task"), artifact_relpath=".")
+            with patch.dict(os.environ, {"OPENROUTER_API_KEY": "fallback-secret"}, clear=False):
+                submission = OpenGameRuntime(
+                    OpenGameRuntimeConfig(
+                        backbone_provider="qwen",
+                        fallback_on_timeout=False,
+                        timeout_seconds=1800,
+                    ),
+                    runner=runner,
+                ).run(task, episode_dir=root / "episode")
+            self.assertEqual(submission.status, "failed")
+            self.assertEqual(submission.metadata["provider_route"], "primary")
+            self.assertEqual(len(runner.calls), 1)
+            self.assertTrue(
+                any("timed out after 1800s" in item for item in submission.diagnostics)
+            )
 
     def test_task_rejects_artifact_escape(self):
         with self.assertRaisesRegex(ValueError, "stay within"):

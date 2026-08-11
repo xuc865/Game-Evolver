@@ -37,6 +37,9 @@ PROVIDERS = {
     "deepseek": "deepseek-v4-flash",
 }
 REQUIRED_ARTIFACTS = ("package.json", "src", "data.md", "state_injection_api.md")
+MAX_GENERATION_SESSION_TURNS = 120
+MAX_GENERATION_SECONDS = 1800
+PROGRESS_NOTICE_PATH = Path("/Users/wangxucong/Desktop/workspace/progress.txt")
 
 
 def read_json(path: Path) -> dict:
@@ -52,6 +55,43 @@ def write_json(path: Path, value: dict) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     temporary.replace(path)
+
+
+def append_progress_notice(
+    item: dict,
+    *,
+    attempted_count: int,
+    completed_count: int,
+    progress_path: Path = PROGRESS_NOTICE_PATH,
+) -> bool:
+    """Append one concurrency-safe, idempotent notice for a finished task attempt."""
+
+    attempt_root = Path(str(item.get("attempt_root", "")))
+    if not attempt_root.is_dir() or attempted_count <= 0:
+        return False
+    marker = attempt_root / "progress_notice.done"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    with marker.open("a+", encoding="utf-8") as marker_file:
+        fcntl.flock(marker_file.fileno(), fcntl.LOCK_EX)
+        marker_file.seek(0)
+        if marker_file.read().strip():
+            return False
+        accuracy = completed_count / attempted_count
+        line = (
+            f"{item.get('finished_at') or time.strftime('%Y-%m-%dT%H:%M:%S%z')} "
+            "bench=gamegen-verifier-public arm=awesome-skill "
+            f"task={item.get('task')} model={item.get('model')} status={item.get('status')} "
+            f"cumulative_accuracy={completed_count}/{attempted_count} ({accuracy:.2%})\n"
+        )
+        progress_path.parent.mkdir(parents=True, exist_ok=True)
+        with progress_path.open("a", encoding="utf-8") as progress_file:
+            fcntl.flock(progress_file.fileno(), fcntl.LOCK_EX)
+            progress_file.write(line)
+            progress_file.flush()
+            os.fsync(progress_file.fileno())
+        marker_file.write(line)
+        marker_file.flush()
+        return True
 
 
 def task_files() -> list[Path]:
@@ -74,17 +114,37 @@ def generation_prompt(specification: str) -> str:
         "- State injection must deterministically update both internal state and rendered UI.\n"
         "- Do not create keypoints.md and do not write tests for the evaluator.\n"
         "- Finish only after npm build succeeds.\n\n"
+        "Efficiency and early-stop contract (mandatory):\n"
+        "- Work directly toward the required artifact; do not repeatedly reread the same "
+        "documentation, inspect unrelated templates, or narrate progress.\n"
+        "- Target no more than 45 tool calls. Implement the smallest complete game that "
+        "faithfully satisfies the specification and state-injection contract.\n"
+        "- Do one implementation pass. Do not repeatedly rewrite working files, restart the "
+        "plan, or defer required files to a later phase. Create all required inputs early.\n"
+        "- Run npm build once after implementation, then only rerun it when fixing a concrete "
+        "build error. Do not add optional tests, polish, or assets after the build passes.\n"
+        "- As soon as all four required artifact inputs exist and npm build passes, stop "
+        "immediately and return the final response.\n\n"
         "## Public specification\n\n" + specification
     )
 
 
 def generate(provider: str, task: Path, attempt_root: Path, timeout: int) -> tuple[Path | None, dict]:
     episode = attempt_root / "generation_episode"
-    config = runtime_config_from_environment(provider=provider, timeout_seconds=timeout)
+    config = runtime_config_from_environment(
+        provider=provider, timeout_seconds=min(timeout, MAX_GENERATION_SECONDS)
+    )
     # The benchmark workspace is disposable and all four providers must receive
     # the same non-interactive tool policy.  The per-backbone auto-edit setting
     # otherwise rejects ordinary shell scaffolding commands.
-    config = OpenGameRuntimeConfig.from_dict({**config.to_dict(), "permission_mode": "yolo"})
+    config_value = config.to_dict()
+    config_value["permission_mode"] = "yolo"
+    config_value["max_session_turns"] = MAX_GENERATION_SESSION_TURNS
+    config_value["fallback_on_timeout"] = False
+    config_value["exclude_tools"] = [
+        name for name in config_value.get("exclude_tools", []) if name != "todo_write"
+    ]
+    config = OpenGameRuntimeConfig.from_dict(config_value)
     runtime = OpenGameRuntime(config)
     game_task = GameTask(
         task_id=f"verigame-{task.stem}",
@@ -325,6 +385,14 @@ def run_provider(args: argparse.Namespace, provider: str) -> None:
         summary["officially_completed_count"] = sum(x["status"] == "completed" for x in by_task.values())
         summary["infrastructure_failed_count"] = len(by_task) - summary["officially_completed_count"]
         write_json(summary_path, summary)
+        try:
+            append_progress_notice(
+                item,
+                attempted_count=summary["attempted_count"],
+                completed_count=summary["officially_completed_count"],
+            )
+        except OSError as exc:
+            print(f"[{provider}] progress notice failed: {exc}", file=sys.stderr, flush=True)
     summary["finished_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     write_json(summary_path, summary)
 
@@ -333,7 +401,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--provider", action="append", choices=sorted(PROVIDERS))
     parser.add_argument("--output-root", type=Path, default=ROOT / ".baseline-agent-runs" / "verigame-official-public-awesome-v1")
-    parser.add_argument("--generation-timeout", type=int, default=3600)
+    parser.add_argument("--generation-timeout", type=int, default=MAX_GENERATION_SECONDS)
     parser.add_argument("--evaluation-timeout", type=int, default=14400)
     parser.add_argument("--only-keypoints", default="")
     parser.add_argument("--smoke", action="store_true")
