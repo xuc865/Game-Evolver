@@ -2824,6 +2824,88 @@ class GameLoopTests(unittest.TestCase):
             self.assertTrue(outcome.infrastructure_ok)
             self.assertEqual(outcome.final_score, 0.42)
 
+    def test_admission_case_restarts_paused_attempt_with_healthy_seed(self):
+        from game_loop.cli import _run_harness_admission_case
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config = write_config(root, candidates=1, level="L4", max_probe_calls=2)
+            source_config = root / "config.json"
+            engine = HarnessEvolutionEngine(root / "outer", config.method.harness_evolution)
+            harness = engine.initialize()
+            case_dir = root / "case" / "parent"
+            case_dir.mkdir(parents=True)
+            for relative in (
+                "coevolution/game_archive.json",
+                "coevolution/interaction_matrix.json",
+                "coevolution/probe_archive.json",
+            ):
+                path = case_dir / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("{}")
+            (case_dir / "manifest.json").write_text(json.dumps({
+                "config_fingerprint": config.fingerprint,
+                "harness_frozen_within_episode": True,
+                "budgets": {},
+            }))
+            (case_dir / "state.json").write_text(json.dumps({
+                "status": "paused_infrastructure",
+                "champion_harness_id": harness.harness_id,
+                "champion_evaluation": {
+                    "primary_score": 0.0,
+                    "feasible": True,
+                    "constraints": {"infrastructure_ok": True},
+                    "evaluator": {"infrastructure_failure": False},
+                },
+            }))
+            task = root / "task"; task.mkdir()
+            seed = root / "seed"; seed.mkdir()
+
+            def fake_init(args):
+                args.run_dir.mkdir(parents=True, exist_ok=True)
+                (args.run_dir / "manifest.json").write_text(json.dumps({
+                    "config_fingerprint": config.fingerprint,
+                    "harness_frozen_within_episode": True,
+                    "budgets": {},
+                }))
+                (args.run_dir / "state.json").write_text(json.dumps({
+                    "status": "completed",
+                    "champion_harness_id": harness.harness_id,
+                    "champion_evaluation": {
+                        "primary_score": 0.5,
+                        "feasible": True,
+                        "constraints": {"infrastructure_ok": True},
+                        "evaluator": {"infrastructure_failure": False},
+                    },
+                    "model_calls": 1,
+                    "evaluator_queries": 1,
+                }))
+                return 0
+
+            with patch("game_loop.cli.cmd_init", side_effect=fake_init) as init, \
+                    patch("game_loop.cli.cmd_evolve", return_value=None) as evolve:
+                outcome = _run_harness_admission_case(
+                    case_id="case-1",
+                    case_dir=case_dir,
+                    harness=harness,
+                    runner=Mock(),
+                    outer_dir=root / "outer",
+                    config=config,
+                    source_config=source_config,
+                    task_source=task,
+                    seed_artifact=seed,
+                    seed_score=0.0,
+                    epoch=1,
+                    run_id_prefix="t",
+                    evaluate_seed=True,
+                )
+
+            init.assert_called_once()
+            evolve.assert_called_once()
+            self.assertTrue((case_dir.parent / "parent.infra-retry-1").is_dir())
+            self.assertTrue(outcome.infrastructure_ok)
+            self.assertEqual(outcome.final_score, 0.5)
+
     def test_admission_case_does_not_evolve_after_incomplete_init(self):
         from game_loop.cli import _run_harness_admission_case
 

@@ -158,6 +158,12 @@ def build_parser() -> argparse.ArgumentParser:
     self_supervise.add_argument("--task-pool", type=Path)
     self_supervise.add_argument("--skip-rubric-validation", action="store_true")
     self_supervise.add_argument("--heartbeat-seconds", type=int, default=30)
+    self_supervise.add_argument(
+        "--max-epoch-retries",
+        type=int,
+        default=int(os.environ.get("GAME_LOOP_MAX_EPOCH_RETRIES", "3")),
+        help="maximum infrastructure/proposal retries before recording FAILED_INFRA and advancing",
+    )
     self_supervise.add_argument("--ui-port", type=int, default=8765)
 
     agentx_init = sub.add_parser("agentx-nested-init")
@@ -964,6 +970,23 @@ def _run_harness_admission_case(
                     harness_id=harness.harness_id,
                     run_dir=case_dir,
                 )
+            elif status == "paused_infrastructure":
+                # LoopController intentionally preserves a paused run for
+                # evaluator-only recovery and cmd_evolve returns it unchanged.
+                # An admission replay must make progress, so start a fresh
+                # attempt after preserving the failed evidence instead of
+                # repeatedly loading the same permanently paused state.
+                retry_index = 1
+                while (case_dir.parent / f"{case_dir.name}.infra-retry-{retry_index}").exists():
+                    retry_index += 1
+                archived = case_dir.parent / f"{case_dir.name}.infra-retry-{retry_index}"
+                case_dir.rename(archived)
+                case_dir.mkdir(parents=True, exist_ok=True)
+                print(
+                    f"[{case_id}] archived paused infrastructure episode to "
+                    f"{archived.name}; restarting clean admission attempt"
+                )
+                resumable_files_present = False
             elif status in _ADMISSION_RESUMABLE_STATUSES:
                 _maybe_clear_stale_run_lock(case_dir)
                 owner_path = case_dir / ".loop.lock" / "owner.json"
@@ -1502,6 +1525,71 @@ def cmd_harness_self_supervise(args: argparse.Namespace) -> int:
 
     current_epoch = args.start_epoch
     max_epochs = args.max_epochs
+    max_epoch_retries = int(args.max_epoch_retries)
+    if max_epoch_retries < 1:
+        raise ValueError("--max-epoch-retries must be >= 1")
+    retry_state_path = outer_dir / "epoch_retry_state.json"
+    failures_path = outer_dir / "epoch_failures.json"
+
+    def _read_retry_state() -> dict[str, Any]:
+        if not retry_state_path.is_file():
+            return {"epochs": {}}
+        try:
+            value = read_json(retry_state_path)
+        except (OSError, ValueError, TypeError):
+            return {"epochs": {}}
+        return value if isinstance(value, dict) and isinstance(value.get("epochs"), dict) else {"epochs": {}}
+
+    def _failed_epoch_numbers() -> set[int]:
+        if not failures_path.is_file():
+            return set()
+        try:
+            value = read_json(failures_path)
+        except (OSError, ValueError, TypeError):
+            return set()
+        return {
+            int(item["epoch"])
+            for item in value.get("items", [])
+            if isinstance(item, dict) and str(item.get("epoch", "")).isdigit()
+        }
+
+    def _record_failure(exc: Exception) -> bool:
+        state = _read_retry_state()
+        key = str(current_epoch)
+        previous = state["epochs"].get(key, {})
+        attempts = int(previous.get("attempts", 0)) + 1
+        state["epochs"][key] = {
+            "attempts": attempts,
+            "last_error": str(exc),
+            "updated_at": utc_now(),
+        }
+        atomic_write_json(retry_state_path, state)
+        if attempts < max_epoch_retries:
+            print(
+                f"[supervisor] epoch {current_epoch} retry {attempts}/{max_epoch_retries}",
+                file=sys.stderr,
+            )
+            return False
+        try:
+            failures = read_json(failures_path) if failures_path.is_file() else {"items": []}
+        except (OSError, ValueError, TypeError):
+            failures = {"items": []}
+        items = [item for item in failures.get("items", []) if item.get("epoch") != current_epoch]
+        items.append({
+            "epoch": current_epoch,
+            "status": "FAILED_INFRA",
+            "attempts": attempts,
+            "error": str(exc),
+            "created_at": utc_now(),
+        })
+        atomic_write_json(failures_path, {"items": sorted(items, key=lambda item: int(item["epoch"]))})
+        state["epochs"].pop(key, None)
+        atomic_write_json(retry_state_path, state)
+        print(
+            f"[supervisor] epoch {current_epoch} marked FAILED_INFRA after {attempts} attempts; advancing",
+            file=sys.stderr,
+        )
+        return True
 
     print(f"[supervisor] PID={os.getpid()} start_epoch={current_epoch} max_epochs={max_epochs}")
     heartbeat.update(
@@ -1532,6 +1620,10 @@ def cmd_harness_self_supervise(args: argparse.Namespace) -> int:
                     print(f"[supervisor] epoch {current_epoch} already completed, skipping")
                     current_epoch += 1
                     continue
+            if current_epoch in _failed_epoch_numbers():
+                print(f"[supervisor] epoch {current_epoch} previously FAILED_INFRA, skipping")
+                current_epoch += 1
+                continue
 
             # ── run epoch ──
             print(f"[supervisor] starting epoch {current_epoch}")
@@ -1571,6 +1663,7 @@ def cmd_harness_self_supervise(args: argparse.Namespace) -> int:
                 print(f"[supervisor] epoch {current_epoch} failed: {exc}", file=sys.stderr)
                 import traceback
                 traceback.print_exc()
+                epoch_completed = _record_failure(exc)
 
             if epoch_completed:
                 current_epoch += 1
