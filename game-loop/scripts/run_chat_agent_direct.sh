@@ -19,17 +19,21 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-if [[ -f "$ROOT_DIR/.env" ]]; then
+_source_env_file() {
+  local env_file="$1"
   set -a
-  # shellcheck disable=SC1091
-  source "$ROOT_DIR/.env"
+  set +u
+  # shellcheck disable=SC1090
+  source "$env_file"
+  set -u
   set +a
+}
+
+if [[ -f "$ROOT_DIR/.env" ]]; then
+  _source_env_file "$ROOT_DIR/.env"
 fi
 if [[ -f "$ROOT_DIR/.env.local" ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  source "$ROOT_DIR/.env.local"
-  set +a
+  _source_env_file "$ROOT_DIR/.env.local"
 fi
 
 # DashScope is OpenAI-compatible but its native credential name is
