@@ -417,11 +417,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.queue:
         queue_awesome = args.queue.endswith("_awesome")
         queue_value = args.queue[:-len("_awesome")] if queue_awesome else args.queue
-        parts = queue_value.split("_", 1)
-        if len(parts) != 2:
+        bench = next((candidate for candidate in BENCHES if queue_value.endswith(f"_{candidate}")), None)
+        model = queue_value[:-(len(bench) + 1)] if bench else ""
+        if not model or not bench:
             print(f"Invalid queue ID: {args.queue}. Expected format: {{model}}_{{bench}}")
             return 1
-        model, bench = parts
         if model not in MODELS:
             print(f"Unknown model: {model}. Available: {MODELS}")
             return 1
