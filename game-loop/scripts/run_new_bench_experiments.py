@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 import sys
 import time
@@ -50,6 +51,27 @@ MODEL_CONFIG_SUFFIX = {
     "claude": "claude",
     "gpt55": "gpt55",
 }
+
+
+def load_env_local() -> None:
+    """Load the repository-local model credentials without logging values."""
+    env_file = ROOT / ".env.local"
+    if not env_file.is_file():
+        return
+    completed = subprocess.run(
+        [
+            "/bin/zsh",
+            "-lc",
+            f"set -a; source {shlex.quote(str(env_file))}; set +a; env -0",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    for item in completed.stdout.split(b"\0"):
+        if b"=" not in item:
+            continue
+        key, value = item.split(b"=", 1)
+        os.environ[key.decode("utf-8")] = value.decode("utf-8")
 
 
 def config_for(bench: str, model: str) -> Path:
@@ -323,6 +345,7 @@ def dry_run() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     import argparse
+    load_env_local()
     parser = argparse.ArgumentParser(description="General benchmark baseline runner (6×3)")
     parser.add_argument("--queue", type=str, default=None,
                         help="Queue ID: {model}_{bench} e.g. kimi_swebench")

@@ -39,7 +39,11 @@ def run(
     if workspace.exists():
         raise FileExistsError(f"official evaluation workspace must be new: {workspace}")
     game = workspace / "games" / game_name
-    shutil.copytree(artifact_dir.resolve(), game)
+    shutil.copytree(
+        artifact_dir.resolve(),
+        game,
+        ignore=shutil.ignore_patterns("node_modules"),
+    )
     for required in ("package.json", "src", "data.md", "state_injection_api.md"):
         if not (game / required).exists():
             raise FileNotFoundError(f"OpenGame artifact lacks official GGV input: {required}")
@@ -69,6 +73,16 @@ def run(
         command.extend(["--only-keypoints", only_keypoints])
     environment = dict(os.environ)
     environment["PATH"] = f"{official_root / '.venv' / 'bin'}:{environment.get('PATH', '')}"
+    environment["PYTHONPATH"] = os.pathsep.join(
+        part for part in (
+            str(official_root / "scripts"),
+            str(official_root),
+            environment.get("PYTHONPATH", ""),
+        ) if part
+    )
+    browser_cache = official_root.parents[1] / ".cache" / "gamegen-verifier-playwright-v1"
+    if browser_cache.is_dir():
+        environment["PLAYWRIGHT_BROWSERS_PATH"] = str(browser_cache)
     log_path = output_dir.resolve() / "official_ggv.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("wb") as log:

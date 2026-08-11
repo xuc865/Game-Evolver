@@ -19,7 +19,9 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--log-root", type=Path, required=True)
-    parser.add_argument("--timeout", type=int, default=900)
+    parser.add_argument("--generation-timeout", type=int, default=3600)
+    parser.add_argument("--evaluation-timeout", type=int, default=14400)
+    parser.add_argument("--only-keypoints", default="")
     parser.add_argument("--provider", action="append", choices=PROVIDERS)
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
@@ -44,8 +46,11 @@ def main() -> int:
                 provider,
                 "--output-root",
                 str(args.output_root.resolve()),
-                "--timeout",
-                str(args.timeout),
+                "--generation-timeout",
+                str(args.generation_timeout),
+                "--evaluation-timeout",
+                str(args.evaluation_timeout),
+                *(["--only-keypoints", args.only_keypoints] if args.only_keypoints else []),
             ],
             cwd=root,
             stdout=log,
