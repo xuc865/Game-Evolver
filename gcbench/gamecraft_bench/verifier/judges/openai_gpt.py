@@ -166,6 +166,15 @@ class OpenAIJudge(MultimodalJudge):
             # reasoning_content and can return an empty content string.  The
             # text judge needs strict JSON, not hidden chain-of-thought.
             request_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+        elif input_mode == "text" and any(
+            name in self.model.lower() for name in ("glm", "qwen", "kimi")
+        ):
+            # Local reasoning deployments may put the entire response in a
+            # hidden thinking channel on text-only requests.  The verifier
+            # must receive the machine-readable JSON from message.content.
+            request_kwargs["extra_body"] = {
+                "chat_template_kwargs": {"enable_thinking": False}
+            }
         try:
             resp = client.chat.completions.create(**request_kwargs)
         except Exception as e:
