@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 RUNS = ROOT / ".baseline-agent-runs"
 PYTHON = sys.executable
 CFG_DIR = ROOT / "experiments" / "configs-v4"
+SEED_ARTIFACT = ROOT / "experiments" / "seed_artifacts" / "puzzle-sokoban-scaffold"
 
 BENCHES = ["gcbench", "gdbench"]
 MODELS = ["glm5.2", "deepseek_v4", "kimi", "qwen3.6-27b", "claude", "gpt55"]
@@ -72,7 +73,11 @@ def discover_tasks(bench: str) -> list[Path]:
                 with zipfile.ZipFile(d) as archive:
                     archive.extractall(extracted)
                 marker.write_text(str(d.resolve()), encoding="utf-8")
-            tasks.append(extracted)
+            # The official archives contain a top-level tasks/<task_name>
+            # directory.  game-loop expects the directory that owns
+            # task_config.json, not the extraction container.
+            nested = extracted / "tasks" / d.stem
+            tasks.append(nested if nested.is_dir() else extracted)
     return tasks
 
 
@@ -129,6 +134,22 @@ def run_queue(model: str, bench: str) -> None:
     ts = time.strftime("%Y%m%d-%H%M%S")
     out_dir = RUNS / f"{prefix}_{bench}-resume-{ts}"
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    if not SEED_ARTIFACT.is_dir():
+        raise FileNotFoundError(f"shared seed artifact does not exist: {SEED_ARTIFACT}")
+
+    # L4 is run as one bounded generation per public task in this matrix.  The
+    # checked-in configs are also used by multi-generation evolution jobs, so
+    # create an isolated effective config instead of mutating those files.
+    effective_cfg = out_dir / "config.json"
+    config_value = json.loads(cfg.read_text(encoding="utf-8"))
+    evolution = config_value.setdefault("evolution", {})
+    evolution["max_generations"] = 1
+    evolution["candidates_per_generation"] = 1
+    effective_cfg.write_text(
+        json.dumps(config_value, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
 
     tasks = discover_tasks(bench)
     done_ids = load_done_ids(out_dir)
@@ -187,12 +208,13 @@ def run_queue(model: str, bench: str) -> None:
                     [PYTHON, "-m", "game_loop", "init",
                      "--run-dir", run_dir, "--task-source", str(task),
                      "--cold-start", "--seed-score", "0",
-                     "--config", str(cfg), "--run-id", run_id],
+                     "--seed-artifact", str(SEED_ARTIFACT),
+                     "--config", str(effective_cfg), "--run-id", run_id],
                     log_path, append=False,
                 )
             rcs["bench_rc"] = run_to_log(
                 [PYTHON, "-m", "game_loop", "evolve",
-                 "--run-dir", run_dir, "--config", str(cfg)],
+                 "--run-dir", run_dir, "--config", str(effective_cfg)],
                 log_path, append=True,
             )
         except Exception as exc:
