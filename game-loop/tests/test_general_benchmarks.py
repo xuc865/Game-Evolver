@@ -11,18 +11,37 @@ from unittest.mock import patch
 from game_loop.benchmarks import load_adapter
 from game_loop.core.models import AttemptContext, BackendExecution
 from scripts.general_benchmark_progress import cumulative_accuracy, record_task_notice
-from scripts.run_new_bench_experiments import load_done_ids, terminalbench_docker_ready
+from scripts.run_new_bench_experiments import (
+    _process_tree_rss_kib,
+    load_done_ids,
+    terminalbench_docker_ready,
+)
 
 
 class GeneralBenchmarkContractTests(unittest.TestCase):
+    @patch("scripts.run_new_bench_experiments.subprocess.run")
+    def test_process_tree_rss_includes_only_owned_descendants(self, run):
+        run.return_value.stdout = "10 1 100\n11 10 200\n12 11 300\n20 1 999\n"
+        self.assertEqual(_process_tree_rss_kib(10), 600)
+
     @patch("scripts.run_new_bench_experiments.shutil.which", return_value="/usr/bin/docker")
     @patch("scripts.run_new_bench_experiments.subprocess.run")
     def test_terminalbench_preflight_rejects_stopped_docker(self, run, _which):
         run.return_value.returncode = 1
-        self.assertEqual(
-            terminalbench_docker_ready(),
-            (False, "Docker daemon is not running"),
-        )
+        with patch.dict(os.environ, {"TERMINALBENCH_DOCKER_HOST": "unix:///dead.sock"}, clear=False):
+            self.assertEqual(
+                terminalbench_docker_ready(),
+                (False, "Docker daemon is not running"),
+            )
+
+    @patch("scripts.run_new_bench_experiments.shutil.which", return_value="/usr/bin/docker")
+    @patch("scripts.run_new_bench_experiments.subprocess.run")
+    def test_terminalbench_preflight_selects_configured_sandbox(self, run, _which):
+        run.return_value.returncode = 0
+        host = "unix:///sandbox/docker.sock"
+        with patch.dict(os.environ, {"TERMINALBENCH_DOCKER_HOST": host}, clear=False):
+            self.assertEqual(terminalbench_docker_ready(), (True, ""))
+            self.assertEqual(os.environ["DOCKER_HOST"], host)
 
     def test_progress_notice_is_deduplicated_and_reports_cumulative_accuracy(self):
         with tempfile.TemporaryDirectory() as td:
@@ -211,6 +230,38 @@ class GeneralBenchmarkContractTests(unittest.TestCase):
             )
             self.assertIn(run_id, load_done_ids(out_dir))
 
+    def test_tau_resume_rejects_partial_or_infrastructure_batch(self):
+        with tempfile.TemporaryDirectory() as td:
+            out_dir = Path(td)
+            run_id = "new_bench_qwen_taubench_taubench-instruction"
+            candidate = out_dir / run_id / "generation_001" / "candidate_01"
+            result_dir = candidate / "tau2_1"
+            result_dir.mkdir(parents=True)
+            (out_dir / "summary.json").write_text(json.dumps({
+                "bench": "taubench",
+                "cases": [{"run_id": run_id, "status": "completed"}],
+            }), encoding="utf-8")
+            manifest = candidate / "taubench_execution.json"
+            manifest.write_text(
+                json.dumps({"status": "infrastructure_failure"}),
+                encoding="utf-8",
+            )
+            (result_dir / "results.json").write_text(
+                json.dumps({"simulations": [{"reward_info": {"reward": 1}}]}),
+                encoding="utf-8",
+            )
+            self.assertNotIn(run_id, load_done_ids(out_dir))
+
+            manifest.write_text(json.dumps({"status": "completed"}), encoding="utf-8")
+            self.assertNotIn(run_id, load_done_ids(out_dir))
+            (result_dir / "results.json").write_text(
+                json.dumps({"simulations": [
+                    {"reward_info": {"reward": 1}} for _ in range(50)
+                ]}),
+                encoding="utf-8",
+            )
+            self.assertIn(run_id, load_done_ids(out_dir))
+
     def test_tau_factory_accepts_generic_runner_metadata(self):
         root = Path(__file__).resolve().parents[1]
         tau_python = root / "third_party" / "tau2-bench" / ".venv" / "bin" / "python"
@@ -241,6 +292,9 @@ assert isinstance(agent, GameMakingTauAgent)
         self.assertIn("set -o pipefail", bridge)
         self.assertIn("${PIPESTATUS[0]}", bridge)
         self.assertIn("return_code not in (0, 1)", bridge)
+        self.assertIn("stdout=subprocess.DEVNULL", bridge)
+        self.assertNotIn("capture_output=True", bridge)
+        self.assertIn("1024 * 1024", bridge)
 
 
 if __name__ == "__main__":

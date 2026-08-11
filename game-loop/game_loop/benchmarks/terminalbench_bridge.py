@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
+from game_loop.runtime.credentials import select_provider_api_key
 
 from game_loop.runtime import GameTask, OpenGameRuntime
 from .runtime_config import runtime_config_from_environment
@@ -85,7 +86,7 @@ def _run_harbor(*, task_root: Path, output_manifest: Path, harness_context: Path
     # OpenAI-compatible deployments that intentionally do not require one.
     env.setdefault("OPENAI_API_KEY", "EMPTY")
     provider = env.get("CODEX_PROVIDER", env.get("GAME_LOOP_BACKBONE_PROVIDER", "")).casefold()
-    provider_key = {
+    provider_key = select_provider_api_key(provider, env, salt=str(output_manifest)) or {
         "claude": env.get("ANTHROPIC_AUTH_TOKEN") or env.get("ANTHROPIC_API_KEY") or env.get("CODEX_API_KEY_CLAUDE"),
         "gpt55": env.get("CODEX_API_KEY_GPT55") or env.get("OPENAI_API_KEY"),
         "deepseek": env.get("DEEPSEEK_API_KEY"),

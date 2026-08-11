@@ -6,6 +6,7 @@ import os
 import subprocess
 import time
 from pathlib import Path
+from game_loop.runtime.credentials import select_provider_api_key
 from .sandbox import require_project_sandbox
 
 
@@ -59,7 +60,7 @@ def main(argv: list[str] | None = None) -> int:
             model = "openai/" + model
         env["TAU_GAME_MAKING_MODEL"] = model
     provider = env.get("CODEX_PROVIDER", env.get("GAME_LOOP_BACKBONE_PROVIDER", "")).casefold()
-    provider_key = {
+    provider_key = select_provider_api_key(provider, env, salt=str(output_manifest)) or {
         "claude": env.get("ANTHROPIC_AUTH_TOKEN") or env.get("ANTHROPIC_API_KEY") or env.get("CODEX_API_KEY_CLAUDE"),
         "gpt55": env.get("CODEX_API_KEY_GPT55") or env.get("OPENAI_API_KEY"),
         "deepseek": env.get("DEEPSEEK_API_KEY"),
@@ -68,9 +69,19 @@ def main(argv: list[str] | None = None) -> int:
         env["OPENAI_API_KEY"] = provider_key
     if args.harness_context:
         env["GAME_LOOP_HARNESS_CONTEXT"] = str(args.harness_context.resolve())
+    runner_log = result_dir / "tau_runner.log"
     try:
-        proc = subprocess.run(command, cwd=root, env=env, text=True, capture_output=True,
-                              timeout=args.timeout)
+        result_dir.mkdir(parents=True, exist_ok=True)
+        with runner_log.open("w", encoding="utf-8") as log:
+            proc = subprocess.run(
+                command,
+                cwd=root,
+                env=env,
+                text=True,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                timeout=args.timeout,
+            )
     except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
         proc = None
         error = type(exc).__name__
@@ -95,11 +106,16 @@ def main(argv: list[str] | None = None) -> int:
         normalized.write_text(json.dumps({"status": "completed" if rewards and not infrastructure_errors else "infrastructure_failure",
             "reward": sum(rewards) / len(rewards) if rewards else None,
             "infrastructure_errors": infrastructure_errors, "domain": args.domain}, indent=2) + "\n")
+    log_tail = ""
+    if runner_log.is_file():
+        with runner_log.open("rb") as log:
+            log.seek(max(0, runner_log.stat().st_size - 2000))
+            log_tail = log.read().decode("utf-8", errors="replace")
     payload = {"status": "completed" if proc and proc.returncode == 0 and rewards and not infrastructure_errors
                else "infrastructure_failure", "result_path": str(normalized or ""),
                "return_code": proc.returncode if proc else -1,
                "diagnostics": infrastructure_errors + ([error] if error else []) +
-               ([] if not proc else [proc.stderr[-2000:]])}
+               ([log_tail] if proc and log_tail else [])}
     output_manifest.parent.mkdir(parents=True, exist_ok=True)
     output_manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     return 0 if payload["status"] == "completed" else 1

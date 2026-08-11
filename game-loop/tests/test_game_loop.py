@@ -2013,6 +2013,28 @@ class GameLoopTests(unittest.TestCase):
         self.assertEqual(urlopen.call_count, 2)
         self.assertEqual(payload["choices"][0]["message"]["content"], "ok")
 
+    def test_gpt55_retry_reduces_output_budget(self):
+        from game_loop.chat_agent import LocalChatAgent
+
+        agent = LocalChatAgent.__new__(LocalChatAgent)
+        agent.model = "gpt-5.5"
+        payload = {"max_tokens": 8192}
+
+        agent._tighten_unstable_provider_payload(payload)
+
+        self.assertEqual(payload["max_tokens"], 4096)
+        agent._tighten_unstable_provider_payload(payload)
+        self.assertEqual(payload["max_tokens"], 2048)
+
+    def test_gpt55_uses_native_low_reasoning_effort(self):
+        from game_loop.chat_agent import LocalChatAgent
+
+        agent = LocalChatAgent.__new__(LocalChatAgent)
+        agent.provider = "gpt55"
+        agent.thinking_mode = "none"
+
+        self.assertEqual(agent._build_extra_body(), {"reasoning_effort": "none"})
+
     def test_qwen_and_glm_chat_agent_disable_hidden_thinking(self):
         from game_loop.chat_agent import LocalChatAgent
 
@@ -2063,6 +2085,91 @@ class GameLoopTests(unittest.TestCase):
                 agent._call_api([{"role": "user", "content": "ping"}])
         self.assertEqual(urlopen.call_count, 2)
         self.assertEqual(urlopen.call_args.kwargs["timeout"], 42)
+
+    def test_gpt55_rotates_fallback_key_on_retryable_http_error(self):
+        import urllib.error
+        from game_loop.chat_agent import LocalChatAgent
+
+        agent = LocalChatAgent.__new__(LocalChatAgent)
+        agent.api_base = "http://example.test/v1"
+        agent.model = "gpt-5.5"
+        agent.provider = "gpt55"
+        agent.api_key = "primary"
+        agent.api_keys = ["primary", "fallback"]
+        agent.thinking_mode = ""
+        error = urllib.error.HTTPError(
+            "http://example.test/v1/chat/completions", 429, "rate limited", {}, None
+        )
+        response = Mock()
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        response.read.return_value = b'{"choices":[{"message":{"content":"ok"}}]}'
+
+        with patch(
+            "game_loop.chat_agent.urllib.request.urlopen",
+            side_effect=[error, response],
+        ) as urlopen, patch("game_loop.chat_agent.time.sleep"):
+            agent._call_api([{"role": "user", "content": "ping"}])
+
+        first_request = urlopen.call_args_list[0].args[0]
+        second_request = urlopen.call_args_list[1].args[0]
+        self.assertEqual(first_request.get_header("Authorization"), "Bearer primary")
+        self.assertEqual(second_request.get_header("Authorization"), "Bearer fallback")
+        # The retry uses the fallback, then success advances the next request
+        # back to the primary key.
+        self.assertEqual(agent._api_key_index, 0)
+
+    def test_gpt55_round_robins_keys_after_successful_requests(self):
+        from game_loop.chat_agent import LocalChatAgent
+
+        agent = LocalChatAgent.__new__(LocalChatAgent)
+        agent.api_base = "http://example.test/v1"
+        agent.model = "gpt-5.5"
+        agent.provider = "gpt55"
+        agent.api_key = "key-0"
+        agent.api_keys = ["key-0", "key-1", "key-2"]
+        agent._api_key_index = 0
+        agent.thinking_mode = ""
+
+        responses = []
+        for _ in range(4):
+            response = Mock()
+            response.__enter__ = Mock(return_value=response)
+            response.__exit__ = Mock(return_value=False)
+            response.read.return_value = b'{"choices":[{"message":{"content":"ok"}}]}'
+            responses.append(response)
+
+        with patch(
+            "game_loop.chat_agent.urllib.request.urlopen",
+            side_effect=responses,
+        ) as urlopen:
+            for _ in range(4):
+                agent._call_api([{"role": "user", "content": "ping"}])
+
+        authorizations = [
+            call.args[0].get_header("Authorization")
+            for call in urlopen.call_args_list
+        ]
+        self.assertEqual(
+            authorizations,
+            ["Bearer key-0", "Bearer key-1", "Bearer key-2", "Bearer key-0"],
+        )
+        self.assertEqual(agent._api_key_index, 1)
+
+    def test_gpt55_key_pool_deduplicates_and_supports_worker_offset(self):
+        from game_loop.runtime.credentials import provider_api_keys, provider_key_start_index
+
+        environment = {
+            "CODEX_API_KEY_GPT55": "key-a",
+            "CODEX_API_KEYS_GPT55": "key-a,key-b key-c",
+            "GAME_LOOP_CHAT_API_KEY_OFFSET": "2",
+        }
+        keys = provider_api_keys("gpt55", environment)
+        self.assertEqual(keys, ["key-a", "key-b", "key-c"])
+        self.assertEqual(
+            provider_key_start_index("gpt55", keys, environment=environment),
+            2,
+        )
 
     def test_chat_agent_has_a_total_timeout_across_retries(self):
         import socket
@@ -2115,7 +2222,7 @@ class GameLoopTests(unittest.TestCase):
         arguments = normalized["tool_calls"][0]["function"]["arguments"]
         parsed = json.loads(arguments)
         self.assertIn("_tool_argument_error", parsed)
-        self.assertLessEqual(len(parsed["_raw_arguments_prefix"]), 500)
+        self.assertNotIn("_raw_arguments_prefix", parsed)
 
         agent = LocalChatAgent.__new__(LocalChatAgent)
         with tempfile.TemporaryDirectory() as raw:
@@ -2123,6 +2230,28 @@ class GameLoopTests(unittest.TestCase):
         payload = json.loads(result["content"])
         self.assertFalse(payload["ok"])
         self.assertIn("Retry this tool call", payload["instruction"])
+
+    def test_chat_agent_recovers_proxy_prefixed_tool_arguments(self):
+        from game_loop.chat_agent import LocalChatAgent
+
+        malformed = {
+            "role": "assistant",
+            "tool_calls": [{
+                "id": "call-1",
+                "type": "function",
+                "function": {
+                    "name": "write_file",
+                    "arguments": '{}{"path":"game/Main.gd","content":"extends Node"}',
+                },
+            }],
+        }
+
+        normalized = LocalChatAgent._normalize_assistant_message(malformed)
+        arguments = normalized["tool_calls"][0]["function"]["arguments"]
+        self.assertEqual(
+            json.loads(arguments),
+            {"path": "game/Main.gd", "content": "extends Node"},
+        )
 
     def test_chat_agent_refuses_early_stop_until_gcbench_demos_exist(self):
         from game_loop.chat_agent import LocalChatAgent

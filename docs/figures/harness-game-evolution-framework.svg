@@ -1,0 +1,374 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1180" viewBox="0 0 1800 1180" role="img" aria-labelledby="title desc">
+  <!-- Framework diagram for the harness-game inner and outer evolution loops. -->
+  <title id="title">Harness-Game 演化框架</title>
+  <desc id="desc">展示内环 artifact 演化、内环 hard/soft rubric 验证、外环 harness 演化、共享证据归档、probe 共演化，以及 L4 episode 内冻结 harness 数据流的系统框架图。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#334155"/>
+    </marker>
+    <marker id="arrow-soft" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#64748b"/>
+    </marker>
+    <marker id="arrow-blue" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#2563eb"/>
+    </marker>
+    <marker id="arrow-green" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#15803d"/>
+    </marker>
+    <marker id="arrow-orange" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#c2410c"/>
+    </marker>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0f172a" flood-opacity="0.11"/>
+    </filter>
+    <style>
+      .bg { fill: #f7f8fb; }
+      .title { font: 700 30px "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", Arial, Helvetica, sans-serif; fill: #0f172a; letter-spacing: 0; }
+      .subtitle { font: 400 15px "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", Arial, Helvetica, sans-serif; fill: #475569; letter-spacing: 0; }
+      .cluster { rx: 16; fill: #ffffff; stroke-width: 2; filter: url(#shadow); }
+      .cluster-inner { stroke: #2563eb; }
+      .cluster-outer { stroke: #7c3aed; }
+      .cluster-shared { stroke: #0f766e; }
+      .cluster-init { stroke: #475569; }
+      .cluster-title { font: 700 18px "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", Arial, Helvetica, sans-serif; fill: #111827; letter-spacing: 0; }
+      .cluster-note { font: 400 12px "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", Arial, Helvetica, sans-serif; fill: #64748b; letter-spacing: 0; }
+      .box { rx: 8; stroke-width: 1.4; filter: url(#shadow); }
+      .box-blue { fill: #eff6ff; stroke: #60a5fa; }
+      .box-indigo { fill: #eef2ff; stroke: #818cf8; }
+      .box-green { fill: #ecfdf5; stroke: #34d399; }
+      .box-orange { fill: #fff7ed; stroke: #fb923c; }
+      .box-red { fill: #fef2f2; stroke: #f87171; }
+      .box-teal { fill: #f0fdfa; stroke: #2dd4bf; }
+      .box-purple { fill: #faf5ff; stroke: #a78bfa; }
+      .box-gray { fill: #f8fafc; stroke: #94a3b8; }
+      .box-yellow { fill: #fefce8; stroke: #eab308; }
+      .box-title { font: 700 14px "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", Arial, Helvetica, sans-serif; fill: #0f172a; letter-spacing: 0; }
+      .box-text { font: 400 12px "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", Arial, Helvetica, sans-serif; fill: #334155; letter-spacing: 0; }
+      .small { font: 400 11px "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", Arial, Helvetica, sans-serif; fill: #475569; letter-spacing: 0; }
+      .mono { font: 400 11px "SFMono-Regular", Consolas, monospace; fill: #334155; letter-spacing: 0; }
+      .edge { fill: none; stroke: #334155; stroke-width: 2; marker-end: url(#arrow); }
+      .edge-soft { fill: none; stroke: #64748b; stroke-width: 1.8; marker-end: url(#arrow-soft); }
+      .edge-blue { fill: none; stroke: #2563eb; stroke-width: 2.2; marker-end: url(#arrow-blue); }
+      .edge-green { fill: none; stroke: #15803d; stroke-width: 2.2; marker-end: url(#arrow-green); }
+      .edge-orange { fill: none; stroke: #c2410c; stroke-width: 2.2; marker-end: url(#arrow-orange); }
+      .edge-dashed { stroke-dasharray: 7 6; }
+      .lane-label { font: 700 12px "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", Arial, Helvetica, sans-serif; fill: #334155; letter-spacing: 0; }
+      .badge { rx: 12; fill: #0f172a; }
+      .badge-text { font: 700 11px "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", Arial, Helvetica, sans-serif; fill: #ffffff; letter-spacing: 0; }
+    </style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1800" height="1180"/>
+  <text class="title" x="48" y="48">Harness-Game 演化框架</text>
+  <text class="subtitle" x="48" y="75">内环在单个 benchmark episode 内演化 game artifact，并用 hard/soft rubrics 验证 harness 候选；外环在 episodes 之间利用证据汇总演化 harness。</text>
+
+  <!-- Initialization and inputs -->
+  <rect class="cluster cluster-init" x="38" y="104" width="430" height="270"/>
+  <text class="cluster-title" x="62" y="137">运行初始化</text>
+  <text class="cluster-note" x="62" y="158">内环开始前由 init 执行。</text>
+
+  <rect class="box box-gray" x="62" y="184" width="170" height="72"/>
+  <text class="box-title" x="78" y="207">Benchmark 任务</text>
+  <text class="box-text" x="78" y="228">task_source</text>
+  <text class="mono" x="78" y="247">adapter 参数</text>
+
+  <rect class="box box-gray" x="260" y="184" width="170" height="72"/>
+  <text class="box-title" x="276" y="207">Seed Artifact</text>
+  <text class="box-text" x="276" y="228">暂存并跑门控</text>
+  <text class="mono" x="276" y="247">.seed_stage</text>
+
+  <rect class="box box-blue" x="62" y="278" width="170" height="70"/>
+  <text class="box-title" x="78" y="301">AppConfig 配置</text>
+  <text class="box-text" x="78" y="322">方法层级、门控</text>
+  <text class="box-text" x="78" y="340">预算、后端</text>
+
+  <rect class="box box-teal" x="260" y="278" width="170" height="70"/>
+  <text class="box-title" x="276" y="301">Benchmark Adapter</text>
+  <text class="box-text" x="276" y="322">prepare、collect</text>
+  <text class="box-text" x="276" y="340">validate、解析评估</text>
+
+  <!-- Shared stores -->
+  <rect class="cluster cluster-shared" x="506" y="104" width="612" height="270"/>
+  <text class="cluster-title" x="530" y="137">持久化运行状态与证据</text>
+  <text class="cluster-note" x="530" y="158">所有决策都从 run 目录中的显式文件恢复和追踪。</text>
+
+  <rect class="box box-teal" x="530" y="184" width="170" height="74"/>
+  <text class="box-title" x="546" y="207">Artifact 存储</text>
+  <text class="box-text" x="546" y="228">内容寻址快照</text>
+  <text class="mono" x="546" y="247">artifacts/&lt;hash&gt;</text>
+
+  <rect class="box box-gray" x="724" y="184" width="170" height="74"/>
+  <text class="box-title" x="740" y="207">运行文件</text>
+  <text class="mono" x="740" y="228">manifest.json</text>
+  <text class="mono" x="740" y="247">state.json, report.md</text>
+
+  <rect class="box box-orange" x="918" y="184" width="170" height="74"/>
+  <text class="box-title" x="934" y="207">候选证据</text>
+  <text class="mono" x="934" y="228">feedback.json</text>
+  <text class="mono" x="934" y="247">门控/评估/选择</text>
+
+  <rect class="box box-green" x="530" y="282" width="170" height="68"/>
+  <text class="box-title" x="546" y="305">Probe 归档</text>
+  <text class="box-text" x="546" y="326">L3/L4 活跃目录</text>
+  <text class="box-text" x="546" y="344">统计与裁剪</text>
+
+  <rect class="box box-purple" x="724" y="282" width="170" height="68"/>
+  <text class="box-title" x="740" y="305">Harness 存储</text>
+  <text class="box-text" x="740" y="326">profiles、champion</text>
+  <text class="box-text" x="740" y="344">外环 epochs</text>
+
+  <rect class="box box-yellow" x="918" y="282" width="170" height="68"/>
+  <text class="box-title" x="934" y="305">Element 统计</text>
+  <text class="box-text" x="934" y="326">使用率</text>
+  <text class="box-text" x="934" y="344">成功率</text>
+
+  <!-- Inner loop cluster -->
+  <rect class="cluster cluster-inner" x="38" y="410" width="1120" height="720"/>
+  <text class="cluster-title" x="62" y="443">内环：单个 Benchmark Episode 内的 Artifact 演化</text>
+  <text class="cluster-note" x="62" y="464">Controller.evolve 按 generation 和 candidate 游标推进 attempt；L4 harness 在整个 episode 内保持冻结。</text>
+
+  <rect class="box box-blue" x="70" y="500" width="180" height="92"/>
+  <text class="box-title" x="88" y="524">1. 选择父 Artifact</text>
+  <text class="box-text" x="88" y="546">父代冻结时用 seed</text>
+  <text class="box-text" x="88" y="565">否则用本代父代</text>
+  <text class="mono" x="88" y="584">champion_result</text>
+
+  <rect class="box box-blue" x="284" y="500" width="180" height="92"/>
+  <text class="box-title" x="302" y="524">2. 选择变异意图</text>
+  <text class="box-text" x="302" y="546">最弱 objective</text>
+  <text class="box-text" x="302" y="565">二值需求缺口</text>
+  <text class="box-text" x="302" y="584">或探索式替代搜索</text>
+
+  <rect class="box box-green" x="498" y="500" width="180" height="92"/>
+  <text class="box-title" x="516" y="524">3. 选择 Probe</text>
+  <text class="box-text" x="516" y="546">L1 固定 probes</text>
+  <text class="box-text" x="516" y="565">L2 主动选冻结目录</text>
+  <text class="box-text" x="516" y="584">L3/L4 主动选归档</text>
+
+  <rect class="box box-green" x="712" y="500" width="180" height="92"/>
+  <text class="box-title" x="730" y="524">4. 父代 Probe</text>
+  <text class="box-text" x="730" y="546">暂存父 artifact</text>
+  <text class="box-text" x="730" y="565">运行选中 probes</text>
+  <text class="mono" x="730" y="584">probes/parent/suite</text>
+
+  <rect class="box box-indigo" x="926" y="500" width="190" height="92"/>
+  <text class="box-title" x="944" y="524">5. 编译 Feedback</text>
+  <text class="box-text" x="944" y="546">objectives、constraints</text>
+  <text class="box-text" x="944" y="565">近期 attempts、probes</text>
+  <text class="box-text" x="944" y="584">可选 L4 harness</text>
+
+  <rect class="box box-purple" x="926" y="642" width="190" height="104"/>
+  <text class="box-title" x="944" y="666">6. 调用冻结 Agent</text>
+  <text class="box-text" x="944" y="688">adapter.prepare</text>
+  <text class="box-text" x="944" y="707">CommandBackend.run</text>
+  <text class="box-text" x="944" y="726">先预扣模型调用预算</text>
+
+  <rect class="box box-orange" x="712" y="642" width="180" height="104"/>
+  <text class="box-title" x="730" y="666">7. 收集结果</text>
+  <text class="box-text" x="730" y="688">adapter.collect</text>
+  <text class="box-text" x="730" y="707">artifact_dir</text>
+  <text class="box-text" x="730" y="726">标准化 evaluation</text>
+
+  <rect class="box box-orange" x="498" y="642" width="180" height="104"/>
+  <text class="box-title" x="516" y="666">8. 门控与评估</text>
+  <text class="box-text" x="516" y="688">强制门控</text>
+  <text class="box-text" x="516" y="707">feasible 标记</text>
+  <text class="box-text" x="516" y="726">主分数和 objectives</text>
+
+  <rect class="box box-green" x="284" y="642" width="180" height="104"/>
+  <text class="box-title" x="302" y="666">9. 候选 Probe</text>
+  <text class="box-text" x="302" y="688">仅在门控通过后运行</text>
+  <text class="box-text" x="302" y="707">与父代 probes 成对比较</text>
+  <text class="mono" x="302" y="726">probes/candidate/suite</text>
+
+  <rect class="box box-red" x="70" y="642" width="180" height="104"/>
+  <text class="box-title" x="88" y="666">10. 选择策略</text>
+  <text class="box-text" x="88" y="688">门控、feasible</text>
+  <text class="box-text" x="88" y="707">delta >= delta_min</text>
+  <text class="box-text" x="88" y="726">objective/probe 回退</text>
+
+  <rect class="box box-teal" x="70" y="800" width="232" height="104"/>
+  <text class="box-title" x="88" y="824">接受候选</text>
+  <text class="box-text" x="88" y="846">快照进 artifact 存储</text>
+  <text class="box-text" x="88" y="865">更新 champion artifact</text>
+  <text class="box-text" x="88" y="884">清零连续拒绝计数</text>
+
+  <rect class="box box-gray" x="330" y="800" width="230" height="104"/>
+  <text class="box-title" x="348" y="824">拒绝候选</text>
+  <text class="box-text" x="348" y="846">记录拒绝原因</text>
+  <text class="box-text" x="348" y="865">保留证据和 artifact</text>
+  <text class="box-text" x="348" y="884">增加连续拒绝计数</text>
+
+  <rect class="box box-red" x="588" y="800" width="230" height="104"/>
+  <text class="box-title" x="606" y="824">基础设施失败</text>
+  <text class="box-text" x="606" y="846">缺 artifact/eval</text>
+  <text class="box-text" x="606" y="865">backend 或 probe 失败</text>
+  <text class="box-text" x="606" y="884">默认暂停 run</text>
+
+  <rect class="box box-purple" x="846" y="800" width="270" height="104"/>
+  <text class="box-title" x="864" y="824">内环双 Rubric 验证</text>
+  <text class="box-text" x="864" y="846">hard rubrics：每项 &gt;= baseline</text>
+  <text class="box-text" x="864" y="865">soft rubrics：总和 &gt;= baseline</text>
+  <text class="box-text" x="864" y="884">不额外要求 +0.03 提升</text>
+
+  <rect class="box box-green" x="70" y="950" width="300" height="126"/>
+  <text class="box-title" x="88" y="974">Probe 共演化更新</text>
+  <text class="box-text" x="88" y="997">记录父代和候选的 probe 结果</text>
+  <text class="box-text" x="88" y="1016">更新 trials、通过率、回退</text>
+  <text class="box-text" x="88" y="1035">生成有界 probe offspring</text>
+  <text class="box-text" x="88" y="1054">带回退保护裁剪归档</text>
+
+  <rect class="box box-gray" x="410" y="950" width="300" height="126"/>
+  <text class="box-title" x="428" y="974">状态推进与停止检查</text>
+  <text class="box-text" x="428" y="997">先推进 candidate，再推进 generation</text>
+  <text class="box-text" x="428" y="1016">模型/evaluator/probe 预算</text>
+  <text class="box-text" x="428" y="1035">终止成功或停滞</text>
+  <text class="mono" x="428" y="1054">state.json, report.md</text>
+
+  <rect class="box box-purple" x="750" y="950" width="366" height="126"/>
+  <text class="box-title" x="768" y="974">Episode 内冻结的 L4 Agent Harness</text>
+  <text class="box-text" x="768" y="997">活跃 modules 与 tool interfaces</text>
+  <text class="box-text" x="768" y="1016">context compiler 与 history window</text>
+  <text class="box-text" x="768" y="1035">recovery/validation policy 触发修复</text>
+  <text class="box-text" x="768" y="1054">从 champion harness profile 读取一次</text>
+
+  <!-- Outer loop cluster -->
+  <rect class="cluster cluster-outer" x="1190" y="104" width="570" height="1026"/>
+  <text class="cluster-title" x="1214" y="137">外环：Benchmark Episodes 之间的 Harness 演化</text>
+  <text class="cluster-note" x="1214" y="158">默认关闭，只有显式开启时才允许 harness mutation。</text>
+
+  <rect class="box box-red" x="1218" y="184" width="230" height="80"/>
+  <text class="box-title" x="1236" y="208">外环演化开关</text>
+  <text class="box-text" x="1236" y="230">默认：关闭</text>
+  <text class="box-text" x="1236" y="249">显式配置后开启 epochs</text>
+
+  <rect class="box box-blue" x="1496" y="184" width="230" height="80"/>
+  <text class="box-title" x="1514" y="208">Episode 批量运行器</text>
+  <text class="box-text" x="1514" y="230">启动可比较 runs</text>
+  <text class="box-text" x="1514" y="249">同一 benchmark suite 矩阵</text>
+
+  <rect class="box box-orange" x="1218" y="306" width="230" height="92"/>
+  <text class="box-title" x="1236" y="330">Episode 证据账本</text>
+  <text class="box-text" x="1236" y="352">接受/拒绝的 attempts</text>
+  <text class="box-text" x="1236" y="371">失败模式与日志</text>
+  <text class="box-text" x="1236" y="390">成对 replay cases</text>
+
+  <rect class="box box-indigo" x="1496" y="306" width="230" height="92"/>
+  <text class="box-title" x="1514" y="330">Harness Expert Agent</text>
+  <text class="box-text" x="1514" y="352">总结证据</text>
+  <text class="box-text" x="1514" y="371">推导语义梯度</text>
+  <text class="box-text" x="1514" y="390">定位 harness 类别</text>
+
+  <rect class="box box-purple" x="1218" y="440" width="508" height="120"/>
+  <text class="box-title" x="1236" y="464">Harness 提案引擎</text>
+  <text class="box-text" x="1236" y="488">只修改允许的 harness 表面：modules、tool interfaces、active elements</text>
+  <text class="box-text" x="1236" y="512">context compiler、recovery policy、validation policy</text>
+  <text class="box-text" x="1236" y="536">基于使用统计做 element mutation，并可注册新的 catalog 项</text>
+  <text class="box-text" x="1236" y="552">提案以内容寻址形式保存为候选 harness profile</text>
+
+  <rect class="box box-yellow" x="1218" y="602" width="230" height="110"/>
+  <text class="box-title" x="1236" y="626">Element 库管理器</text>
+  <text class="box-text" x="1236" y="649">记录 element 使用率</text>
+  <text class="box-text" x="1236" y="668">记录 element 成功率</text>
+  <text class="box-text" x="1236" y="687">扩展或淘汰候选项</text>
+
+  <rect class="box box-purple" x="1496" y="602" width="230" height="110"/>
+  <text class="box-title" x="1514" y="626">候选 Harness</text>
+  <text class="box-text" x="1514" y="649">profile id 与 parent id</text>
+  <text class="box-text" x="1514" y="668">活跃 modules/elements</text>
+  <text class="box-text" x="1514" y="687">策略与 compiler</text>
+
+  <rect class="box box-green" x="1218" y="754" width="230" height="120"/>
+  <text class="box-title" x="1236" y="778">Replay 证据聚合器</text>
+  <text class="box-text" x="1236" y="801">汇总内环双 rubric 结果</text>
+  <text class="box-text" x="1236" y="820">汇总 case-level replay delta</text>
+  <text class="box-text" x="1236" y="839">汇总失败模式和 element 统计</text>
+  <text class="box-text" x="1236" y="858">形成外环晋升证据</text>
+
+  <rect class="box box-teal" x="1496" y="754" width="230" height="120"/>
+  <text class="box-title" x="1514" y="778">成对 Replay 晋升</text>
+  <text class="box-text" x="1514" y="801">同一 cases，旧/新 harness 对比</text>
+  <text class="box-text" x="1514" y="820">读取 promotion_delta_min</text>
+  <text class="box-text" x="1514" y="839">case regression 保护</text>
+  <text class="box-text" x="1514" y="858">晋升或拒绝</text>
+
+  <rect class="box box-purple" x="1218" y="916" width="508" height="104"/>
+  <text class="box-title" x="1236" y="940">Champion Harness 注册表</text>
+  <text class="box-text" x="1236" y="964">被接受 profile 成为下一 episode 的冻结 harness</text>
+  <text class="box-text" x="1236" y="983">被拒 profile 与诊断保留在 epochs 账本</text>
+  <text class="mono" x="1236" y="1002">harness/champion.json, profiles/*.json, epochs.json</text>
+
+  <rect class="box box-gray" x="1218" y="1050" width="508" height="52"/>
+  <text class="box-title" x="1236" y="1073">报告输出面</text>
+  <text class="box-text" x="1236" y="1092">benchmark 报告、外环 epoch 摘要、replay 证据、archive 统计</text>
+
+  <!-- Edges inside initialization/shared -->
+  <path class="edge-soft" d="M232 220 C246 220 246 220 260 220"/>
+  <path class="edge-soft" d="M430 220 C472 220 488 220 530 220"/>
+  <path class="edge-soft" d="M430 313 C470 313 490 313 530 316"/>
+  <path class="edge-soft" d="M700 221 C712 221 712 221 724 221"/>
+  <path class="edge-soft" d="M894 221 C906 221 906 221 918 221"/>
+  <path class="edge-soft" d="M894 316 C906 316 906 316 918 316"/>
+
+  <!-- Inner loop snake edges -->
+  <path class="edge-blue" d="M250 546 L284 546"/>
+  <path class="edge-blue" d="M464 546 L498 546"/>
+  <path class="edge-green" d="M678 546 L712 546"/>
+  <path class="edge-green" d="M892 546 L926 546"/>
+  <path class="edge-blue" d="M1021 592 L1021 642"/>
+  <path class="edge-orange" d="M926 694 L892 694"/>
+  <path class="edge-orange" d="M712 694 L678 694"/>
+  <path class="edge-orange" d="M498 694 L464 694"/>
+  <path class="edge-green" d="M284 694 L250 694"/>
+  <path class="edge-green" d="M160 746 L180 800"/>
+  <path class="edge-soft" d="M160 746 C208 785 270 794 330 842"/>
+  <path class="edge-orange" d="M250 719 C375 764 480 790 588 842"/>
+  <path class="edge-soft edge-dashed" d="M926 707 C872 742 852 780 818 842"/>
+  <path class="edge-soft" d="M302 852 C336 884 382 916 410 986"/>
+  <path class="edge-soft" d="M560 852 C592 889 628 916 650 950"/>
+  <path class="edge-green" d="M185 904 C170 924 164 934 160 950"/>
+  <path class="edge-blue edge-dashed" d="M1035 950 C1145 870 1140 770 1116 707"/>
+  <path class="edge-blue edge-dashed" d="M1030 950 C1138 840 1140 650 1065 592"/>
+  <path class="edge-green edge-dashed" d="M220 950 C355 890 440 715 498 566"/>
+
+  <!-- Shared-store edges to inner loop -->
+  <path class="edge-soft edge-dashed" d="M615 258 C580 348 345 407 160 500"/>
+  <path class="edge-soft edge-dashed" d="M809 258 C830 343 760 407 802 500"/>
+  <path class="edge-green edge-dashed" d="M615 350 C610 404 598 455 588 500"/>
+  <path class="edge-orange edge-dashed" d="M1003 258 C1035 333 1038 422 1021 500"/>
+  <path class="edge-purple edge-dashed" d="M809 350 C1120 470 1160 740 1110 890 C1090 930 1060 950 1040 950" style="fill:none;stroke:#7c3aed;stroke-width:2;stroke-dasharray:7 6;marker-end:url(#arrow-soft)"/>
+
+  <!-- Outer loop edges -->
+  <path class="edge-orange" d="M1448 224 L1496 224"/>
+  <path class="edge-orange" d="M1611 264 C1611 286 1490 286 1448 329"/>
+  <path class="edge-orange" d="M1448 352 L1496 352"/>
+  <path class="edge-blue" d="M1611 398 C1611 420 1472 420 1472 440"/>
+  <path class="edge-soft" d="M1472 560 L1611 602"/>
+  <path class="edge-soft" d="M1472 560 L1333 602"/>
+  <path class="edge-soft" d="M1448 657 L1496 657"/>
+  <path class="edge-green" d="M1611 712 C1611 734 1494 734 1448 795"/>
+  <path class="edge-green" d="M1448 814 L1496 814"/>
+  <path class="edge-green" d="M1611 874 C1611 898 1494 898 1472 916"/>
+  <path class="edge-soft edge-dashed" d="M1333 712 C1320 730 1308 738 1288 754"/>
+  <path class="edge-soft edge-dashed" d="M1472 1020 C1472 1035 1472 1038 1472 1050"/>
+
+  <!-- Cross-loop edges -->
+  <path class="edge-purple edge-dashed" d="M1218 958 C1110 958 1054 958 1116 1004" style="fill:none;stroke:#7c3aed;stroke-width:2.2;stroke-dasharray:7 6;marker-end:url(#arrow-soft)"/>
+  <path class="edge-orange edge-dashed" d="M710 1012 C920 1080 1100 1045 1218 964"/>
+  <path class="edge-orange edge-dashed" d="M1088 221 C1156 238 1190 282 1218 329"/>
+  <path class="edge-green edge-dashed" d="M370 1014 C702 1128 991 1075 1218 657"/>
+  <path class="edge-blue edge-dashed" d="M1496 224 C1340 228 1220 398 1116 520"/>
+
+  <!-- Labels for important cross-loop edges -->
+  <rect class="badge" x="1112" y="931" width="152" height="24"/>
+  <text class="badge-text" x="1126" y="948">下一 episode harness</text>
+  <rect class="badge" x="1050" y="1062" width="142" height="24"/>
+  <text class="badge-text" x="1064" y="1079">episode 证据</text>
+  <rect class="badge" x="1050" y="255" width="126" height="24"/>
+  <text class="badge-text" x="1064" y="272">run 摘要</text>
+
+  <!-- Legend -->
+  <rect class="box box-gray" x="38" y="1136" width="1722" height="36" filter="none"/>
+  <text class="small" x="58" y="1150">图例：实线表示执行流；虚线表示证据、feedback、archive 或跨 episode 传递。</text>
+  <text class="small" x="58" y="1165">内环 artifact 准入使用门控、feasible、delta、objective 和 probe 检查；内环 harness 验证使用 hard/soft rubrics；外环使用证据聚合与成对 replay。</text>
+</svg>

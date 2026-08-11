@@ -77,7 +77,6 @@ class GameDevBenchAdapter(BenchmarkAdapter):
             "project.godot not found",
             "validation timed out",
             "error running validation",
-            "no validation result found",
             "opengame failed",
         )
         solver_success = bool(solver.get("success", True))

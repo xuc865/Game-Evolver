@@ -17,12 +17,12 @@
       "--harness-context",
       "{harness_context}",
       "--timeout",
-      "7000",
+      "172800",
       "--output-manifest",
       "{output_manifest}"
     ],
     "cwd": ".",
-    "timeout_seconds": 7200,
+    "timeout_seconds": 173000,
     "env": {
       "CODEX_API_BASE": "http://29.163.228.59:8080/v1",
       "CODEX_MODEL": "Qwen3.6-27B",

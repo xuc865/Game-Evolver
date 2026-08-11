@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from typing import Mapping
 from urllib.parse import urlparse
 
+from game_loop.runtime.credentials import select_provider_api_key
+
 
 @dataclass(frozen=True)
 class BackboneProviderSpec:
@@ -27,6 +29,13 @@ class BackboneProviderSpec:
     def resolve(self, environment: Mapping[str, str] | None = None) -> "ResolvedBackbone":
         env = os.environ if environment is None else environment
         credential_env = next((name for name in self.credential_envs if env.get(name)), None)
+        pooled_api_key = select_provider_api_key(
+            self.provider_id,
+            env,
+            salt=str(env.get("GAME_LOOP_PROVIDER_KEY_SALT", "")),
+        )
+        if pooled_api_key and env.get(f"CODEX_API_KEYS_{self.provider_id.upper()}"):
+            credential_env = f"CODEX_API_KEYS_{self.provider_id.upper()}"
         # Backends historically use *_API_BASE while the provider registry
         # predates that convention and stores *_BASE_URL. Prefer the explicit
         # provider-specific API setting before the generic CODEX endpoint;
@@ -52,7 +61,10 @@ class BackboneProviderSpec:
             base_url=str(provider_base).rstrip("/"),
             model=str(provider_model),
             credential_env=credential_env,
-            api_key=None if credential_env is None else str(env[credential_env]),
+            api_key=(
+                pooled_api_key
+                or (None if credential_env is None else str(env[credential_env]))
+            ),
             official_docs=self.official_docs,
             requires_credential=self.requires_credential,
             allow_http=self.allow_http,

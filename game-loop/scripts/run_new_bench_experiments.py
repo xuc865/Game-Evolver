@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import shlex
 import shutil
 import subprocess
@@ -131,6 +132,30 @@ def load_done_ids(out_dir: Path) -> set[str]:
                         for path in manifests
                     ):
                         continue
+                if bench == "taubench":
+                    manifests = sorted(
+                        (out_dir / run_id).glob(
+                            "generation_*/candidate_*/taubench_execution.json"
+                        ),
+                        key=lambda path: path.stat().st_mtime,
+                        reverse=True,
+                    )
+                    if not manifests or rj(manifests[0]).get("status") != "completed":
+                        continue
+                    batches = list(
+                        (out_dir / run_id).glob(
+                            "generation_*/candidate_*/tau2_*/results.json"
+                        )
+                    )
+                    if max(
+                        (
+                            len(rj(path).get("simulations", []))
+                            for path in batches
+                            if isinstance(rj(path).get("simulations"), list)
+                        ),
+                        default=0,
+                    ) < 50:
+                        continue
                 done.add(run_id)
         except Exception:
             pass
@@ -170,13 +195,88 @@ def rj(p: Path) -> dict:
         return {}
 
 
-def run_to_log(cmd: list, log_path: Path, append: bool = True) -> int:
+def _process_tree_rss_kib(root_pid: int) -> int:
+    """Return RSS for root_pid and descendants without adding a dependency."""
+    completed = subprocess.run(
+        ["ps", "-axo", "pid=,ppid=,rss="],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    children: dict[int, list[int]] = {}
+    rss: dict[int, int] = {}
+    for line in completed.stdout.splitlines():
+        try:
+            pid_text, ppid_text, rss_text = line.split()
+            pid, ppid = int(pid_text), int(ppid_text)
+            rss[pid] = int(rss_text)
+            children.setdefault(ppid, []).append(pid)
+        except (TypeError, ValueError):
+            continue
+    pending = [root_pid]
+    seen: set[int] = set()
+    total = 0
+    while pending:
+        pid = pending.pop()
+        if pid in seen:
+            continue
+        seen.add(pid)
+        total += rss.get(pid, 0)
+        pending.extend(children.get(pid, ()))
+    return total
+
+
+def _terminate_owned_process_group(process: subprocess.Popen) -> None:
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+        process.wait(timeout=15)
+    except (ProcessLookupError, subprocess.TimeoutExpired):
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+
+
+def run_to_log(
+    cmd: list,
+    log_path: Path,
+    append: bool = True,
+    *,
+    memory_limit_gib: float | None = None,
+) -> int:
     mode = "a" if append else "w"
     with log_path.open(mode, encoding="utf-8") as log:
         log.write("\n$ " + " ".join(map(str, cmd)) + "\n")
         log.flush()
-        p = subprocess.Popen(list(map(str, cmd)), cwd=ROOT, stdout=log, stderr=subprocess.STDOUT)
-        rc = p.wait()
+        p = subprocess.Popen(
+            list(map(str, cmd)),
+            cwd=ROOT,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        limit_kib = None if memory_limit_gib is None else int(memory_limit_gib * 1024 * 1024)
+        rc = None
+        while rc is None:
+            try:
+                rc = p.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                if limit_kib is None:
+                    continue
+                rss_kib = _process_tree_rss_kib(p.pid)
+                if rss_kib <= limit_kib:
+                    continue
+                log.write(
+                    "\n[infrastructure_error] owned process tree exceeded "
+                    f"{memory_limit_gib:g} GiB (RSS={rss_kib / 1024 / 1024:.2f} GiB)\n"
+                )
+                log.flush()
+                _terminate_owned_process_group(p)
+                rc = 75
         log.write(f"\n[returncode] {rc}\n")
         log.flush()
         return rc
@@ -186,18 +286,37 @@ def terminalbench_docker_ready() -> tuple[bool, str]:
     docker = shutil.which("docker")
     if not docker:
         return False, "docker CLI is not installed"
-    try:
-        completed = subprocess.run(
-            [docker, "info"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=15,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return False, f"docker preflight failed: {exc}"
-    if completed.returncode != 0:
-        return False, "Docker daemon is not running"
-    return True, ""
+    configured = os.environ.get("TERMINALBENCH_DOCKER_HOST")
+    dedicated_socket = Path.home() / ".colima" / "terminalbench" / "docker.sock"
+    candidates = [configured, os.environ.get("DOCKER_HOST")]
+    if dedicated_socket.exists():
+        candidates.append(f"unix://{dedicated_socket}")
+    candidates.append(None)
+    checked: set[str | None] = set()
+    for host in candidates:
+        if host in checked:
+            continue
+        checked.add(host)
+        env = dict(os.environ)
+        if host:
+            env["DOCKER_HOST"] = host
+        else:
+            env.pop("DOCKER_HOST", None)
+        try:
+            completed = subprocess.run(
+                [docker, "info"],
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=15,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if completed.returncode == 0:
+            if host:
+                os.environ["DOCKER_HOST"] = host
+            return True, ""
+    return False, "Docker daemon is not running"
 
 
 def run_queue(model: str, bench: str) -> None:
@@ -292,7 +411,13 @@ def run_queue(model: str, bench: str) -> None:
             rcs["bench_rc"] = run_to_log(
                 [PYTHON, "-m", "game_loop", "evolve",
                  "--run-dir", run_dir, "--config", str(effective_cfg)],
-                log_path, append=True,
+                log_path,
+                append=True,
+                memory_limit_gib=(
+                    float(os.environ.get("NL2REPO_TASK_MEMORY_LIMIT_GIB", "12"))
+                    if bench == "nl2repo"
+                    else None
+                ),
             )
         except Exception as exc:
             with log_path.open("a", encoding="utf-8") as log:

@@ -10,8 +10,11 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import hashlib
 import json
 import os
+import random
+import re
 import shutil
 import subprocess
 import sys
@@ -40,6 +43,8 @@ REQUIRED_ARTIFACTS = ("package.json", "src", "data.md", "state_injection_api.md"
 MAX_GENERATION_SESSION_TURNS = 120
 MAX_GENERATION_SECONDS = 1800
 PROGRESS_NOTICE_PATH = Path("/Users/wangxucong/Desktop/workspace/progress.txt")
+DEFAULT_KEYPOINT_SAMPLE_SIZE = 10
+KEYPOINT_HEADING = re.compile(r"^## Keypoint\s+([^:]+):", re.MULTILINE)
 
 
 def read_json(path: Path) -> dict:
@@ -96,6 +101,19 @@ def append_progress_notice(
 
 def task_files() -> list[Path]:
     return sorted(TASKS.glob("*.md"))
+
+
+def select_keypoints(keypoints: Path, task_name: str, sample_size: int) -> str:
+    """Select a stable per-task subset so every provider is judged identically."""
+
+    if sample_size <= 0:
+        return ""
+    identifiers = KEYPOINT_HEADING.findall(keypoints.read_text(encoding="utf-8"))
+    if len(identifiers) <= sample_size:
+        return ",".join(identifiers)
+    seed = int.from_bytes(hashlib.sha256(task_name.encode("utf-8")).digest()[:8], "big")
+    selected = set(random.Random(seed).sample(identifiers, sample_size))
+    return ",".join(identifier for identifier in identifiers if identifier in selected)
 
 
 def generation_prompt(specification: str) -> str:
@@ -293,10 +311,12 @@ def evaluate_official(
 def run_case(
     provider: str, task: Path, case_dir: Path, shared_root: Path,
     generation_timeout: int, evaluation_timeout: int, only_keypoints: str,
+    keypoint_sample_size: int,
 ) -> dict:
     attempt_root = case_dir / f"attempt-{int(time.time())}"
     attempt_root.mkdir(parents=True, exist_ok=False)
     started = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    selected_keypoints = ""
     try:
         artifact = None
         generation = {}
@@ -319,9 +339,12 @@ def run_case(
         if artifact is None:
             raise RuntimeError("generation did not produce all official evaluator inputs")
         keypoints = ensure_shared_keypoints(task, shared_root, evaluation_timeout)
+        selected_keypoints = only_keypoints or select_keypoints(
+            keypoints, task.stem, keypoint_sample_size
+        )
         evaluation = evaluate_official(
             artifact=artifact, task=task, keypoints=keypoints, attempt_root=attempt_root,
-            only_keypoints=only_keypoints, timeout=evaluation_timeout,
+            only_keypoints=selected_keypoints, timeout=evaluation_timeout,
         )
         status = "completed" if evaluation.get("status") == "completed" else "failed"
         error = None
@@ -345,6 +368,8 @@ def run_case(
         "official_evaluation_status": evaluation.get("status"),
         "primary_score": evaluation.get("primary_score"),
         "keypoint_results": evaluation.get("keypoint_results", []),
+        "selected_keypoints": selected_keypoints,
+        "keypoint_sample_size": keypoint_sample_size,
         "implementation": evaluation.get("implementation"),
         "error": error,
         "attempt_root": str(attempt_root),
@@ -366,6 +391,7 @@ def run_provider(args: argparse.Namespace, provider: str) -> None:
         "provider": provider,
         "model": PROVIDERS[provider],
         "planned_count": len(tasks),
+        "keypoint_sample_size": args.keypoint_sample_size,
     })
     by_task = {str(item.get("task")): item for item in summary.get("cases", [])}
     for index, task in enumerate(tasks, 1):
@@ -377,6 +403,7 @@ def run_provider(args: argparse.Namespace, provider: str) -> None:
         item = run_case(
             provider, task, provider_root / task.stem, args.output_root.resolve() / "_shared_keypoints",
             args.generation_timeout, args.evaluation_timeout, args.only_keypoints,
+            args.keypoint_sample_size,
         )
         by_task[task.stem] = item
         summary["cases"] = [by_task[name] for name in sorted(by_task)]
@@ -404,6 +431,7 @@ def main() -> int:
     parser.add_argument("--generation-timeout", type=int, default=MAX_GENERATION_SECONDS)
     parser.add_argument("--evaluation-timeout", type=int, default=14400)
     parser.add_argument("--only-keypoints", default="")
+    parser.add_argument("--keypoint-sample-size", type=int, default=DEFAULT_KEYPOINT_SAMPLE_SIZE)
     parser.add_argument("--smoke", action="store_true")
     args = parser.parse_args()
     if not all((OFFICIAL.is_dir(), TASKS.is_dir(), SEED.is_dir(), OFFICIAL_WRAPPER.is_file())):

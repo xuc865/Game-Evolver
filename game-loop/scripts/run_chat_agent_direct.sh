@@ -83,4 +83,4 @@ fi
 
 # ── run the agent ──
 cd "$ROOT_DIR"
-exec "$PYTHON" -m game_loop.chat_agent "$@"
+exec "$PYTHON" -u -m game_loop.chat_agent "$@"

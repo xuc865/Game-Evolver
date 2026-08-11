@@ -107,16 +107,35 @@ def main(argv: list[str] | None = None) -> int:
                "-v", f"{result_dir}:/game_loop_result", image,
                "bash", "-s"]
     error = ""
+    docker_log = result_dir / "docker_driver.log"
     try:
-        proc = subprocess.run(command, input=script_file.read_text(encoding="utf-8"),
-                              capture_output=True, text=True, timeout=args.timeout)
+        # Pytest output is already persisted by official_eval.sh.  Capturing the
+        # duplicated docker stream here can retain unbounded output in RAM.
+        with script_file.open("rb") as script, docker_log.open("wb") as log:
+            proc = subprocess.run(
+                command,
+                stdin=script,
+                stdout=subprocess.DEVNULL,
+                stderr=log,
+                timeout=args.timeout,
+            )
         return_code = proc.returncode
-        error = proc.stderr[-2000:] if return_code not in (0, 1) else ""
+        if return_code not in (0, 1):
+            with docker_log.open("rb") as log:
+                log.seek(max(0, docker_log.stat().st_size - 2000))
+                error = log.read().decode("utf-8", errors="replace")
     except subprocess.TimeoutExpired:
         return_code, error = -1, "timeout"
     except FileNotFoundError:
         return_code, error = -2, "docker not found"
-    text = output_file.read_text(encoding="utf-8", errors="replace") if output_file.is_file() else ""
+    # Pytest summaries are at the end.  Keep parsing bounded even when a test
+    # emits pathological amounts of output.
+    if output_file.is_file():
+        with output_file.open("rb") as output:
+            output.seek(max(0, output_file.stat().st_size - 1024 * 1024))
+            text = output.read().decode("utf-8", errors="replace")
+    else:
+        text = ""
     passed_matches = re.findall(r"(\d+) passed", text)
     failed_matches = re.findall(r"(\d+) failed", text)
     error_matches = re.findall(r"(\d+) error", text)

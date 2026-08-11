@@ -22,6 +22,7 @@ def main() -> int:
     parser.add_argument("--generation-timeout", type=int, default=1800)
     parser.add_argument("--evaluation-timeout", type=int, default=14400)
     parser.add_argument("--only-keypoints", default="")
+    parser.add_argument("--keypoint-sample-size", type=int, default=10)
     parser.add_argument("--provider", action="append", choices=PROVIDERS)
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
@@ -50,6 +51,8 @@ def main() -> int:
                 str(args.generation_timeout),
                 "--evaluation-timeout",
                 str(args.evaluation_timeout),
+                "--keypoint-sample-size",
+                str(args.keypoint_sample_size),
                 *(["--only-keypoints", args.only_keypoints] if args.only_keypoints else []),
             ],
             cwd=root,

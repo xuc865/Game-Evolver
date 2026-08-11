@@ -11,4 +11,5 @@ exec /Library/Developer/CommandLineTools/usr/bin/python3 -u scripts/supervise_ve
   --output-root .baseline-agent-runs/verigame-official-public-awesome-v1 \
   --log-root experiments/full-matrix-launch/verigame-official-public-awesome-v1 \
   --generation-timeout 1800 \
-  --evaluation-timeout 14400
+  --evaluation-timeout 14400 \
+  --keypoint-sample-size 10

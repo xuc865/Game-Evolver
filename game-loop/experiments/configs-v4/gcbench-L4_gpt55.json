@@ -24,7 +24,11 @@
       "CODEX_MODEL": "gpt-5.5",
       "CODEX_PROVIDER": "gpt55",
       "OPENAI_BASE_URL": "https://xmcode.shop/v1",
-      "GAME_LOOP_BACKBONE_PROVIDER": "gpt55"
+      "GAME_LOOP_BACKBONE_PROVIDER": "gpt55",
+      "GAME_LOOP_CHAT_MAX_OUTPUT_TOKENS": "512",
+      "GAME_LOOP_CHAT_RETRY_MAX_OUTPUT_TOKENS": "256",
+      "GAME_LOOP_CHAT_API_TOTAL_TIMEOUT_SECONDS": "900",
+      "CODEX_THINKING": "none"
     }
   },
   "method": {

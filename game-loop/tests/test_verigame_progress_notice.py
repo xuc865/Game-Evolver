@@ -4,10 +4,22 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.run_verigame_public_awesome import append_progress_notice
+from scripts.run_verigame_public_awesome import append_progress_notice, select_keypoints
 
 
 class VeriGameProgressNoticeTests(unittest.TestCase):
+    def test_keypoint_sample_is_stable_and_task_specific(self):
+        with tempfile.TemporaryDirectory() as td:
+            keypoints = Path(td) / "keypoints.md"
+            keypoints.write_text(
+                "\n".join(f"## Keypoint {index}: Test" for index in range(1, 21)),
+                encoding="utf-8",
+            )
+            first = select_keypoints(keypoints, "2048", 10)
+            self.assertEqual(first, select_keypoints(keypoints, "2048", 10))
+            self.assertEqual(len(first.split(",")), 10)
+            self.assertNotEqual(first, select_keypoints(keypoints, "pinball", 10))
+
     def test_notice_is_concise_and_idempotent(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

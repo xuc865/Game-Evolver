@@ -24,6 +24,8 @@ from pathlib import Path
 import fcntl
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 RUNS = ROOT / ".baseline-agent-runs"
 PYTHON = sys.executable
 CFG_DIR = ROOT / "experiments" / "configs-v4"
@@ -100,7 +102,7 @@ def load_done_ids(out_dir: Path) -> set[str]:
         try:
             s = json.loads(summary_path.read_text())
             for c in s.get("cases", []):
-                if c.get("status") == "completed":
+                if _case_is_solidly_done(c):
                     done.add(c.get("run_id", ""))
         except Exception:
             pass
@@ -160,7 +162,55 @@ def _case_is_solidly_done(case: dict) -> bool:
     stop = str(case.get("stop_reason") or "").lower()
     if "infrastructure" in stop:
         return False
-    return True
+    try:
+        evaluator_queries = int(case.get("evaluator_queries", 0) or 0)
+    except (TypeError, ValueError):
+        return False
+    return evaluator_queries > 0 and case.get("champion_score") is not None
+
+
+def _classify_case(bench_rc: int | None, state: dict) -> str:
+    stop = str(state.get("stop_reason") or "").lower()
+    champion = state.get("champion_result") or state.get("champion_evaluation") or {}
+    try:
+        evaluator_queries = int(state.get("evaluator_queries", 0) or 0)
+    except (TypeError, ValueError):
+        evaluator_queries = 0
+    evaluated = evaluator_queries > 0 and champion.get("primary_score") is not None
+    if bench_rc == 0 and "infrastructure" not in stop and evaluated:
+        return "completed"
+    return "failed"
+
+
+def _recover_paused_gdbench_state(run_dir: Path, state: dict) -> dict | None:
+    """Normalize a retained official GD result that was misclassified as infra."""
+    if state.get("status") != "paused_infrastructure":
+        return None
+    attempts = state.get("attempts") or []
+    if not attempts:
+        return None
+    candidate_dir = Path(str(attempts[-1].get("candidate_dir") or ""))
+    result_path = candidate_dir / "gdbench_result" / "result.json"
+    if not candidate_dir.is_dir() or not result_path.is_file():
+        return None
+
+    from game_loop.benchmarks.gdbench import GameDevBenchAdapter
+
+    evaluation = GameDevBenchAdapter({}).parse_evaluation(result_path)
+    if not evaluation.feasible:
+        return None
+    recovered = dict(state)
+    recovered["status"] = "completed"
+    recovered["stop_reason"] = (
+        "official GameDevBench evaluator completed; normalized retained result "
+        "without another model call"
+    )
+    recovered["evaluator_queries"] = max(
+        1, int(recovered.get("evaluator_queries", 0) or 0)
+    )
+    recovered["champion_result"] = evaluation.to_dict()
+    recovered["champion_evaluation"] = evaluation.to_dict()
+    return recovered
 
 
 def rj(p: Path) -> dict:
@@ -354,6 +404,7 @@ def run_queue(model: str, bench: str, *, awesome_skills: bool = False) -> None:
             rl.write(f"\n===== CASE {idx}/{len(queue_list)} {qid} {task.name} =====\n")
 
         rcs = {"init_rc": None, "bench_rc": None}
+        recovered_state = None
         try:
             need_init = not state_path.is_file()
             if need_init:
@@ -365,26 +416,35 @@ def run_queue(model: str, bench: str, *, awesome_skills: bool = False) -> None:
                      "--config", str(effective_cfg), "--run-id", run_id],
                     log_path, append=False,
                 )
-            with model_queue_lock(model):
-                rcs["bench_rc"] = run_to_log(
-                    [PYTHON, "-m", "game_loop", "evolve",
-                     "--run-dir", run_dir, "--config", str(effective_cfg)],
-                    log_path, append=True,
+            if bench == "gdbench" and state_path.is_file():
+                recovered_state = _recover_paused_gdbench_state(
+                    run_dir, rj(state_path)
                 )
+            if recovered_state is not None:
+                rcs["bench_rc"] = 0
+                with log_path.open("a", encoding="utf-8") as log:
+                    log.write(
+                        "\n[recovery] normalized retained official evaluator result "
+                        "without another model call\n"
+                    )
+            else:
+                with model_queue_lock(model):
+                    rcs["bench_rc"] = run_to_log(
+                        [PYTHON, "-m", "game_loop", "evolve",
+                         "--run-dir", run_dir, "--config", str(effective_cfg)],
+                        log_path, append=True,
+                    )
         except Exception as exc:
             with log_path.open("a", encoding="utf-8") as log:
                 log.write(f"\n[runner_exception] {exc}\n")
 
         completed = time.strftime("%Y-%m-%dT%H:%M:%S%z")
-        st = rj(run_dir / "state.json")
+        st = recovered_state or rj(run_dir / "state.json")
         cr = st.get("champion_result") or st.get("champion_evaluation") or {}
         stop_reason = st.get("stop_reason")
         run_status = st.get("status")
 
-        if rcs.get("bench_rc") == 0 and "infrastructure" not in str(stop_reason or "").lower():
-            status = "completed"
-        else:
-            status = "failed"
+        status = _classify_case(rcs.get("bench_rc"), st)
 
         item = {
             "run_id": run_id,
@@ -410,7 +470,11 @@ def run_queue(model: str, bench: str, *, awesome_skills: bool = False) -> None:
         with (out_dir / "runner.log").open("a", encoding="utf-8") as rl:
             rl.write(f"CASE_SUMMARY={json.dumps({'run_id': run_id, 'status': status, 'score': cr.get('primary_score'), 'stop_reason': stop_reason}, ensure_ascii=False)}\n")
         state_mtime_after = state_path.stat().st_mtime_ns if state_path.is_file() else None
-        executed_this_run = need_init or state_mtime_after != state_mtime_before
+        executed_this_run = (
+            need_init
+            or recovered_state is not None
+            or state_mtime_after != state_mtime_before
+        )
         try:
             if executed_this_run:
                 append_progress_notice(prefix, item)

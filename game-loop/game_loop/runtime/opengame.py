@@ -306,6 +306,7 @@ class OpenGameRuntime:
             "XDG_CACHE_HOME": str(isolation.cache_home),
             "XDG_DATA_HOME": str(isolation.data_home),
         })
+        environment.setdefault("GAME_LOOP_PROVIDER_KEY_SALT", task.task_id)
         provider_model = None
         resolved_provider = None
         if self.config.backbone_provider is not None:

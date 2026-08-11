@@ -27,6 +27,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from game_loop.runtime.credentials import provider_api_keys, provider_key_start_index
+
 _BASE_SYSTEM_PROMPT = """\
 You are an expert game development AI agent working inside a game-loop harness.
 Your job is to follow instructions precisely, use available tools to inspect and
@@ -78,6 +80,8 @@ class LocalChatAgent:
         self.model = os.environ.get("CODEX_MODEL", "")
         self.provider = os.environ.get("CODEX_PROVIDER", "").strip().casefold()
         self.api_key = self._resolve_api_key(self.provider)
+        self.api_keys = self._resolve_api_keys(self.provider, self.api_key)
+        self._api_key_index = provider_key_start_index(self.provider, self.api_keys)
         self.thinking_mode = os.environ.get("CODEX_THINKING", "").strip().lower()
 
         if not self.api_base:
@@ -163,6 +167,13 @@ class LocalChatAgent:
         )
 
     @staticmethod
+    def _resolve_api_keys(provider: str, primary: str) -> list[str]:
+        keys = provider_api_keys(provider)
+        if primary and primary not in keys:
+            keys.insert(0, primary)
+        return keys
+
+    @staticmethod
     def _demo_trace_count(workspace: Path) -> int:
         candidates = (Path(workspace) / "game" / "demo_outputs", Path(workspace) / "demo_outputs")
         traces: set[Path] = set()
@@ -218,6 +229,12 @@ class LocalChatAgent:
     def _build_extra_body(self) -> dict[str, Any]:
         """Build extra_body for thinking/reasoning parameters."""
         extra: dict[str, Any] = {}
+        if getattr(self, "provider", "") in {"gpt55", "gpt-5.5"}:
+            if self.thinking_mode in ("none", "medium", "high", "low"):
+                extra["reasoning_effort"] = self.thinking_mode
+            elif self.thinking_mode in ("off", "0", "false", "no"):
+                extra["reasoning_effort"] = "low"
+            return extra
         if self.thinking_mode and self.thinking_mode not in ("off", "0", "false", "no"):
             if self.thinking_mode in ("on", "1", "true", "yes"):
                 extra["thinking"] = {"type": "on"}
@@ -273,8 +290,11 @@ class LocalChatAgent:
             # Python signature with error 1010. Use an explicit client UA.
             "User-Agent": "game-loop/1.0",
         }
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
+        api_keys = getattr(self, "api_keys", None) or ([self.api_key] if self.api_key else [])
+        key_index = min(
+            int(getattr(self, "_api_key_index", 0) or 0),
+            max(0, len(api_keys) - 1),
+        )
 
         max_retries = max(1, int(os.environ.get("GAME_LOOP_CHAT_API_MAX_RETRIES", "8")))
         api_timeout = max(10, int(os.environ.get("GAME_LOOP_CHAT_API_TIMEOUT_SECONDS", "180")))
@@ -290,12 +310,19 @@ class LocalChatAgent:
                     f"API call exceeded total timeout of {total_timeout}s"
                 )
             data = json.dumps(payload).encode("utf-8")
+            if api_keys:
+                headers["Authorization"] = f"Bearer {api_keys[key_index]}"
             req = urllib.request.Request(url, data=data, headers=headers, method="POST")
             try:
                 with urllib.request.urlopen(
                     req, timeout=max(1, min(api_timeout, int(remaining)))
                 ) as resp:
                     body = resp.read().decode("utf-8")
+                    if (
+                        getattr(self, "provider", "") in {"gpt55", "gpt-5.5"}
+                        and len(api_keys) > 1
+                    ):
+                        self._api_key_index = (key_index + 1) % len(api_keys)
                     return json.loads(body)
             except (
                 http.client.IncompleteRead,
@@ -305,6 +332,10 @@ class LocalChatAgent:
             ) as exc:
                 if attempt < max_retries - 1 and time.monotonic() < deadline:
                     self._tighten_unstable_provider_payload(payload)
+                    if len(api_keys) > 1:
+                        key_index = (key_index + 1) % len(api_keys)
+                        self._api_key_index = key_index
+                        print("[chat_agent] rotating provider credential", file=sys.stderr)
                     wait = min(30, 2 ** (attempt + 1), max(0, deadline - time.monotonic()))
                     print(
                         f"[chat_agent] stream/read error, retrying in {wait}s: {exc}",
@@ -325,10 +356,14 @@ class LocalChatAgent:
                     pass
                 if (
                     attempt < max_retries - 1
-                    and exc.code in (429, 500, 502, 503, 504)
+                    and exc.code in (403, 429, 500, 502, 503, 504, 524)
                     and time.monotonic() < deadline
                 ):
                     self._tighten_unstable_provider_payload(payload)
+                    if len(api_keys) > 1:
+                        key_index = (key_index + 1) % len(api_keys)
+                        self._api_key_index = key_index
+                        print("[chat_agent] rotating provider credential", file=sys.stderr)
                     wait = min(30, 2 ** (attempt + 1), max(0, deadline - time.monotonic()))
                     print(f"[chat_agent] API error {exc.code}, retrying in {wait}s: {error_body[:200]}",
                           file=sys.stderr)
@@ -342,6 +377,10 @@ class LocalChatAgent:
             except urllib.error.URLError as exc:
                 if attempt < max_retries - 1 and time.monotonic() < deadline:
                     self._tighten_unstable_provider_payload(payload)
+                    if len(api_keys) > 1:
+                        key_index = (key_index + 1) % len(api_keys)
+                        self._api_key_index = key_index
+                        print("[chat_agent] rotating provider credential", file=sys.stderr)
                     wait = min(30, 2 ** (attempt + 1), max(0, deadline - time.monotonic()))
                     print(f"[chat_agent] URL error, retrying in {wait}s: {exc}",
                           file=sys.stderr)
@@ -361,12 +400,15 @@ class LocalChatAgent:
         """Conservatively reduce retry size for flaky local provider deployments."""
 
         model_name = self.model.casefold()
-        if "qwen" not in model_name and "glm" not in model_name:
+        if not any(name in model_name for name in ("qwen", "glm", "gpt-5.5")):
             return
-        fallback = self._env_int("GAME_LOOP_CHAT_RETRY_MAX_OUTPUT_TOKENS", 512)
+        default_fallback = 2048 if "gpt-5.5" in model_name else 512
+        fallback = self._env_int(
+            "GAME_LOOP_CHAT_RETRY_MAX_OUTPUT_TOKENS", default_fallback
+        )
         current = int(payload.get("max_tokens", fallback))
         if current > fallback:
-            payload["max_tokens"] = fallback
+            payload["max_tokens"] = max(fallback, current // 2)
 
     @classmethod
     def _bounded_messages_for_api(cls, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -551,15 +593,34 @@ class LocalChatAgent:
             try:
                 json.loads(raw)
             except (json.JSONDecodeError, TypeError) as exc:
-                function["arguments"] = json.dumps(
-                    {
-                        "_tool_argument_error": (
-                            f"model emitted incomplete/invalid JSON arguments: {exc}"
-                        ),
-                        "_raw_arguments_prefix": raw[:500],
-                    },
-                    ensure_ascii=False,
-                )
+                # Some OpenAI-compatible proxies prepend an empty object to the
+                # real arguments (for example ``{}{\"path\": ...}``). Recover
+                # the last complete object instead of teaching the model about
+                # our internal error representation on every subsequent turn.
+                decoder = json.JSONDecoder()
+                values: list[Any] = []
+                position = 0
+                try:
+                    while position < len(raw):
+                        while position < len(raw) and raw[position].isspace():
+                            position += 1
+                        if position < len(raw):
+                            value, position = decoder.raw_decode(raw, position)
+                            values.append(value)
+                    recovered = next(
+                        value for value in reversed(values) if isinstance(value, dict) and value
+                    )
+                except (json.JSONDecodeError, StopIteration, TypeError):
+                    function["arguments"] = json.dumps(
+                        {
+                            "_tool_argument_error": (
+                                f"model emitted incomplete/invalid JSON arguments: {exc}"
+                            )
+                        },
+                        ensure_ascii=False,
+                    )
+                else:
+                    function["arguments"] = json.dumps(recovered, ensure_ascii=False)
             else:
                 function["arguments"] = raw
             tool_call["function"] = function

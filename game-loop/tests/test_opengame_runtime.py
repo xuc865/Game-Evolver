@@ -25,6 +25,7 @@ from game_loop.runtime import (
     OpenGameRuntimeConfig,
     RunnerResult,
 )
+from game_loop.runtime.providers import load_provider
 
 
 class FakeOpenGameRunner:
@@ -339,6 +340,18 @@ class OpenGameRuntimeTests(unittest.TestCase):
                     if path.is_file()
                 )
                 self.assertNotIn(secret, persisted)
+
+    def test_gpt55_backbone_selects_from_key_pool(self):
+        environment = {
+            "CODEX_API_KEY_GPT55": "key-a",
+            "CODEX_API_KEYS_GPT55": "key-a,key-b,key-c",
+            "GAME_LOOP_CHAT_API_KEY_OFFSET": "1",
+            "GAME_LOOP_PROVIDER_KEY_SALT": "task-17",
+        }
+        resolved = load_provider("gpt55").resolve(environment)
+        self.assertEqual(resolved.api_key, "key-b")
+        self.assertEqual(resolved.credential_env, "CODEX_API_KEYS_GPT55")
+        self.assertEqual(resolved.inject({})["OPENAI_API_KEY"], "key-b")
 
     def test_runtime_profile_rejects_embedded_credentials(self):
         with self.assertRaisesRegex(ValueError, "cannot contain credentials"):

@@ -65,7 +65,7 @@ launch_one() {
   fi
 
   log="$LOG_DIR/${session}.log"
-  if [[ "$queue" == claude_* ]]; then
+  if [[ "$queue" == claude_* || "$queue" == gpt55_* ]]; then
     if [[ ! -f "$LOCAL_ENV" ]]; then
       printf 'missing local credential file: %s\n' "$LOCAL_ENV" >&2
       return 1
