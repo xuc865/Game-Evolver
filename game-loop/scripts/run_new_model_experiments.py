@@ -154,6 +154,17 @@ def run_queue(model: str, bench: str) -> None:
     evolution = config_value.setdefault("evolution", {})
     evolution["max_generations"] = 1
     evolution["candidates_per_generation"] = 1
+    if bench == "gdbench":
+        # Official GD validation can exceed the historical 180s smoke budget
+        # even when the model successfully produced a runnable artifact.
+        # Keep this override local to the matrix run and preserve checked-in
+        # configs used by shorter smoke jobs.
+        config_value.setdefault("backend", {})["timeout_seconds"] = 900
+        command = config_value["backend"].get("command", [])
+        for index, value in enumerate(command[:-1]):
+            if value == "--evaluator-timeout" and command[index + 1] == "180":
+                command[index + 1] = "600"
+                break
     effective_cfg.write_text(
         json.dumps(config_value, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
