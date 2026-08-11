@@ -240,7 +240,7 @@
       "require_rubric_validation": true,
       "dynamic_rubric_generation": true,
       "enable_usage_driven_mutation": true,
-      "rubric_provider": "deepseek",
+      "rubric_provider": "glm",
       "element_mutation_policy": {
         "removal_min_usage": 5,
         "removal_min_usage_share": 0.25,
