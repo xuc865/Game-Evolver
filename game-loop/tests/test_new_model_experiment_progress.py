@@ -95,6 +95,29 @@ def test_paused_gdbench_result_recovers_without_another_model_call(tmp_path):
     assert recovered["champion_result"]["primary_score"] == 0.0
 
 
+def test_true_paused_infrastructure_retries_in_current_run_root(tmp_path, monkeypatch):
+    runs = tmp_path / "runs"
+    historical = runs / "new_model_awesome_kimi_gdbench-resume-old" / "run-one"
+    historical.mkdir(parents=True)
+    (historical / "state.json").write_text(
+        json.dumps({
+            "status": "paused_infrastructure",
+            "attempts": [{"candidate_dir": str(historical / "candidate")}],
+        }),
+        encoding="utf-8",
+    )
+    current = runs / "new_model_awesome_kimi_gdbench-resume-new"
+    current.mkdir()
+    monkeypatch.setattr(runner, "RUNS", runs)
+
+    selected, recovered = runner._select_resume_run_dir(
+        "new_model_awesome_kimi", "gdbench", "run-one", current
+    )
+
+    assert selected == current / "run-one"
+    assert recovered is None
+
+
 def test_done_ids_exclude_unevaluated_completed_cases(tmp_path):
     (tmp_path / "summary.json").write_text(
         json.dumps(

@@ -213,6 +213,27 @@ def _recover_paused_gdbench_state(run_dir: Path, state: dict) -> dict | None:
     return recovered
 
 
+def _select_resume_run_dir(
+    prefix: str, bench: str, run_id: str, out_dir: Path
+) -> tuple[Path, dict | None]:
+    historical = historical_run_dir(prefix, bench, run_id)
+    if historical is None:
+        return out_dir / run_id, None
+    state = rj(historical / "state.json")
+    recovered = (
+        _recover_paused_gdbench_state(historical, state)
+        if bench == "gdbench"
+        else None
+    )
+    if bench == "gdbench" and state.get("status") == "paused_infrastructure":
+        # A retained normal evaluator result can be normalized without another
+        # model call. A genuinely incomplete infrastructure episode is
+        # immutable evidence, so retry it in this run root instead of calling
+        # evolve on a state that intentionally returns unchanged forever.
+        return (historical, recovered) if recovered is not None else (out_dir / run_id, None)
+    return historical, recovered
+
+
 def rj(p: Path) -> dict:
     try:
         return json.loads(p.read_text(encoding="utf-8"))
@@ -395,7 +416,9 @@ def run_queue(model: str, bench: str, *, awesome_skills: bool = False) -> None:
     for idx, (task, run_id) in enumerate(queue_list, 1):
         if (out_dir / "STOP").exists():
             break
-        run_dir = historical_run_dir(prefix, bench, run_id) or (out_dir / run_id)
+        run_dir, recovered_state = _select_resume_run_dir(
+            prefix, bench, run_id, out_dir
+        )
         state_path = run_dir / "state.json"
         state_mtime_before = state_path.stat().st_mtime_ns if state_path.is_file() else None
         log_path = out_dir / f"{run_id}.log"
@@ -404,7 +427,6 @@ def run_queue(model: str, bench: str, *, awesome_skills: bool = False) -> None:
             rl.write(f"\n===== CASE {idx}/{len(queue_list)} {qid} {task.name} =====\n")
 
         rcs = {"init_rc": None, "bench_rc": None}
-        recovered_state = None
         try:
             need_init = not state_path.is_file()
             if need_init:
@@ -416,7 +438,11 @@ def run_queue(model: str, bench: str, *, awesome_skills: bool = False) -> None:
                      "--config", str(effective_cfg), "--run-id", run_id],
                     log_path, append=False,
                 )
-            if bench == "gdbench" and state_path.is_file():
+            if (
+                recovered_state is None
+                and bench == "gdbench"
+                and state_path.is_file()
+            ):
                 recovered_state = _recover_paused_gdbench_state(
                     run_dir, rj(state_path)
                 )
