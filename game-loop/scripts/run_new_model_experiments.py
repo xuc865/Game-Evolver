@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-run_new_model_experiments.py — Runner for 8 queues: GC/GD × 4 models.
+run_new_model_experiments.py — Full-task runner for GC/GD/VeriGame model queues.
 
-Benchmarks: gcbench, gdbench
+Benchmarks: gcbench, gdbench, verigame
 Models:     glm5.2, deepseek_v4, kimi, qwen3.6-27b, claude, gpt55
 
 Usage:
@@ -23,14 +23,19 @@ ROOT = Path(__file__).resolve().parents[1]
 RUNS = ROOT / ".baseline-agent-runs"
 PYTHON = sys.executable
 CFG_DIR = ROOT / "experiments" / "configs-v4"
-SEED_ARTIFACT = ROOT / "experiments" / "seed_artifacts" / "puzzle-sokoban-scaffold"
+SEED_ARTIFACTS = {
+    "gcbench": ROOT / "experiments" / "seed_artifacts" / "puzzle-sokoban-scaffold",
+    "gdbench": ROOT / "experiments" / "seed_artifacts" / "puzzle-sokoban-scaffold",
+    "verigame": ROOT / "experiments" / "public_baseline_seeds" / "verigame",
+}
 
-BENCHES = ["gcbench", "gdbench"]
+BENCHES = ["gcbench", "gdbench", "verigame"]
 MODELS = ["glm5.2", "deepseek_v4", "kimi", "qwen3.6-27b", "claude", "gpt55"]
 
 TASK_SOURCES = {
     "gcbench": ROOT.parent / "gcbench" / "tasks",
     "gdbench": ROOT / "third_party" / "gamedevbench" / "tasks",
+    "verigame": ROOT / "third_party" / "GameGen-Verifier" / "spec",
 }
 
 MODEL_CONFIG_SUFFIX = {
@@ -60,6 +65,8 @@ def discover_tasks(bench: str) -> list[Path]:
     tasks: list[Path] = []
     for d in sorted(src.iterdir()):
         if d.is_dir() and not d.name.startswith(".") and not d.name.endswith(".zip"):
+            tasks.append(d)
+        elif bench == "verigame" and d.is_file() and d.suffix.casefold() == ".md":
             tasks.append(d)
         elif bench == "gdbench" and d.is_file() and d.suffix == ".zip":
             # Official GD task archives are read-only. Extract each archive
@@ -135,8 +142,9 @@ def run_queue(model: str, bench: str) -> None:
     out_dir = RUNS / f"{prefix}_{bench}-resume-{ts}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    if not SEED_ARTIFACT.is_dir():
-        raise FileNotFoundError(f"shared seed artifact does not exist: {SEED_ARTIFACT}")
+    seed_artifact = SEED_ARTIFACTS[bench]
+    if not seed_artifact.is_dir():
+        raise FileNotFoundError(f"shared seed artifact does not exist: {seed_artifact}")
 
     # L4 is run as one bounded generation per public task in this matrix.  The
     # checked-in configs are also used by multi-generation evolution jobs, so
@@ -208,7 +216,7 @@ def run_queue(model: str, bench: str) -> None:
                     [PYTHON, "-m", "game_loop", "init",
                      "--run-dir", run_dir, "--task-source", str(task),
                      "--cold-start", "--seed-score", "0",
-                     "--seed-artifact", str(SEED_ARTIFACT),
+                     "--seed-artifact", str(seed_artifact),
                      "--config", str(effective_cfg), "--run-id", run_id],
                     log_path, append=False,
                 )
@@ -309,7 +317,9 @@ def dry_run() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     import argparse
-    parser = argparse.ArgumentParser(description="New model experiment runner (GC/GD × 4 models)")
+    parser = argparse.ArgumentParser(
+        description="Full-task model experiment runner (GC/GD/VeriGame × configured models)"
+    )
     parser.add_argument("--queue", type=str, default=None,
                         help="Queue ID: {model}_{bench} e.g. glm5.2_gcbench")
     parser.add_argument("--launch-all", action="store_true")
