@@ -165,6 +165,12 @@ def run_queue(model: str, bench: str) -> None:
             if value == "--evaluator-timeout" and command[index + 1] == "180":
                 command[index + 1] = "600"
                 break
+    # Bridge commands otherwise fall back to the SDK's 7200s default.  Keep
+    # a bounded per-task session so a dead/stalled model endpoint cannot hold a
+    # full-matrix queue indefinitely.
+    command = config_value["backend"].get("command", [])
+    if bench in {"gdbench", "verigame"} and "--timeout" not in command:
+        command.extend(["--timeout", "900"])
     effective_cfg.write_text(
         json.dumps(config_value, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
