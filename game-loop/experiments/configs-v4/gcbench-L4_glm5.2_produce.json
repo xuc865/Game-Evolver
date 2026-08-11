@@ -647,6 +647,7 @@
         ]
       },
       "seed_tool_interfaces": [],
+      "rubric_provider": "glm",
       "rubric_judge_timeout_seconds": 45
     }
   },
