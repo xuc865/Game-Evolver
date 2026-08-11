@@ -28,8 +28,8 @@ BENCHES = ["gcbench", "gdbench"]
 MODELS = ["glm5.2", "deepseek_v4", "kimi", "qwen3.6-27b", "claude", "gpt55"]
 
 TASK_SOURCES = {
-    "gcbench": Path("/Users/wangxucong/Desktop/workspace/harness-game/gcbench/tasks"),
-    "gdbench": Path("/Users/wangxucong/Desktop/workspace/harness-game/gdbench/tasks"),
+    "gcbench": ROOT.parent / "gcbench" / "tasks",
+    "gdbench": ROOT / "third_party" / "gamedevbench" / "tasks",
 }
 
 MODEL_CONFIG_SUFFIX = {
@@ -60,6 +60,19 @@ def discover_tasks(bench: str) -> list[Path]:
     for d in sorted(src.iterdir()):
         if d.is_dir() and not d.name.startswith(".") and not d.name.endswith(".zip"):
             tasks.append(d)
+        elif bench == "gdbench" and d.is_file() and d.suffix == ".zip":
+            # Official GD task archives are read-only. Extract each archive
+            # into the repository-local run cache before handing it to the
+            # game-loop runner; never mutate the checkout under third_party/.
+            extracted = RUNS / "task-cache" / "gdbench" / d.stem
+            marker = extracted / ".source_archive"
+            if not marker.is_file() or marker.read_text(encoding="utf-8") != str(d.resolve()):
+                import zipfile
+                extracted.mkdir(parents=True, exist_ok=True)
+                with zipfile.ZipFile(d) as archive:
+                    archive.extractall(extracted)
+                marker.write_text(str(d.resolve()), encoding="utf-8")
+            tasks.append(extracted)
     return tasks
 
 
