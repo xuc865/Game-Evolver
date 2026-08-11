@@ -648,8 +648,17 @@ class LocalChatAgent:
         if tools is None:
             tools = self._default_tools()
 
+        target_turns = max(1, min(max_turns, int(max_turns * 0.8)))
+        efficiency_budget = (
+            f"\n\n## Execution Budget\n"
+            f"You have a hard limit of {max_turns} API turns. Aim to finish within "
+            f"{target_turns} turns. Prioritize a runnable gameplay core, required "
+            "deterministic demos, and one successful headless smoke test. Once those "
+            "are complete, stop calling tools and return your concise final response "
+            "immediately. Do not spend remaining turns on optional polish."
+        )
         messages: list[dict[str, Any]] = [
-            {"role": "system", "content": self.system_prompt},
+            {"role": "system", "content": self.system_prompt + efficiency_budget},
             {"role": "user", "content": instruction},
         ]
 

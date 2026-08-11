@@ -1937,6 +1937,32 @@ class GameLoopTests(unittest.TestCase):
         ]
         self.assertEqual(len(continuation), 1)
 
+    def test_chat_agent_tells_model_to_finish_before_turn_limit(self):
+        from game_loop.chat_agent import LocalChatAgent
+
+        agent = LocalChatAgent.__new__(LocalChatAgent)
+        agent.system_prompt = "test system"
+        captured_messages = []
+
+        def fake_call(messages, tools):
+            captured_messages.extend(messages)
+            return {
+                "choices": [{
+                    "message": {"role": "assistant", "content": "done"},
+                    "finish_reason": "stop",
+                }]
+            }
+
+        agent._call_api = fake_call
+        with tempfile.TemporaryDirectory() as raw:
+            result = agent.run("build it", Path(raw), tools=[], max_turns=20)
+
+        self.assertEqual(result["turns"], 1)
+        budget = captured_messages[0]["content"]
+        self.assertIn("hard limit of 20 API turns", budget)
+        self.assertIn("finish within 16 turns", budget)
+        self.assertIn("stop calling tools", budget)
+
     def test_chat_agent_retries_socket_timeout(self):
         import socket
         from game_loop.chat_agent import LocalChatAgent
