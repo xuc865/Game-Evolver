@@ -571,8 +571,9 @@ def run_model(*, model: str, output_root: Path, limit: int | None, evaluator_tim
             "updated_at": utc_now(),
         })
         _release_task_lock(lock)
-        if index % 10 == 0:
-            atomic_write_json(model_root / "summary.json", _summary(output_root, model, len(rows)))
+        # Persist every task so a long full-dataset run has an immediately
+        # auditable attempted denominator after interruption or monitoring.
+        atomic_write_json(model_root / "summary.json", _summary(output_root, model, len(rows)))
         print(json.dumps({"model": model, "index": index + 1, "total": len(selected), "task_id": task_id, "status": terminal}, ensure_ascii=False), flush=True)
     atomic_write_json(model_root / "summary.json", _summary(output_root, model, len(rows)))
     return 0
