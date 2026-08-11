@@ -1890,6 +1890,33 @@ class GameLoopTests(unittest.TestCase):
             self.assertEqual(command[6], str(task.name))
             self.assertTrue(command[5].endswith("gcbench_execution.json"))
 
+    def test_command_backend_stops_after_log_inactivity(self):
+        import subprocess
+        import time
+
+        from game_loop.backends.command import _wait_for_process
+
+        with tempfile.TemporaryDirectory() as raw:
+            log_path = Path(raw) / "backend.log"
+            with log_path.open("wb") as log:
+                process = subprocess.Popen(
+                    [sys.executable, "-c", "import time; time.sleep(10)"],
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                )
+                started = time.monotonic()
+                return_code, error = _wait_for_process(
+                    process,
+                    log_path=log_path,
+                    timeout_seconds=10,
+                    inactivity_timeout_seconds=1,
+                )
+
+        self.assertNotEqual(return_code, 0)
+        self.assertIn("no log progress for 1s", error)
+        self.assertLess(time.monotonic() - started, 5)
+
     def test_chat_agent_blocks_root_find(self):
         from game_loop.chat_agent import LocalChatAgent
 

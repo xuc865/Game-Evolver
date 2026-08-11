@@ -19,6 +19,7 @@ class BackendConfig:
     command: tuple[str, ...]
     cwd: Path
     timeout_seconds: int = 10800
+    inactivity_timeout_seconds: int | None = None
     env: dict[str, str] = field(default_factory=dict)
 
     @classmethod
@@ -29,12 +30,24 @@ class BackendConfig:
         cwd = Path(str(value.get("cwd", "."))).expanduser().resolve()
         if not cwd.is_dir():
             raise ValueError(f"backend.cwd does not exist: {cwd}")
-        return cls(
+        inactivity_timeout = value.get("inactivity_timeout_seconds")
+        result = cls(
             command=tuple(command),
             cwd=cwd,
             timeout_seconds=int(value.get("timeout_seconds", 10800)),
+            inactivity_timeout_seconds=(
+                None if inactivity_timeout is None else int(inactivity_timeout)
+            ),
             env={str(k): str(v) for k, v in value.get("env", {}).items()},
         )
+        if result.timeout_seconds <= 0:
+            raise ValueError("backend.timeout_seconds must be positive")
+        if (
+            result.inactivity_timeout_seconds is not None
+            and result.inactivity_timeout_seconds <= 0
+        ):
+            raise ValueError("backend.inactivity_timeout_seconds must be positive")
+        return result
 
 
 @dataclass(frozen=True)

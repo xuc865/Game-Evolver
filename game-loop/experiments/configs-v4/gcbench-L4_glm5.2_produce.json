@@ -18,7 +18,8 @@
       "{breakdown_path}"
     ],
     "cwd": ".",
-    "timeout_seconds": 3600,
+    "timeout_seconds": 2400,
+    "inactivity_timeout_seconds": 420,
     "env": {
       "CODEX_API_BASE": "http://29.116.237.75:8080/v1",
       "CODEX_MODEL": "GLM-5.2-W4AFP8-node1",

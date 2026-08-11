@@ -4,6 +4,7 @@ import os
 import re
 import signal
 import subprocess
+import time
 from pathlib import Path
 
 from game_loop.config import BackendConfig
@@ -30,6 +31,7 @@ class CommandBackend:
             "command": [_redact(part) for part in command],
             "cwd": str(self.config.cwd),
             "timeout_seconds": self.config.timeout_seconds,
+            "inactivity_timeout_seconds": self.config.inactivity_timeout_seconds,
             "adapter": prepared.adapter_id,
         })
         error = None
@@ -48,15 +50,56 @@ class CommandBackend:
                 start_new_session=True,
             )
             try:
-                return_code = process.wait(timeout=self.config.timeout_seconds)
-            except subprocess.TimeoutExpired:
-                error = f"backend timed out after {self.config.timeout_seconds}s"
-                _terminate_process_group(process)
-                return_code = process.returncode if process.returncode is not None else -9
+                return_code, error = _wait_for_process(
+                    process,
+                    log_path=log_path,
+                    timeout_seconds=self.config.timeout_seconds,
+                    inactivity_timeout_seconds=self.config.inactivity_timeout_seconds,
+                )
             except BaseException:
                 _terminate_process_group(process)
                 raise
         return BackendExecution(return_code, log_path, error)
+
+
+def _wait_for_process(
+    process: subprocess.Popen,
+    *,
+    log_path: Path,
+    timeout_seconds: int,
+    inactivity_timeout_seconds: int | None,
+) -> tuple[int, str | None]:
+    started = time.monotonic()
+    last_progress = started
+    last_size = -1
+    while True:
+        now = time.monotonic()
+        try:
+            size = log_path.stat().st_size
+        except OSError:
+            size = last_size
+        if size != last_size:
+            last_size = size
+            last_progress = now
+
+        if now - started >= timeout_seconds:
+            error = f"backend timed out after {timeout_seconds}s"
+            _terminate_process_group(process)
+            return process.returncode if process.returncode is not None else -9, error
+        if (
+            inactivity_timeout_seconds is not None
+            and now - last_progress >= inactivity_timeout_seconds
+        ):
+            error = (
+                "backend produced no log progress for "
+                f"{inactivity_timeout_seconds}s"
+            )
+            _terminate_process_group(process)
+            return process.returncode if process.returncode is not None else -9, error
+        try:
+            return process.wait(timeout=1), None
+        except subprocess.TimeoutExpired:
+            pass
 
 
 def _terminate_process_group(process: subprocess.Popen) -> None:
