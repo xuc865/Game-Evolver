@@ -1955,12 +1955,12 @@ class GameLoopTests(unittest.TestCase):
 
         agent._call_api = fake_call
         with tempfile.TemporaryDirectory() as raw:
-            result = agent.run("build it", Path(raw), tools=[], max_turns=20)
+            result = agent.run("build it", Path(raw), tools=[], max_turns=45)
 
         self.assertEqual(result["turns"], 1)
         budget = captured_messages[0]["content"]
-        self.assertIn("hard limit of 20 API turns", budget)
-        self.assertIn("finish within 16 turns", budget)
+        self.assertIn("hard limit of 45 API turns", budget)
+        self.assertIn("finish within 30 turns", budget)
         self.assertIn("stop calling tools", budget)
 
     def test_chat_agent_retries_socket_timeout(self):
