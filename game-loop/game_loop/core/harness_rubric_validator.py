@@ -839,6 +839,207 @@ class LLMRubricJudge:
             evidence_ref=evidence.run_ref,
         )
 
+    def score_pair(
+        self,
+        *,
+        parent_evidence: DeepPlaytestEvidence,
+        candidate_evidence: DeepPlaytestEvidence,
+        hard_rubrics: Sequence[HarnessRubricCriterion],
+        soft_rubrics: Sequence[HarnessRubricCriterion],
+    ) -> tuple[RubricCaseScores, RubricCaseScores]:
+        """Score both sides in one request so admission uses one judgment context."""
+        from game_loop.runtime.providers import load_provider
+        import urllib.error
+        import urllib.request
+
+        resolved = load_provider(self.provider_id).resolve()
+        doctor = resolved.doctor()
+        if not doctor.get("ready"):
+            error = f"rubric provider {self.provider_id} is not ready"
+            return tuple(
+                RubricCaseScores(
+                    case_id=evidence.case_id,
+                    hard={},
+                    soft={},
+                    soft_total=0.0,
+                    judge=self.judge_id,
+                    evidence_ref=evidence.run_ref,
+                    infrastructure_ok=False,
+                    errors=(error,),
+                )
+                for evidence in (parent_evidence, candidate_evidence)
+            )  # type: ignore[return-value]
+
+        hard_template = {item.rubric_id: 0 for item in hard_rubrics}
+        soft_template = {item.rubric_id: 0.0 for item in soft_rubrics}
+        side_template = {"hard": hard_template, "soft": soft_template}
+        schema = {"parent": side_template, "candidate": side_template}
+        rubric_text = {
+            "hard": {item.rubric_id: item.description for item in hard_rubrics},
+            "soft": {
+                item.rubric_id: {"description": item.description, "weight": item.weight}
+                for item in soft_rubrics
+            },
+        }
+        evidence_payload = {
+            "parent": parent_evidence.to_dict(),
+            "candidate": candidate_evidence.to_dict(),
+        }
+        prompt = (
+            "Score parent and candidate together from their deep runtime evidence. "
+            "Apply each rubric identically to both sides. Missing evidence means 0. "
+            "For gcbench, nominal files or demo JSON without completed real-input replay "
+            "logs are not gameplay evidence. Return only JSON matching this schema:\n"
+            f"{json.dumps(schema, ensure_ascii=False)}\n"
+            f"Rubrics: {json.dumps(rubric_text, ensure_ascii=False)}\n"
+            f"Evidence: {json.dumps(evidence_payload, ensure_ascii=False)[:10000]}"
+        )
+        compact_prompt = (
+            "Return only valid JSON. Score both sides consistently; missing evidence is 0.\n"
+            f"Schema={json.dumps(schema)}\n"
+            f"Rubrics={json.dumps(rubric_text, ensure_ascii=False)}\n"
+            f"Parent={json.dumps(parent_evidence.to_dict(), ensure_ascii=False)[:3500]}\n"
+            f"Candidate={json.dumps(candidate_evidence.to_dict(), ensure_ascii=False)[:3500]}"
+        )
+        payload: dict[str, Any] = {
+            "model": resolved.model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You compare game harness outcomes using deep runtime evidence. "
+                        "Return only JSON. Hard values are 0 or 1; soft values are in [0,1]."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.0,
+            "max_tokens": 4000,
+            "response_format": {"type": "json_object"},
+        }
+        if any(name in resolved.model.casefold() for name in ("qwen", "glm", "kimi")):
+            payload["chat_template_kwargs"] = {"enable_thinking": False}
+        elif "deepseek" in resolved.model.casefold():
+            payload["reasoning_effort"] = "none"
+
+        errors: list[str] = []
+        parsed: dict[str, Any] | None = None
+        supports_response_format = True
+        for attempt in range(3):
+            request_payload = dict(payload)
+            if not supports_response_format:
+                request_payload.pop("response_format", None)
+            request_payload["messages"] = [
+                payload["messages"][0],
+                {"role": "user", "content": prompt if attempt == 0 else compact_prompt},
+            ]
+            if attempt:
+                request_payload["max_tokens"] = 1600
+            request = urllib.request.Request(
+                resolved.base_url + "/chat/completions",
+                data=json.dumps(request_payload).encode("utf-8"),
+                method="POST",
+                headers={
+                    "Authorization": f"Bearer {resolved.api_key or 'EMPTY'}",
+                    "Content-Type": "application/json",
+                },
+            )
+            try:
+                lock_key = f"{resolved.base_url}|{resolved.model}"
+                lock_name = hashlib.sha256(lock_key.encode("utf-8")).hexdigest()[:24]
+                lock_path = Path("/tmp") / f"game-loop-rubric-judge-{lock_name}.lock"
+                with lock_path.open("a+") as lock_file:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+                    try:
+                        with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+                            value = json.loads(response.read().decode("utf-8"))
+                    finally:
+                        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                message = value["choices"][0]["message"]
+                parse_errors: list[str] = []
+                for field_name in ("content", "reasoning_content", "reasoning"):
+                    content = message.get(field_name)
+                    if not isinstance(content, str) or not content.strip():
+                        continue
+                    try:
+                        candidate = extract_json_object(content)
+                        if set(candidate) != {"parent", "candidate"}:
+                            raise ValueError("paired rubric JSON requires parent and candidate keys")
+                        for side in ("parent", "candidate"):
+                            if not isinstance(candidate[side], dict):
+                                raise ValueError(f"paired rubric JSON {side} must be an object")
+                            _validate_rubric_payload(
+                                candidate[side],
+                                hard_rubrics=hard_rubrics,
+                                soft_rubrics=soft_rubrics,
+                            )
+                    except (ValueError, TypeError, KeyError) as exc:
+                        parse_errors.append(f"{field_name}: {type(exc).__name__}: {exc}")
+                        continue
+                    parsed = candidate
+                    break
+                if parsed is None:
+                    raise ValueError(
+                        "no valid paired rubric JSON found"
+                        + (f" ({'; '.join(parse_errors)})" if parse_errors else "")
+                    )
+                break
+            except urllib.error.HTTPError as exc:
+                body = exc.read().decode("utf-8", errors="replace")
+                errors.append(f"HTTPError {exc.code}: {body[:200]}")
+                if exc.code in (400, 422):
+                    supports_response_format = False
+            except (
+                urllib.error.URLError,
+                TimeoutError,
+                KeyError,
+                json.JSONDecodeError,
+                ValueError,
+                IndexError,
+            ) as exc:
+                errors.append(f"{type(exc).__name__}: {exc}")
+            if attempt < 2:
+                time.sleep(2 ** (attempt + 1))
+
+        if parsed is None:
+            error = "paired rubric judge failed after 3 attempts: " + (
+                "; ".join(errors[-3:]) or "unknown error"
+            )
+            return tuple(
+                RubricCaseScores(
+                    case_id=evidence.case_id,
+                    hard={},
+                    soft={},
+                    soft_total=0.0,
+                    judge=f"{self.judge_id}_paired",
+                    evidence_ref=evidence.run_ref,
+                    infrastructure_ok=False,
+                    errors=(error,),
+                )
+                for evidence in (parent_evidence, candidate_evidence)
+            )  # type: ignore[return-value]
+
+        results: list[RubricCaseScores] = []
+        for side, evidence in (("parent", parent_evidence), ("candidate", candidate_evidence)):
+            side_payload = parsed[side]
+            hard = {
+                item.rubric_id: _coerce_hard(side_payload["hard"][item.rubric_id])
+                for item in hard_rubrics
+            }
+            soft = {
+                item.rubric_id: _coerce_soft(side_payload["soft"][item.rubric_id])
+                for item in soft_rubrics
+            }
+            results.append(RubricCaseScores(
+                case_id=evidence.case_id,
+                hard=hard,
+                soft=soft,
+                soft_total=sum(item.weight * soft[item.rubric_id] for item in soft_rubrics),
+                judge=f"{self.judge_id}_paired",
+                evidence_ref=evidence.run_ref,
+            ))
+        return results[0], results[1]
+
     def _build_prompt(
         self,
         *,
@@ -1090,16 +1291,25 @@ class HarnessRubricValidator:
             else:
                 hard_rubrics = self.config.hard_rubrics
                 soft_rubrics = self.config.soft_rubrics
-            parent_scores = self.judge.score(
-                evidence=parent_evidence,
-                hard_rubrics=hard_rubrics,
-                soft_rubrics=soft_rubrics,
-            )
-            candidate_scores = self.judge.score(
-                evidence=candidate_evidence,
-                hard_rubrics=hard_rubrics,
-                soft_rubrics=soft_rubrics,
-            )
+            score_pair = getattr(self.judge, "score_pair", None)
+            if callable(score_pair):
+                parent_scores, candidate_scores = score_pair(
+                    parent_evidence=parent_evidence,
+                    candidate_evidence=candidate_evidence,
+                    hard_rubrics=hard_rubrics,
+                    soft_rubrics=soft_rubrics,
+                )
+            else:
+                parent_scores = self.judge.score(
+                    evidence=parent_evidence,
+                    hard_rubrics=hard_rubrics,
+                    soft_rubrics=soft_rubrics,
+                )
+                candidate_scores = self.judge.score(
+                    evidence=candidate_evidence,
+                    hard_rubrics=hard_rubrics,
+                    soft_rubrics=soft_rubrics,
+                )
             comparison = compare_rubric_pair(
                 case_id=case_id,
                 parent=parent_scores,
@@ -1141,7 +1351,7 @@ def extract_json_object(text: str) -> dict[str, Any]:
         if isinstance(value, dict):
             if first_object is None:
                 first_object = value
-            if "hard" in value or "soft" in value:
+            if "hard" in value or "soft" in value or set(value) == {"parent", "candidate"}:
                 return value
     if first_object is not None:
         return first_object

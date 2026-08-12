@@ -411,6 +411,117 @@ class HarnessRubricValidatorTests(unittest.TestCase):
         self.assertFalse(comparison.passed)
         self.assertTrue(any("hard rubric" in reason for reason in comparison.reasons))
 
+    def test_rejects_hard_regression_even_when_soft_total_improves(self):
+        parent = RubricCaseScores(
+            case_id="epoch-8-case-2",
+            hard={"launches_without_crash": 1.0},
+            soft={"gameplay_responsiveness": 0.2},
+            soft_total=0.2,
+            judge="llm_deep_playtest_v1_paired",
+            evidence_ref="/tmp/parent",
+        )
+        candidate = RubricCaseScores(
+            case_id="epoch-8-case-2",
+            hard={"launches_without_crash": 0.0},
+            soft={"gameplay_responsiveness": 0.9},
+            soft_total=0.9,
+            judge="llm_deep_playtest_v1_paired",
+            evidence_ref="/tmp/candidate",
+        )
+
+        comparison = compare_rubric_pair(
+            case_id="epoch-8-case-2",
+            parent=parent,
+            candidate=candidate,
+            hard_rubrics=DEFAULT_HARD_RUBRICS[:1],
+            soft_rubrics=DEFAULT_SOFT_RUBRICS[:1],
+        )
+
+        self.assertFalse(comparison.passed)
+        self.assertIn("parent=1, candidate=0", comparison.reasons[0])
+
+    @patch("game_loop.core.harness_rubric_validator.collect_deep_playtest_evidence")
+    def test_validator_prefers_atomic_pair_scoring(self, collect_mock):
+        collect_mock.side_effect = lambda *, case_id, run_dir: _synthetic_evidence(
+            passed=True,
+            richer="candidate" in str(run_dir),
+        )
+        judge = unittest.mock.Mock()
+        judge.score_pair.return_value = (
+            _score_artifact(passed=True),
+            _score_artifact(passed=True, richer=True),
+        )
+        config = HarnessEvolutionConfig.from_dict({
+            "modules": [{"id": "a", "instruction": "a", "tags": []}],
+            "seed_modules": ["a"],
+            "max_active_modules": 1,
+            "max_active_tool_interfaces": 0,
+            "mutation_width": 1,
+            "rubric_validation_sample_size": 1,
+            "require_rubric_validation": True,
+        })
+        outcome_args = ("case-a", "artifact", 0.5, True, 1, 1)
+
+        result = HarnessRubricValidator(config, judge=judge).validate_paired_outcomes(
+            parent_outcomes=[HarnessEpisodeOutcome(*outcome_args, run_ref="/tmp/parent")],
+            candidate_outcomes=[HarnessEpisodeOutcome(*outcome_args, run_ref="/tmp/candidate")],
+        )
+
+        self.assertTrue(result.accepted)
+        judge.score_pair.assert_called_once()
+        judge.score.assert_not_called()
+
+    @patch("game_loop.runtime.providers.BackboneProviderSpec.resolve")
+    @patch("urllib.request.urlopen")
+    def test_llm_pair_judge_scores_both_sides_in_one_response(
+        self, urlopen_mock, resolve_mock
+    ):
+        resolved = unittest.mock.Mock()
+        resolved.doctor.return_value = {"ready": True}
+        resolved.model = "judge-model"
+        resolved.base_url = "http://judge.local/v1"
+        resolved.api_key = ""
+        resolve_mock.return_value = resolved
+
+        class _Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return json.dumps({"choices": [{"message": {"content": json.dumps({
+                    "parent": {
+                        "hard": {"launches_without_crash": 1},
+                        "soft": {"gameplay_responsiveness": 0.2},
+                    },
+                    "candidate": {
+                        "hard": {"launches_without_crash": 0},
+                        "soft": {"gameplay_responsiveness": 0.9},
+                    },
+                })}}]}).encode("utf-8")
+
+        urlopen_mock.return_value = _Response()
+        parent, candidate = LLMRubricJudge(provider_id="deepseek").score_pair(
+            parent_evidence=_synthetic_evidence(passed=True),
+            candidate_evidence=_synthetic_evidence(passed=False, richer=True),
+            hard_rubrics=DEFAULT_HARD_RUBRICS[:1],
+            soft_rubrics=DEFAULT_SOFT_RUBRICS[:1],
+        )
+
+        self.assertEqual(urlopen_mock.call_count, 1)
+        self.assertEqual(parent.hard["launches_without_crash"], 1.0)
+        self.assertEqual(candidate.hard["launches_without_crash"], 0.0)
+        comparison = compare_rubric_pair(
+            case_id="case-a",
+            parent=parent,
+            candidate=candidate,
+            hard_rubrics=DEFAULT_HARD_RUBRICS[:1],
+            soft_rubrics=DEFAULT_SOFT_RUBRICS[:1],
+        )
+        self.assertFalse(comparison.passed)
+
     def test_infrastructure_failure_stops_pair_comparison(self):
         parent = _score_artifact(passed=True)
         candidate = RubricCaseScores(
