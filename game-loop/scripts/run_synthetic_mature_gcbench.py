@@ -29,8 +29,9 @@ from scripts.run_new_model_experiments import (
 )
 
 CONFIGS = {
-    "glm5.2": ROOT / "experiments/configs-v4/gcbench-L4_glm5.2_produce.json",
-    "kimi": ROOT / "experiments/configs-v4/gcbench-L4_kimi_produce.json",
+    "kimi": ROOT / "experiments/configs-v4/gcbench-L4_kimi.json",
+    "gpt55": ROOT / "experiments/configs-v4/gcbench-L4_gpt55.json",
+    "claude": ROOT / "experiments/configs-v4/gcbench-L4_claude.json",
 }
 TASKS = ROOT.parent / "gcbench/tasks"
 SEED = ROOT / "experiments/seed_artifacts/puzzle-sokoban-scaffold"
@@ -70,6 +71,7 @@ def run(model: str, output_root: Path) -> int:
     done = _done_ids(summary)
     profile = json.loads(profile_path.read_text(encoding="utf-8"))
     summary["harness_id"] = profile["harness_id"]
+    summary["completed_count"] = len(done)
     atomic_write_json(summary_path, summary)
 
     for index, task in enumerate(tasks, 1):

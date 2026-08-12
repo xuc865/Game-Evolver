@@ -36,7 +36,7 @@ class SyntheticMatureGcbenchTests(unittest.TestCase):
             )
 
     def test_effective_config_keeps_one_candidate(self) -> None:
-        source = ROOT / "experiments/configs-v4/gcbench-L4_kimi_produce.json"
+        source = ROOT / "experiments/configs-v4/gcbench-L4_kimi.json"
         with tempfile.TemporaryDirectory() as temporary:
             destination = Path(temporary) / "config.json"
             config = build_effective_config(source, destination)
