@@ -2954,6 +2954,130 @@ class GameLoopTests(unittest.TestCase):
         self.assertEqual(selected["element_id"], "bbb_fresh")
         self.assertEqual(selected["category"], "skill")
 
+    def test_fallback_harness_shortlist_is_diverse_and_avoids_recent_elements(self):
+        from game_loop.cli import _fallback_harness_shortlist
+
+        selected = _fallback_harness_shortlist(
+            [
+                {"id": "skill_recent", "category": "skill"},
+                {"id": "skill_fresh", "category": "skill"},
+                {"id": "tool_fresh", "category": "tool"},
+                {"id": "workflow_fresh", "category": "workflow"},
+            ],
+            [{"element_id": "skill_recent"}],
+        )
+
+        self.assertEqual(selected, ["skill_fresh", "tool_fresh", "workflow_fresh"])
+
+    def test_outer_proposer_progressively_discloses_shortlisted_elements(self):
+        from game_loop.cli import _build_llm_dynamic_gradient
+        from game_loop.config import HarnessEvolutionConfig
+
+        class FakeResponse:
+            def __init__(self, value):
+                self.value = value
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return json.dumps({
+                    "choices": [{"message": {"content": json.dumps(self.value)}}]
+                }).encode()
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config = write_config(root, candidates=1, level="L4", max_probe_calls=2)
+            harness_config = HarnessEvolutionConfig.from_dict({
+                "modules": [{
+                    "id": "outer_base",
+                    "instruction": "Inspect evidence before selecting a harness element.",
+                    "tags": ["context"],
+                }],
+                "seed_modules": ["outer_base"],
+                "max_active_modules": 1,
+                "max_active_tool_interfaces": 0,
+                "mutation_width": 1,
+                "replay_min_cases": 1,
+                "require_rubric_validation": False,
+                "enable_usage_driven_mutation": True,
+                "element_catalog": [
+                    {
+                        "id": "skill_alpha",
+                        "category": "skill",
+                        "description": "ALPHA_SECRET_DESCRIPTION",
+                        "spec": {"secret": "ALPHA_SECRET_SPEC"},
+                        "tags": ["universal"],
+                    },
+                    {
+                        "id": "tool_beta",
+                        "category": "tool",
+                        "description": "BETA_SECRET_DESCRIPTION",
+                        "spec": {"secret": "BETA_SECRET_SPEC"},
+                        "tags": ["universal"],
+                    },
+                    {
+                        "id": "workflow_hidden",
+                        "category": "workflow",
+                        "description": "HIDDEN_SECRET_DESCRIPTION",
+                        "spec": {"secret": "HIDDEN_SECRET_SPEC"},
+                        "tags": ["universal"],
+                    },
+                ],
+            })
+            outer_dir = root / "outer"
+            engine = HarnessEvolutionEngine(outer_dir, harness_config)
+            parent = engine.initialize()
+            requests = []
+            responses = iter([
+                FakeResponse({"element_ids": ["skill_alpha", "tool_beta"]}),
+                FakeResponse({
+                    "diagnosis": "use runtime evidence",
+                    "category": "tool",
+                    "element_id": "tool_beta",
+                }),
+            ])
+
+            def fake_urlopen(request, timeout):
+                requests.append(json.loads(request.data.decode()))
+                return next(responses)
+
+            with patch.dict(os.environ, {
+                "CODEX_API_BASE": "http://example.test/v1",
+                "CODEX_MODEL": "kimi-test",
+                "GAME_LOOP_HARNESS_PROPOSER_ATTEMPTS": "1",
+            }), patch("game_loop.cli.urllib.request.urlopen", side_effect=fake_urlopen):
+                gradient = _build_llm_dynamic_gradient(
+                    outer_dir=outer_dir,
+                    epoch=1,
+                    parent=parent,
+                    engine=engine,
+                    config=config,
+                )
+
+            self.assertEqual(len(requests), 2)
+            first_prompt = json.loads(requests[0]["messages"][1]["content"])
+            second_prompt = json.loads(requests[1]["messages"][1]["content"])
+            self.assertNotIn("ALPHA_SECRET_DESCRIPTION", json.dumps(first_prompt))
+            self.assertNotIn("ALPHA_SECRET_SPEC", json.dumps(first_prompt))
+            self.assertEqual(
+                [item["id"] for item in second_prompt["disclosed_catalog"]],
+                ["skill_alpha", "tool_beta"],
+            )
+            self.assertNotIn("HIDDEN_SECRET_DESCRIPTION", json.dumps(second_prompt))
+            self.assertNotIn("HIDDEN_SECRET_SPEC", json.dumps(second_prompt))
+            self.assertEqual(
+                requests[0]["chat_template_kwargs"], {"enable_thinking": False}
+            )
+            self.assertIn("element_id:tool_beta", gradient.target_tags)
+            record = json.loads((outer_dir / "harness_proposals" / "epoch_001.json").read_text())
+            self.assertEqual(record["disclosure_policy"], "progressive_index_then_details")
+            self.assertEqual(record["shortlist"], ["skill_alpha", "tool_beta"])
+            self.assertEqual(record["selected"]["element_id"], "tool_beta")
+
     def test_admission_case_archives_config_mismatched_resume_dir(self):
         from game_loop.cli import _run_harness_admission_case
 

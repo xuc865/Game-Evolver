@@ -1351,6 +1351,7 @@ def _build_llm_dynamic_gradient(
             "category": spec.category,
             "description": spec.description,
             "tags": list(spec.tags),
+            "spec": dict(spec.spec),
         })
     if not compatible:
         raise RuntimeError("no benchmark-compatible harness elements available")
@@ -1414,7 +1415,7 @@ def _build_llm_dynamic_gradient(
             "local mutation. The mutation must change harness behavior and respect the "
             "allowed catalog categories in the request. Output a single JSON object and no prose."
         )
-    prompt = {
+    common_prompt = {
         "role": "You improve the harness used by a game-making agent.",
         "benchmark": config.benchmark.adapter,
         "backbone": model,
@@ -1425,112 +1426,158 @@ def _build_llm_dynamic_gradient(
             "active_modules": list(parent.active_modules),
             "active_elements": sorted(active_ids),
         },
-        "compatible_catalog": compatible,
         "recent_epoch_results": recent_epochs,
         "recent_proposals": prior_proposals,
         "reusable_rejection_memory": memory_hint,
-        "task": task,
-        "schema": {
-            "diagnosis": "short evidence-grounded reason",
-            "category": "|".join(allowed_categories),
-            "element_id": "one id from compatible_catalog",
-        },
     }
     if restricted_ablation:
-        prompt["long_term_memory_enabled"] = engine.config.enable_long_term_memory
+        common_prompt["long_term_memory_enabled"] = engine.config.enable_long_term_memory
+    catalog_index = [
+        {
+            "id": item["id"],
+            "category": item["category"],
+            "tags": item["tags"],
+        }
+        for item in compatible
+    ]
     model_name = model.casefold()
     proposer_max_tokens = 256 if "qwen" in model_name else 1200
     proposer_timeout = int(os.environ.get("GAME_LOOP_HARNESS_PROPOSER_TIMEOUT_SECONDS", "120"))
     proposer_attempts = int(os.environ.get("GAME_LOOP_HARNESS_PROPOSER_ATTEMPTS", "4"))
-    payload_body: dict[str, Any] = {
-        "model": model,
-        "messages": [
-            {
-                "role": "system",
-                "content": system_content,
-            },
-            {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
-        ],
-        "temperature": 0.2,
-        "max_tokens": proposer_max_tokens,
-        "stream": False,
-    }
-    if "qwen" in model_name or "glm" in model_name:
-        # Qwen/GLM reasoning can consume the entire structured-output budget
-        # before emitting content.  This vLLM-compatible flag is verified by
-        # the production endpoints and keeps the proposer response auditable.
-        payload_body["chat_template_kwargs"] = {"enable_thinking": False}
-    payload = json.dumps(payload_body).encode("utf-8")
     proposal_dir = outer_dir / "harness_proposals"
     proposal_dir.mkdir(parents=True, exist_ok=True)
-    errors: list[str] = []
-    selected: dict[str, Any] | None = None
     proposal_path = proposal_dir / f"epoch_{epoch:03d}.json"
     record: dict[str, Any] = {
-        "schema_version": "llm-harness-proposal.v1",
+        "schema_version": "llm-harness-proposal.v2",
+        "disclosure_policy": "progressive_index_then_details",
         "epoch": epoch,
         "benchmark": config.benchmark.adapter,
         "model": model,
         "parent_harness_id": parent.harness_id,
-        "status": "requesting",
-        "attempt": 0,
+        "status": "shortlisting",
+        "catalog_size": len(catalog_index),
+        "catalog_index": catalog_index,
+        "shortlist": [],
+        "disclosed_elements": [],
+        "stage_attempts": {"shortlist": 0, "selection": 0},
+        "stage_errors": {"shortlist": [], "selection": []},
         "max_attempts": proposer_attempts,
         "max_tokens": proposer_max_tokens,
         "selected": None,
-        "errors": [],
         "created_at": utc_now(),
     }
     atomic_write_json(proposal_path, record)
-    for attempt in range(1, proposer_attempts + 1):
-        record.update(status="requesting", attempt=attempt, errors=list(errors))
-        atomic_write_json(proposal_path, record)
-        request = urllib.request.Request(
-            base_url + "/chat/completions",
-            data=payload,
-            method="POST",
-            headers={
-                "Authorization": f"Bearer {os.environ.get('CODEX_API_KEY') or 'EMPTY'}",
-                "Content-Type": "application/json",
-            },
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=proposer_timeout) as response:
-                value = json.loads(response.read().decode("utf-8"))
-            message = value["choices"][0]["message"]
-            content = message.get("content") or message.get("reasoning_content") or ""
-            candidate = _extract_model_json(str(content))
-            element_id = str(candidate.get("element_id", "")).strip()
-            category = str(candidate.get("category", "")).strip().casefold()
-            match = next(
-                (item for item in compatible if item["id"] == element_id),
-                None,
+
+    def request_stage(stage: str, prompt: dict[str, Any], max_tokens: int) -> dict[str, Any] | None:
+        errors = record["stage_errors"][stage]
+        for attempt in range(1, proposer_attempts + 1):
+            record["stage_attempts"][stage] = attempt
+            atomic_write_json(proposal_path, record)
+            payload_body: dict[str, Any] = {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system_content},
+                    {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
+                ],
+                "temperature": 0.2,
+                "max_tokens": max_tokens,
+                "stream": False,
+            }
+            if any(name in model_name for name in ("qwen", "glm", "kimi")):
+                payload_body["chat_template_kwargs"] = {"enable_thinking": False}
+            request = urllib.request.Request(
+                base_url + "/chat/completions",
+                data=json.dumps(payload_body).encode("utf-8"),
+                method="POST",
+                headers={
+                    "Authorization": f"Bearer {os.environ.get('CODEX_API_KEY') or 'EMPTY'}",
+                    "Content-Type": "application/json",
+                },
             )
-            if match is None or match["category"] != category:
-                raise ValueError("proposer selected an incompatible or category-mismatched element")
-            if element_id in active_ids:
-                raise ValueError("proposer selected an already-active element")
+            try:
+                with urllib.request.urlopen(request, timeout=proposer_timeout) as response:
+                    value = json.loads(response.read().decode("utf-8"))
+                message = value["choices"][0]["message"]
+                content = message.get("content") or message.get("reasoning_content") or ""
+                return _extract_model_json(str(content))
+            except (OSError, TimeoutError, KeyError, IndexError, json.JSONDecodeError, ValueError) as exc:
+                errors.append(f"attempt {attempt}: {type(exc).__name__}: {exc}")
+                atomic_write_json(proposal_path, record)
+                if attempt < proposer_attempts:
+                    time.sleep(min(8, attempt * 2))
+        return None
+
+    shortlist_prompt = dict(common_prompt)
+    shortlist_prompt.update({
+        "catalog_index": catalog_index,
+        "task": (
+            "Shortlist at most three catalog IDs for deeper inspection. Prefer category "
+            "diversity and avoid recent rejected proposals. No descriptions or implementation "
+            "specifications are available at this stage. Return JSON only."
+        ),
+        "schema": {"element_ids": ["one to three ids from catalog_index"]},
+    })
+    shortlist_value = request_stage("shortlist", shortlist_prompt, 256)
+    valid_ids = {item["id"] for item in compatible}
+    shortlist: list[str] = []
+    if shortlist_value is not None:
+        raw_ids = shortlist_value.get("element_ids", [])
+        if isinstance(raw_ids, list):
+            for value in raw_ids:
+                element_id = str(value).strip()
+                if element_id in valid_ids and element_id not in shortlist:
+                    shortlist.append(element_id)
+                if len(shortlist) == 3:
+                    break
+        if not shortlist:
+            record["stage_errors"]["shortlist"].append(
+                "response contained no compatible catalog IDs"
+            )
+    if not shortlist:
+        shortlist = _fallback_harness_shortlist(compatible, prior_proposals)
+        record["stage_errors"]["shortlist"].append("using deterministic diverse shortlist")
+    disclosed = [item for item in compatible if item["id"] in shortlist]
+    disclosed.sort(key=lambda item: shortlist.index(item["id"]))
+    record.update(status="selecting", shortlist=shortlist, disclosed_elements=disclosed)
+    atomic_write_json(proposal_path, record)
+
+    selection_prompt = dict(common_prompt)
+    selection_prompt.update({
+        "disclosed_catalog": disclosed,
+        "task": task,
+        "schema": {
+            "diagnosis": "short evidence-grounded reason",
+            "category": "|".join(allowed_categories),
+            "element_id": "exactly one id from disclosed_catalog",
+        },
+    })
+    selection_value = request_stage("selection", selection_prompt, proposer_max_tokens)
+    selected: dict[str, Any] | None = None
+    if selection_value is not None:
+        element_id = str(selection_value.get("element_id", "")).strip()
+        category = str(selection_value.get("category", "")).strip().casefold()
+        match = next((item for item in disclosed if item["id"] == element_id), None)
+        if match is not None and match["category"] == category:
             selected = {
-                "diagnosis": str(candidate.get("diagnosis", "")).strip()
+                "diagnosis": str(selection_value.get("diagnosis", "")).strip()
                 or f"activate {element_id}",
                 "category": category,
                 "element_id": element_id,
             }
-            record.update(status="completed", selected=selected, errors=list(errors))
-            atomic_write_json(proposal_path, record)
-            break
-        except (OSError, TimeoutError, KeyError, IndexError, json.JSONDecodeError, ValueError) as exc:
-            errors.append(f"attempt {attempt}: {type(exc).__name__}: {exc}")
-            record.update(status="retrying", errors=list(errors))
-            atomic_write_json(proposal_path, record)
-            if attempt < proposer_attempts:
-                time.sleep(min(8, attempt * 2))
+        else:
+            record["stage_errors"]["selection"].append(
+                "response selected an undisclosed or category-mismatched element"
+            )
     if selected is None:
-        selected = _fallback_harness_proposal(compatible, prior_proposals)
-        errors.append(
-            "using deterministic compatible-catalog fallback after structured proposer failure"
+        selected = _fallback_harness_proposal(disclosed, prior_proposals)
+        record["stage_errors"]["selection"].append(
+            "using deterministic fallback restricted to disclosed catalog"
         )
-        record.update(status="fallback_completed", selected=selected, errors=list(errors))
-        atomic_write_json(proposal_path, record)
+        status = "fallback_completed"
+    else:
+        status = "completed"
+    record.update(status=status, selected=selected)
+    atomic_write_json(proposal_path, record)
     tags = [selected["category"], "usage_driven", "element_add", f"element_id:{selected['element_id']}"]
     if benchmark_tag:
         tags.append(benchmark_tag)
