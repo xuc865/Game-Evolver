@@ -9,7 +9,10 @@ from pathlib import Path
 
 def main(argv: list[str] | None = None) -> int:
     generator = Path(__file__).resolve().parents[1] / "experiments" / "generate_all_configs.py"
-    completed = subprocess.run([sys.executable, str(generator)], check=False)
+    completed = subprocess.run(
+        [sys.executable, str(generator), "--ablation-only"],
+        check=False,
+    )
     return int(completed.returncode)
 
 

@@ -419,6 +419,7 @@ def mutate_category_elements(
     limits: dict[str, int],
     gradient_tags: tuple[str, ...],
     policy: dict[str, Any] | None = None,
+    allow_explicit_replacement: bool = False,
 ) -> ElementMutationResult | None:
     """Add/remove/merge/replace concrete elements inside one category."""
     from game_loop.core.harness import HarnessActiveElement
@@ -531,7 +532,7 @@ def mutate_category_elements(
             active=[*active, HarnessActiveElement.from_config(catalog[add_id])],
             operation="add",
         )
-    if add_id is not None and current:
+    if allow_explicit_replacement and add_id is not None and current:
         explicit_ids = {
             tag.split(":", 1)[1]
             for tag in gradient_tags

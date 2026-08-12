@@ -1249,6 +1249,45 @@ def _fallback_harness_proposal(
     }
 
 
+def _fallback_harness_shortlist(
+    compatible: list[dict[str, Any]],
+    prior_proposals: list[dict[str, Any]],
+    *,
+    limit: int = 3,
+) -> list[str]:
+    """Build a deterministic diverse shortlist when index selection is unavailable."""
+    recent_ids = {
+        str(item.get("element_id", "")).strip()
+        for item in prior_proposals[-6:]
+        if isinstance(item, dict)
+    }
+    ordered = sorted(
+        compatible,
+        key=lambda item: (
+            str(item.get("id", "")) in recent_ids,
+            str(item.get("category", "")),
+            str(item.get("id", "")),
+        ),
+    )
+    selected: list[str] = []
+    used_categories: set[str] = set()
+    for item in ordered:
+        category = str(item.get("category", ""))
+        if category in used_categories:
+            continue
+        selected.append(str(item["id"]))
+        used_categories.add(category)
+        if len(selected) >= limit:
+            return selected
+    for item in ordered:
+        element_id = str(item["id"])
+        if element_id not in selected:
+            selected.append(element_id)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
 def _build_llm_dynamic_gradient(
     *,
     outer_dir: Path,
@@ -1275,6 +1314,10 @@ def _build_llm_dynamic_gradient(
         "1", "true", "yes", "on",
     }
     active_ids = {item.element_id for item in parent.active_elements}
+    active_counts: dict[str, int] = {}
+    for item in parent.active_elements:
+        active_counts[item.category] = active_counts.get(item.category, 0) + 1
+    restricted_ablation = bool(engine.config.allowed_element_categories)
     prior_proposals: list[dict[str, Any]] = []
     existing_proposal_dir = outer_dir / "harness_proposals"
     if engine.config.enable_long_term_memory and existing_proposal_dir.is_dir():
@@ -1296,6 +1339,12 @@ def _build_llm_dynamic_gradient(
         if tags & incompatible:
             continue
         if spec.element_id in active_ids:
+            continue
+        if (
+            not restricted_ablation
+            and active_counts.get(spec.category, 0)
+            >= engine.config.max_active_elements.get(spec.category, 1)
+        ):
             continue
         compatible.append({
             "id": spec.element_id,
@@ -1322,6 +1371,49 @@ def _build_llm_dynamic_gradient(
         category in {"skill", "mcp", "tool", "workflow"}
         for category in allowed_categories
     )
+    task = (
+        "Choose exactly one concrete catalog element whose activation is most likely "
+        "to improve game quality on this benchmark. Avoid repeating a recently "
+        "rejected proposal unless new evidence justifies it. "
+        "Do not choose an element for another engine or any visual/image/video tool "
+        "when text_only is true. The selected element must be executable and behavior-changing: "
+        "it must alter the agent's edit/verify workflow, require observable runtime or gameplay "
+        "evidence, and name the concrete artifact/log/state evidence it will produce. Never select "
+        "a cosmetic rename, metadata-only change, duplicate description, or empty wrapper. "
+        "For gcbench specifically, require real demo input replay, gameplay state progression, "
+        "and verifier runtime logs before accepting a candidate. Return JSON only with diagnosis, "
+        "category, element_id."
+    )
+    system_content = (
+        "You are the harness-improvement agent. Make one cautious AgentX-style "
+        "local mutation. The mutation must change executable harness behavior and "
+        "must be verifiable through deep gameplay evidence, not only profile metadata. "
+        "Output a single JSON object and no prose."
+    )
+    if restricted_ablation:
+        task = (
+            "Choose exactly one concrete catalog element whose activation is most likely "
+            "to improve game quality on this benchmark. Avoid repeating a recently "
+            "rejected proposal unless new evidence justifies it. "
+            "Do not choose an element for another engine or any visual/image/video tool "
+            "when text_only is true. The selected element must be behavior-changing. "
+            + (
+                "It must alter the agent's edit/verify workflow, require observable runtime or gameplay "
+                "evidence, and name the concrete artifact/log/state evidence it will produce. "
+                if executable_mutation
+                else "It must improve textual context compilation or protocol instructions without "
+                "adding executable tools, probes, recovery, or validation behavior. "
+            )
+            + "Never select a cosmetic rename, metadata-only change, duplicate description, "
+            "or empty wrapper. For gcbench specifically, require real demo input replay, "
+            "gameplay state progression, and verifier runtime logs before accepting a candidate. "
+            "Return JSON only with diagnosis, category, element_id."
+        )
+        system_content = (
+            "You are the harness-improvement agent. Make one cautious AgentX-style "
+            "local mutation. The mutation must change harness behavior and respect the "
+            "allowed catalog categories in the request. Output a single JSON object and no prose."
+        )
     prompt = {
         "role": "You improve the harness used by a game-making agent.",
         "benchmark": config.benchmark.adapter,
@@ -1337,32 +1429,15 @@ def _build_llm_dynamic_gradient(
         "recent_epoch_results": recent_epochs,
         "recent_proposals": prior_proposals,
         "reusable_rejection_memory": memory_hint,
-        "long_term_memory_enabled": engine.config.enable_long_term_memory,
-        "task": (
-            "Choose exactly one concrete catalog element whose activation is most likely "
-            "to improve game quality on this benchmark. Avoid repeating a recently "
-            "rejected proposal unless new evidence justifies it. "
-            "Do not choose an element for another engine or any visual/image/video tool "
-            "when text_only is true. The selected element must be behavior-changing. "
-            + (
-                "It must alter the agent's edit/verify workflow, require observable runtime or gameplay "
-                "evidence, and name the concrete artifact/log/state evidence it will produce. "
-                if executable_mutation
-                else "It must improve textual context compilation or protocol instructions without "
-                "adding executable tools, probes, recovery, or validation behavior. "
-            )
-            + "Never select "
-            "a cosmetic rename, metadata-only change, duplicate description, or empty wrapper. "
-            "For gcbench specifically, require real demo input replay, gameplay state progression, "
-            "and verifier runtime logs before accepting a candidate. Return JSON only with diagnosis, "
-            "category, element_id."
-        ),
+        "task": task,
         "schema": {
             "diagnosis": "short evidence-grounded reason",
             "category": "|".join(allowed_categories),
             "element_id": "one id from compatible_catalog",
         },
     }
+    if restricted_ablation:
+        prompt["long_term_memory_enabled"] = engine.config.enable_long_term_memory
     model_name = model.casefold()
     proposer_max_tokens = 256 if "qwen" in model_name else 1200
     proposer_timeout = int(os.environ.get("GAME_LOOP_HARNESS_PROPOSER_TIMEOUT_SECONDS", "120"))
@@ -1372,12 +1447,7 @@ def _build_llm_dynamic_gradient(
         "messages": [
             {
                 "role": "system",
-                "content": (
-                    "You are the harness-improvement agent. Make one cautious AgentX-style "
-                    "local mutation. The mutation must change harness behavior and respect the "
-                    "allowed catalog categories in the request. "
-                    "Output a single JSON object and no prose."
-                ),
+                "content": system_content,
             },
             {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
         ],

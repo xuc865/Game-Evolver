@@ -501,6 +501,9 @@ class HarnessEvolutionEngine:
                 limits=self.config.max_active_elements,
                 gradient_tags=gradient.target_tags,
                 policy=self.config.element_mutation_policy,
+                allow_explicit_replacement=bool(
+                    self.config.allowed_element_categories
+                ),
             )
             if mutation is not None:
                 active_elements = mutation.active
