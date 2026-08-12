@@ -29,6 +29,7 @@ from game_loop.core.harness_rubric_validator import (
     HarnessRubricValidator,
     HeuristicRubricJudge,
     load_task_pool,
+    fixed_task_pool_cases,
     sample_task_pool,
 )
 from game_loop.core.harness_evolution_loop import (
@@ -139,6 +140,7 @@ def build_parser() -> argparse.ArgumentParser:
     self_evolve.add_argument("--task-source", type=Path, required=True)
     self_evolve.add_argument("--seed-artifact", type=Path, required=True)
     self_evolve.add_argument("--task-pool", type=Path)
+    self_evolve.add_argument("--fixed-admission-task-pool", type=Path)
     self_evolve.add_argument("--seed-score", type=float, default=0.0)
     self_evolve.add_argument("--evaluate-seed", action="store_true")
     self_evolve.add_argument("--run-id-prefix", default="e")
@@ -156,6 +158,7 @@ def build_parser() -> argparse.ArgumentParser:
     self_supervise.add_argument("--max-epochs", type=int, default=200)
     self_supervise.add_argument("--cases", type=int, default=3)
     self_supervise.add_argument("--task-pool", type=Path)
+    self_supervise.add_argument("--fixed-admission-task-pool", type=Path)
     self_supervise.add_argument("--skip-rubric-validation", action="store_true")
     self_supervise.add_argument("--heartbeat-seconds", type=int, default=30)
     self_supervise.add_argument(
@@ -368,8 +371,9 @@ def cmd_harness_self_evolve(args: argparse.Namespace) -> int:
         runs_root=outer_dir / "replays",
         project_root=Path(__file__).resolve().parents[1],
     )
+    fixed_pool_path = args.fixed_admission_task_pool
     task_pool = _task_pool_from_args(
-        task_pool_path=args.task_pool,
+        task_pool_path=fixed_pool_path or args.task_pool,
         task_source=args.task_source,
         seed_artifact=args.seed_artifact,
         seed_score=float(args.seed_score),
@@ -386,6 +390,7 @@ def cmd_harness_self_evolve(args: argparse.Namespace) -> int:
         epoch=args.epoch,
         num_cases=args.cases,
         run_id_prefix=args.run_id_prefix,
+        fixed_admission_cases=fixed_pool_path is not None,
         offline_rubric_judge=args.skip_rubric_validation,
         evaluate_seed=bool(args.evaluate_seed),
     )
@@ -403,6 +408,7 @@ def run_harness_self_evolution(
     epoch: int,
     num_cases: int,
     run_id_prefix: str,
+    fixed_admission_cases: bool = False,
     offline_rubric_judge: bool = False,
     evaluate_seed: bool = False,
     heartbeat: SupervisorHeartbeatWriter | None = None,
@@ -424,13 +430,20 @@ def run_harness_self_evolution(
         judge=HeuristicRubricJudge() if offline_rubric_judge else None,
     )
     sample_size = max(num_cases, engine.config.rubric_validation_sample_size)
-    sampled_cases = sample_task_pool(
-        task_pool,
-        sample_size=sample_size,
-        seed=epoch,
-        prefix=f"e{epoch:03d}",
-        anchor_index=epoch - 1,
-    )
+    if fixed_admission_cases:
+        sampled_cases = fixed_task_pool_cases(
+            task_pool,
+            sample_size=sample_size,
+            prefix=f"e{epoch:03d}",
+        )
+    else:
+        sampled_cases = sample_task_pool(
+            task_pool,
+            sample_size=sample_size,
+            seed=epoch,
+            prefix=f"e{epoch:03d}",
+            anchor_index=epoch - 1,
+        )
 
     # ── resume: reuse existing plan if available ──
     existing_plan = None
@@ -465,6 +478,12 @@ def run_harness_self_evolution(
             and existing_plan.get("candidate_harness_id")):
         candidate = engine.get(existing_plan["candidate_harness_id"])
         print(f"[resume] reusing candidate {candidate.harness_id} from existing plan")
+        existing_plan.update({
+            "num_cases": num_cases,
+            "admission_case_selection": "fixed" if fixed_admission_cases else "epoch_sampled",
+            "admission_tasks": [case.task_ref for case in sampled_cases],
+        })
+        atomic_write_json(existing_plan_path, existing_plan)
     else:
         candidate = engine.propose(
             parent_id=parent.harness_id,
@@ -479,6 +498,8 @@ def run_harness_self_evolution(
             "config_fingerprint": config.fingerprint,
             "gradient": gradient.to_dict(),
             "num_cases": num_cases,
+            "admission_case_selection": "fixed" if fixed_admission_cases else "epoch_sampled",
+            "admission_tasks": [case.task_ref for case in sampled_cases],
             "created_at": utc_now(),
         })
 
@@ -1787,8 +1808,9 @@ def cmd_harness_self_supervise(args: argparse.Namespace) -> int:
 
             epoch_completed = False
             try:
+                fixed_pool_path = args.fixed_admission_task_pool
                 task_pool = _task_pool_from_args(
-                    task_pool_path=args.task_pool,
+                    task_pool_path=fixed_pool_path or args.task_pool,
                     task_source=args.task_source,
                     seed_artifact=args.seed_artifact,
                     seed_score=float(args.seed_score),
@@ -1804,6 +1826,7 @@ def cmd_harness_self_supervise(args: argparse.Namespace) -> int:
                     epoch=current_epoch,
                     num_cases=args.cases,
                     run_id_prefix=args.run_id_prefix,
+                    fixed_admission_cases=fixed_pool_path is not None,
                     offline_rubric_judge=args.skip_rubric_validation,
                     evaluate_seed=bool(args.evaluate_seed),
                     heartbeat=heartbeat,

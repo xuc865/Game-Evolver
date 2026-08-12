@@ -17,6 +17,7 @@ from game_loop.core.harness_rubric_validator import (
     collect_deep_playtest_evidence,
     compare_rubric_pair,
     extract_json_object,
+    fixed_task_pool_cases,
     sample_task_pool,
     TaskPoolEntry,
     LLMRubricJudge,
@@ -709,6 +710,27 @@ class HarnessRubricValidatorTests(unittest.TestCase):
             for epoch in range(1, len(pool) + 1)
         ]
         self.assertEqual(anchors, [item.task_ref for item in pool])
+
+    def test_fixed_task_pool_cases_keep_the_same_order_across_epochs(self):
+        pool = tuple(TaskPoolEntry(f"t{index}", f"s{index}") for index in range(4))
+
+        first = fixed_task_pool_cases(pool, sample_size=3, prefix="e001")
+        later = fixed_task_pool_cases(pool, sample_size=3, prefix="e099")
+
+        self.assertEqual([case.task_ref for case in first], ["t0", "t1", "t2"])
+        self.assertEqual(
+            [case.task_ref for case in first],
+            [case.task_ref for case in later],
+        )
+        self.assertEqual([case.case_id for case in later], ["e099-01", "e099-02", "e099-03"])
+
+    def test_fixed_task_pool_cases_reject_too_small_pool(self):
+        with self.assertRaisesRegex(ValueError, "fixed task pool has 2 entries"):
+            fixed_task_pool_cases(
+                (TaskPoolEntry("t0", "s0"), TaskPoolEntry("t1", "s1")),
+                sample_size=3,
+                prefix="e001",
+            )
 
     @patch("game_loop.runtime.providers.BackboneProviderSpec.resolve")
     @patch("urllib.request.urlopen")

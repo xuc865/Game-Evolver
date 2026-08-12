@@ -183,6 +183,25 @@ def sample_task_pool(
     )
 
 
+def fixed_task_pool_cases(
+    pool: Sequence[TaskPoolEntry],
+    *,
+    sample_size: int,
+    prefix: str,
+) -> tuple[HarnessReplayCase, ...]:
+    """Select a stable admission suite in task-pool order."""
+    if sample_size < 1:
+        raise ValueError("sample_size must be >= 1")
+    if len(pool) < sample_size:
+        raise ValueError(
+            f"fixed task pool has {len(pool)} entries but {sample_size} are required"
+        )
+    return tuple(
+        entry.to_replay_case(f"{prefix}-{index + 1:02d}")
+        for index, entry in enumerate(pool[:sample_size])
+    )
+
+
 def resolve_episode_artifact(run_dir: Path) -> Path | None:
     run_dir = run_dir.resolve()
     state_path = run_dir / "state.json"

@@ -1,0 +1,26 @@
+[
+  {
+    "task_ref": "../../gcbench/tasks/platformer-ink-trail",
+    "seed_artifact_ref": "seed_artifacts/puzzle-sokoban-scaffold",
+    "seed_score": 0.0,
+    "metadata": {
+      "coverage": "action platforming, traversal physics, level and runtime feedback"
+    }
+  },
+  {
+    "task_ref": "../../gcbench/tasks/roguelike-breach-tactics",
+    "seed_artifact_ref": "seed_artifacts/puzzle-sokoban-scaffold",
+    "seed_score": 0.0,
+    "metadata": {
+      "coverage": "turn-based tactics, state transitions, combat and progression"
+    }
+  },
+  {
+    "task_ref": "../../gcbench/tasks/openworld-seasons-witch",
+    "seed_artifact_ref": "seed_artifacts/puzzle-sokoban-scaffold",
+    "seed_score": 0.0,
+    "metadata": {
+      "coverage": "open-world systems, seasonal interaction, quests, crafting and UI"
+    }
+  }
+]
