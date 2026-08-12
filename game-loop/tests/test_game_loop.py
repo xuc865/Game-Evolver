@@ -2035,10 +2035,10 @@ class GameLoopTests(unittest.TestCase):
 
         self.assertEqual(agent._build_extra_body(), {"reasoning_effort": "none"})
 
-    def test_qwen_and_glm_chat_agent_disable_hidden_thinking(self):
+    def test_qwen_glm_and_kimi_chat_agent_disable_hidden_thinking(self):
         from game_loop.chat_agent import LocalChatAgent
 
-        for model in ("Qwen3.6-27B", "GLM-5.2-W4AFP8-node6"):
+        for model in ("Qwen3.6-27B", "GLM-5.2-W4AFP8-node6", "Kimi-K2.7-Code"):
             with self.subTest(model=model):
                 agent = LocalChatAgent.__new__(LocalChatAgent)
                 agent.api_base = "http://example.test/v1"
@@ -2057,6 +2057,39 @@ class GameLoopTests(unittest.TestCase):
                 request = urlopen.call_args.args[0]
                 body = json.loads(request.data.decode("utf-8"))
                 self.assertEqual(body["chat_template_kwargs"], {"enable_thinking": False})
+
+    def test_kimi_retry_reduces_output_budget(self):
+        from game_loop.chat_agent import LocalChatAgent
+
+        agent = LocalChatAgent.__new__(LocalChatAgent)
+        agent.model = "Kimi-K2.7-Code"
+        payload = {"max_tokens": 8192}
+
+        agent._tighten_unstable_provider_payload(payload)
+
+        self.assertEqual(payload["max_tokens"], 4096)
+        agent._tighten_unstable_provider_payload(payload)
+        self.assertEqual(payload["max_tokens"], 2048)
+
+    def test_chat_agent_main_uses_distinct_exit_code_for_backbone_timeout(self):
+        from game_loop import chat_agent
+
+        with tempfile.TemporaryDirectory() as raw, patch.object(
+            chat_agent.LocalChatAgent,
+            "run",
+            side_effect=RuntimeError("API call exceeded total timeout of 300s"),
+        ), patch.object(
+            sys,
+            "argv",
+            ["chat_agent", "--instruction", "build it", "--workspace", raw],
+        ), patch.dict(
+            os.environ,
+            {"CODEX_API_BASE": "http://example.test/v1", "CODEX_MODEL": "test-model"},
+            clear=False,
+        ):
+            exit_code = chat_agent.main()
+
+        self.assertEqual(exit_code, 75)
 
     def test_qwen_timeout_switches_endpoint_and_restores_primary(self):
         from game_loop.chat_agent import LocalChatAgent

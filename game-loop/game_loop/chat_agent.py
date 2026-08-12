@@ -323,7 +323,7 @@ class LocalChatAgent:
             payload["tool_choice"] = "auto"
 
         model_name = self.model.casefold()
-        if "qwen" in model_name or "glm" in model_name:
+        if any(name in model_name for name in ("qwen", "glm", "kimi")):
             # These deployments otherwise spend the response budget in hidden
             # reasoning and frequently time out before returning tool calls.
             # The flag is supported by the production OpenAI-compatible
@@ -454,7 +454,7 @@ class LocalChatAgent:
         """Conservatively reduce retry size for flaky local provider deployments."""
 
         model_name = self.model.casefold()
-        if not any(name in model_name for name in ("qwen", "glm", "gpt-5.5")):
+        if not any(name in model_name for name in ("qwen", "glm", "kimi", "gpt-5.5")):
             return
         default_fallback = 2048 if "gpt-5.5" in model_name else 512
         fallback = self._env_int(
@@ -964,11 +964,17 @@ def main() -> int:
     args = parser.parse_args()
 
     agent = LocalChatAgent()
-    result = agent.run(
-        instruction=args.instruction,
-        workspace=args.workspace,
-        max_turns=args.max_turns,
-    )
+    try:
+        result = agent.run(
+            instruction=args.instruction,
+            workspace=args.workspace,
+            max_turns=args.max_turns,
+        )
+    except RuntimeError as exc:
+        if "timeout" in str(exc).casefold() or "timed out" in str(exc).casefold():
+            print(f"[chat_agent] backbone_api_timeout: {exc}", file=sys.stderr)
+            return 75
+        raise
     print(json.dumps({
         "turns": result["turns"],
         "tool_calls": result["tool_calls"],

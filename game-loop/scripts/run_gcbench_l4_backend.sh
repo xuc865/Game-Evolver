@@ -61,6 +61,18 @@ _run_agent() {
     --workspace "$CANDIDATE_WORKSPACE"
 }
 
+_resume_agent_after_timeout() {
+  local instruction
+  instruction="$(cat "$INSTRUCTION_FILE")"
+  instruction+=$'\n\n## Infrastructure recovery\nThe previous agent process was interrupted by a backbone API timeout. The workspace preserves all completed edits. Inspect the existing project first, continue from its current state, finish missing gameplay and demo traces, run the headless smoke test, and stop as soon as the deliverables are complete. Do not restart the implementation from scratch.'
+  GAME_LOOP_CHAT_MAX_OUTPUT_TOKENS="${GAME_LOOP_CHAT_RECOVERY_MAX_OUTPUT_TOKENS:-2048}" \
+  GAME_LOOP_CHAT_API_MAX_RETRIES="${GAME_LOOP_CHAT_RECOVERY_API_MAX_RETRIES:-4}" \
+  GAME_LOOP_CHAT_API_TOTAL_TIMEOUT_SECONDS="${GAME_LOOP_CHAT_RECOVERY_API_TOTAL_TIMEOUT_SECONDS:-300}" \
+    bash "$ROOT_DIR/scripts/run_chat_agent_direct.sh" \
+      --instruction "$instruction" \
+      --workspace "$CANDIDATE_WORKSPACE"
+}
+
 _setup_judge_env() {
   # shellcheck disable=SC1091
   source "$ROOT_DIR/scripts/gcbench_e2e/export_judge_env.sh"
@@ -104,13 +116,22 @@ agent_rc=0
 set +e
 _run_agent
 agent_rc=$?
+if [[ "$agent_rc" -eq 75 ]]; then
+  echo "[gcbench_l4_backend] backbone API timeout; resuming once in preserved workspace" >&2
+  _resume_agent_after_timeout
+  agent_rc=$?
+fi
 set -e
 if [[ "$agent_rc" -ne 0 ]]; then
   # A provider/tooling crash is infrastructure failure, not evidence that the
   # partially written game deserves a quality score.  Refuse to create an
   # evaluation manifest so the controller pauses/retries without admitting a
   # misleading zero.
-  echo "[gcbench_l4_backend] agent infrastructure failure rc=$agent_rc; refusing evaluation" >&2
+  if [[ "$agent_rc" -eq 75 ]]; then
+    echo "[gcbench_l4_backend] backbone_api_timeout after in-workspace recovery; refusing evaluation" >&2
+  else
+    echo "[gcbench_l4_backend] agent infrastructure failure rc=$agent_rc; refusing evaluation" >&2
+  fi
   exit 2
 fi
 
