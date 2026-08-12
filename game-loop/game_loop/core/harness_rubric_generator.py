@@ -30,6 +30,8 @@ _FORBIDDEN_RUBRIC_TERMS = frozenset({
     "tests/rubric",
 })
 
+_RUBRIC_POLICY_VERSION = "frozen-parent-game-quality-v2"
+
 
 @dataclass(frozen=True)
 class DynamicRubricSet:
@@ -293,6 +295,7 @@ def generate_dynamic_rubric_set(
         loop_role=loop_role,
     )
     payload = {
+        "rubric_policy_version": _RUBRIC_POLICY_VERSION,
         "task_ref": str(task_ref.resolve()),
         "benchmark_id": benchmark_id,
         "loop_role": loop_role,
@@ -314,7 +317,8 @@ def generate_dynamic_rubric_set(
         hard_rubrics=hard,
         soft_rubrics=soft,
         generation_notes=(
-            f"Generated for {loop_role} harness with focus {list(focus)} on task {task_ref.name}."
+            f"Policy {_RUBRIC_POLICY_VERSION}; generated before mutation from the parent "
+            f"{loop_role} harness for task {task_ref.name}."
         ),
         official_metric_isolation=isolation,
     )
