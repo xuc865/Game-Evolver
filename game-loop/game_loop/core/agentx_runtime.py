@@ -273,8 +273,16 @@ def build_agentx_nested_evolution(
 ) -> AgentXNestedEvolution:
     inner_engine = HarnessEvolutionEngine(run_dir / "inner", runtime.inner_harness)
     outer_engine = HarnessEvolutionEngine(run_dir / "outer", runtime.outer_harness)
-    inner_memory = HarnessEvolutionMemory(run_dir / "inner" / "harness_archive")
-    outer_memory = HarnessEvolutionMemory(run_dir / "outer" / "harness_archive")
+    inner_memory = (
+        HarnessEvolutionMemory(run_dir / "inner" / "harness_archive")
+        if runtime.inner_harness.enable_long_term_memory
+        else None
+    )
+    outer_memory = (
+        HarnessEvolutionMemory(run_dir / "outer" / "harness_archive")
+        if runtime.outer_harness.enable_long_term_memory
+        else None
+    )
     judge = HeuristicRubricJudge() if offline_rubric_judge else None
     oracle = HarnessLoopNestedReplayOracle(
         config=runtime.app_config,

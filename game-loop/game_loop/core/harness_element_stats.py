@@ -531,6 +531,33 @@ def mutate_category_elements(
             active=[*active, HarnessActiveElement.from_config(catalog[add_id])],
             operation="add",
         )
+    if add_id is not None and current:
+        explicit_ids = {
+            tag.split(":", 1)[1]
+            for tag in gradient_tags
+            if tag.casefold().startswith("element_id:") and ":" in tag
+        }
+        if add_id in explicit_ids:
+            replacement = HarnessActiveElement.from_config(catalog[add_id])
+            removal = min(
+                current,
+                key=lambda item: (
+                    stats.items.get(
+                        element_stat_key(category, item.element_id),
+                        ElementStat(item.element_id, category),
+                    ).accuracy,
+                    item.element_id,
+                ),
+            )
+            return ElementMutationResult(
+                active=[
+                    replacement
+                    if item.category == category and item.element_id == removal.element_id
+                    else item
+                    for item in active
+                ],
+                operation="replace",
+            )
 
     if len(current) < limit:
         seed_spec = next(

@@ -522,6 +522,15 @@ _KNOWN_NICHES = frozenset({
     "session_routing",
 })
 
+_HARNESS_ELEMENT_CATEGORIES = frozenset({
+    "skill",
+    "mcp",
+    "tool",
+    "context",
+    "protocol",
+    "workflow",
+})
+
 
 def _parse_allowed_niches(value: list) -> tuple[str, ...]:
     """Validate and normalise the allowed-niche list for ablation ladders."""
@@ -537,6 +546,23 @@ def _parse_allowed_niches(value: list) -> tuple[str, ...]:
         if name not in niches:
             niches.append(name)
     return tuple(niches)
+
+
+def _parse_allowed_element_categories(value: list) -> tuple[str, ...]:
+    """Validate mutation categories; an empty list preserves unrestricted behavior."""
+    if not isinstance(value, list):
+        raise ValueError("harness_evolution.allowed_element_categories must be a list")
+    categories: list[str] = []
+    for item in value:
+        name = str(item).strip().lower()
+        if name not in _HARNESS_ELEMENT_CATEGORIES:
+            raise ValueError(
+                f"unknown harness element category '{name}'; valid categories: "
+                f"{sorted(_HARNESS_ELEMENT_CATEGORIES)}"
+            )
+        if name not in categories:
+            categories.append(name)
+    return tuple(categories)
 
 
 @dataclass(frozen=True)
@@ -679,6 +705,10 @@ class HarnessEvolutionConfig:
     require_rubric_validation: bool = True
     dynamic_rubric_generation: bool = True
     enable_usage_driven_mutation: bool = True
+    enable_long_term_memory: bool = True
+    allowed_element_categories: tuple[str, ...] = ()
+    enable_tool_interface_mutation: bool = True
+    enable_executable_policy_mutation: bool = True
     element_catalog: tuple[HarnessElementConfig, ...] = ()
     seed_elements: dict[str, tuple[str, ...]] = field(default_factory=dict)
     max_active_elements: dict[str, int] = field(
@@ -769,6 +799,16 @@ class HarnessEvolutionConfig:
             dynamic_rubric_generation=bool(value.get("dynamic_rubric_generation", True)),
             enable_usage_driven_mutation=bool(
                 value.get("enable_usage_driven_mutation", loop_role == "inner")
+            ),
+            enable_long_term_memory=bool(value.get("enable_long_term_memory", True)),
+            allowed_element_categories=_parse_allowed_element_categories(
+                value.get("allowed_element_categories", [])
+            ),
+            enable_tool_interface_mutation=bool(
+                value.get("enable_tool_interface_mutation", True)
+            ),
+            enable_executable_policy_mutation=bool(
+                value.get("enable_executable_policy_mutation", True)
             ),
             element_catalog=element_catalog,
             seed_elements=seed_elements,

@@ -99,76 +99,116 @@
     "harness_evolution": {
       "modules": [
         {
-          "id": "context_compiler",
-          "instruction": "Compile context from task requirements, parent artifact state, and feedback signals.",
+          "id": "evidence_first",
+          "instruction": "Inspect executable evidence before choosing a patch.",
           "tags": [
-            "context"
+            "ImproveObjective",
+            "functional_visuals"
           ]
         },
         {
-          "id": "module_strategy",
-          "instruction": "Select and order modules based on task type and recent outcomes.",
+          "id": "gameplay_observability",
+          "instruction": "Collect runtime and visual observations before accepting a candidate.",
           "tags": [
-            "strategy"
+            "ImproveObjective",
+            "gameplay"
           ]
         },
         {
-          "id": "skill_governance",
-          "instruction": "Curate skill descriptions and manage skill loading priorities.",
+          "id": "mechanic_depth",
+          "instruction": "Prefer changes that deepen mechanics rather than cosmetic-only edits.",
           "tags": [
-            "skills"
+            "ImproveObjective",
+            "mechanics"
           ]
         },
         {
-          "id": "tool_interface",
-          "instruction": "Manage tool interface assembly and safety scoping.",
+          "id": "regression_first",
+          "instruction": "Re-run preserved behavior before finishing.",
           "tags": [
-            "tools"
+            "RepairConstraint",
+            "feasibility"
           ]
         },
         {
-          "id": "probe_governance",
-          "instruction": "Select and parameterise probes based on coverage and regression signals.",
+          "id": "engine_tooling_first",
+          "instruction": "Use engine tooling to inspect import/runtime state before patching.",
           "tags": [
-            "probes"
+            "engine_tooling",
+            "godot"
           ]
         },
         {
-          "id": "feedback_synthesis",
-          "instruction": "Synthesize structured feedback from evaluator outputs and probe observations.",
+          "id": "diversity_escape",
+          "instruction": "Avoid repeating a recently rejected change family.",
           "tags": [
-            "feedback"
+            "ExploreAlternative",
+            "exploration"
           ]
         },
         {
-          "id": "artifact_persistence",
-          "instruction": "Manage artifact snapshots, delivery contracts, and rollback points.",
+          "id": "minimal_coherent_patch",
+          "instruction": "Keep patches minimal and coherent with the existing project structure.",
           "tags": [
-            "persistence"
-          ]
-        },
-        {
-          "id": "session_routing",
-          "instruction": "Route sessions across heterogeneous agent frameworks and model backends.",
-          "tags": [
-            "routing"
+            "RepairConstraint",
+            "feasibility"
           ]
         }
       ],
-      "tool_interfaces": [],
-      "seed_modules": [
-        "context_compiler",
-        "module_strategy"
+      "tool_interfaces": [
+        {
+          "id": "godot_cli_runtime",
+          "kind": "engine_probe",
+          "description": "Run Godot import/runtime checks against the candidate workspace.",
+          "command": [
+            "python3",
+            "-m",
+            "game_loop.probe_tools",
+            "godot-playtest",
+            "--artifact",
+            "{artifact_dir}"
+          ],
+          "safety_scope": "candidate_workspace_only",
+          "tags": [
+            "engine_tooling",
+            "godot"
+          ]
+        },
+        {
+          "id": "godot_mcp_screenshot",
+          "kind": "mcp_server",
+          "description": "Capture engine/runtime screenshots through a bounded MCP wrapper.",
+          "command": [
+            "python3",
+            "-m",
+            "game_loop.probe_tools",
+            "godot-playtest",
+            "--artifact",
+            "{artifact_dir}",
+            "--frames",
+            "120"
+          ],
+          "safety_scope": "candidate_workspace_only",
+          "tags": [
+            "engine_tooling",
+            "visual"
+          ]
+        }
       ],
-      "max_active_modules": 2,
-      "max_active_tool_interfaces": 1,
+      "seed_modules": [
+        "evidence_first",
+        "regression_first",
+        "gameplay_observability"
+      ],
+      "max_active_modules": 5,
+      "max_active_tool_interfaces": 2,
       "mutation_width": 1,
-      "replay_min_cases": 2,
-      "rubric_validation_sample_size": 2,
-      "loop_role": "outer",
+      "replay_min_cases": 3,
+      "rubric_validation_sample_size": 3,
+      "loop_role": "inner",
       "require_rubric_validation": true,
       "dynamic_rubric_generation": true,
-      "enable_usage_driven_mutation": false,
+      "enable_usage_driven_mutation": true,
       "rubric_provider": "deepseek",
       "element_mutation_policy": {
         "removal_min_usage": 5,
@@ -176,16 +216,463 @@
         "removal_max_accuracy": 0.35,
         "merge_min_similarity": 0.55
       },
-      "allowed_niches": [
-        "context_compiler",
-        "module_strategy",
-        "skill_governance",
-        "tool_interface"
-      ]
+      "element_catalog": [
+        {
+          "id": "skill_runtime_smoke",
+          "category": "skill",
+          "description": "Run bounded runtime smoke on the candidate entrypoint.",
+          "spec": {
+            "mode": "runtime_smoke",
+            "timeout_seconds": 30
+          },
+          "tags": [
+            "runtime",
+            "smoke",
+            "universal"
+          ]
+        },
+        {
+          "id": "skill_regression_suite",
+          "category": "skill",
+          "description": "Run preserved regression probes before accepting edits.",
+          "spec": {
+            "mode": "regression_first"
+          },
+          "tags": [
+            "regression",
+            "repair",
+            "universal"
+          ]
+        },
+        {
+          "id": "skill_entrypoint_probe",
+          "category": "skill",
+          "description": "Discover and validate the primary game entrypoint.",
+          "spec": {
+            "mode": "entrypoint_probe"
+          },
+          "tags": [
+            "runtime",
+            "inspection",
+            "universal"
+          ]
+        },
+        {
+          "id": "skill_file_structure_audit",
+          "category": "skill",
+          "description": "Audit project layout for missing gameplay assets and scripts.",
+          "spec": {
+            "mode": "structure_audit"
+          },
+          "tags": [
+            "inspection",
+            "universal"
+          ]
+        },
+        {
+          "id": "skill_visual_snapshot",
+          "category": "skill",
+          "description": "Capture visual/runtime snapshots for gameplay evidence.",
+          "spec": {
+            "mode": "visual_snapshot",
+            "frames": 60
+          },
+          "tags": [
+            "visual",
+            "runtime",
+            "universal"
+          ]
+        },
+        {
+          "id": "skill_demo_replay_audit",
+          "category": "skill",
+          "description": "Audit demo replay artifacts for gameplay evidence.",
+          "spec": {
+            "probe": "gcbench-demo-evidence"
+          },
+          "tags": [
+            "demo",
+            "evidence",
+            "replay"
+          ]
+        },
+        {
+          "id": "skill_pygame_smoke_loop",
+          "category": "skill",
+          "description": "Execute pygame entrypoint for bounded smoke runtime.",
+          "spec": {
+            "probe": "pygame-runtime",
+            "run_seconds": 8
+          },
+          "tags": [
+            "pygame",
+            "runtime"
+          ]
+        },
+        {
+          "id": "skill_godot_headless_playtest",
+          "category": "skill",
+          "description": "Replay real gcbench input traces through the Godot game, inspect state progression and runtime logs, then use the evidence to drive edits.",
+          "spec": {
+            "probe": "official-gcbench-demo-replay",
+            "requires_input_events": true,
+            "requires_runtime_logs": true,
+            "min_traces": 1
+          },
+          "tags": [
+            "godot",
+            "runtime",
+            "interaction",
+            "state_transition",
+            "evidence"
+          ]
+        },
+        {
+          "id": "skill_web_build_verify",
+          "category": "skill",
+          "description": "Build web game bundle and verify dist artifacts.",
+          "spec": {
+            "probe": "verigame-build"
+          },
+          "tags": [
+            "web",
+            "build"
+          ]
+        },
+        {
+          "id": "mcp_runtime_screenshot",
+          "category": "mcp",
+          "description": "Capture bounded runtime screenshots through MCP wrapper.",
+          "spec": {
+            "interface": "runtime_screenshot",
+            "frames": 60
+          },
+          "tags": [
+            "visual",
+            "runtime",
+            "universal"
+          ]
+        },
+        {
+          "id": "mcp_file_tree_inspect",
+          "category": "mcp",
+          "description": "Inspect candidate file tree and highlight gameplay-relevant paths.",
+          "spec": {
+            "interface": "file_tree_inspect"
+          },
+          "tags": [
+            "inspection",
+            "universal"
+          ]
+        },
+        {
+          "id": "mcp_godot_screenshot",
+          "category": "mcp",
+          "description": "Capture bounded Godot runtime screenshots through MCP wrapper.",
+          "spec": {
+            "interface": "godot_mcp_screenshot",
+            "frames": 120
+          },
+          "tags": [
+            "godot",
+            "visual"
+          ]
+        },
+        {
+          "id": "mcp_godot_scene_tree",
+          "category": "mcp",
+          "description": "Inspect Godot scene tree and node state via MCP.",
+          "spec": {
+            "interface": "godot_scene_tree"
+          },
+          "tags": [
+            "godot",
+            "introspection"
+          ]
+        },
+        {
+          "id": "tool_artifact_inventory",
+          "category": "tool",
+          "description": "Inventory candidate files to detect missing gameplay assets.",
+          "spec": {
+            "command": "artifact_inventory"
+          },
+          "tags": [
+            "inspection",
+            "universal"
+          ]
+        },
+        {
+          "id": "tool_entrypoint_discover",
+          "category": "tool",
+          "description": "Locate runnable entry scripts or project manifests.",
+          "spec": {
+            "command": "entrypoint_discover"
+          },
+          "tags": [
+            "runtime",
+            "inspection",
+            "universal"
+          ]
+        },
+        {
+          "id": "tool_dependency_check",
+          "category": "tool",
+          "description": "Validate declared dependencies before gameplay edits.",
+          "spec": {
+            "command": "dependency_check"
+          },
+          "tags": [
+            "build",
+            "universal"
+          ]
+        },
+        {
+          "id": "tool_pygame_runtime_probe",
+          "category": "tool",
+          "description": "Invoke pygame runtime probe on candidate workspace.",
+          "spec": {
+            "command": "pygame-runtime"
+          },
+          "tags": [
+            "pygame",
+            "runtime"
+          ]
+        },
+        {
+          "id": "tool_godot_import_check",
+          "category": "tool",
+          "description": "Run Godot import validation before gameplay edits.",
+          "spec": {
+            "command": "godot-import"
+          },
+          "tags": [
+            "godot",
+            "build"
+          ]
+        },
+        {
+          "id": "ctx_task_spec_anchor",
+          "category": "context",
+          "description": "Keep public task spec anchor always in compiled context.",
+          "spec": {
+            "window": "task_spec",
+            "priority": 1.0
+          },
+          "tags": [
+            "context",
+            "universal"
+          ]
+        },
+        {
+          "id": "ctx_probe_digest",
+          "category": "context",
+          "description": "Summarize latest deep probe outputs for the next edit.",
+          "spec": {
+            "window": "probe_summaries",
+            "limit": 5
+          },
+          "tags": [
+            "context",
+            "runtime",
+            "universal"
+          ]
+        },
+        {
+          "id": "ctx_recent_failures",
+          "category": "context",
+          "description": "Include recent failed attempts with probe stderr excerpts.",
+          "spec": {
+            "window": "failures",
+            "limit": 3
+          },
+          "tags": [
+            "context",
+            "repair",
+            "universal"
+          ]
+        },
+        {
+          "id": "ctx_edit_history",
+          "category": "context",
+          "description": "Track recent patch summaries to avoid repeated dead ends.",
+          "spec": {
+            "window": "edit_history",
+            "limit": 4
+          },
+          "tags": [
+            "context",
+            "repair"
+          ]
+        },
+        {
+          "id": "ctx_engine_hints",
+          "category": "context",
+          "description": "Include engine-specific hints inferred from workspace layout.",
+          "spec": {
+            "window": "engine_hints",
+            "priority": 0.6
+          },
+          "tags": [
+            "context",
+            "runtime"
+          ]
+        },
+        {
+          "id": "proto_workspace_boundary",
+          "category": "protocol",
+          "description": "Forbid edits outside candidate workspace and public task files.",
+          "spec": {
+            "scope": "candidate_workspace_only"
+          },
+          "tags": [
+            "protocol",
+            "safety",
+            "universal"
+          ]
+        },
+        {
+          "id": "proto_edit_verify_handoff",
+          "category": "protocol",
+          "description": "Require explicit edit→verify handoff before candidate acceptance.",
+          "spec": {
+            "phases": [
+              "plan",
+              "edit",
+              "verify"
+            ]
+          },
+          "tags": [
+            "protocol",
+            "universal"
+          ]
+        },
+        {
+          "id": "proto_probe_before_accept",
+          "category": "protocol",
+          "description": "Block acceptance until at least one deep probe succeeds.",
+          "spec": {
+            "gate": "deep_probe_pass"
+          },
+          "tags": [
+            "protocol",
+            "runtime",
+            "universal"
+          ]
+        },
+        {
+          "id": "wf_probe_first",
+          "category": "workflow",
+          "description": "Run deep probes before proposing gameplay patches.",
+          "spec": {
+            "steps": [
+              "probe",
+              "diagnose",
+              "patch"
+            ]
+          },
+          "tags": [
+            "workflow",
+            "runtime",
+            "universal"
+          ]
+        },
+        {
+          "id": "wf_plan_patch_verify",
+          "category": "workflow",
+          "description": "Standard workflow: plan, patch, run deep probes, verify.",
+          "spec": {
+            "steps": [
+              "plan",
+              "patch",
+              "probe",
+              "verify"
+            ]
+          },
+          "tags": [
+            "workflow",
+            "universal"
+          ]
+        },
+        {
+          "id": "wf_checkpoint_rollback",
+          "category": "workflow",
+          "description": "Checkpoint artifact then rollback on hard regression.",
+          "spec": {
+            "steps": [
+              "checkpoint",
+              "patch",
+              "verify",
+              "rollback_on_fail"
+            ]
+          },
+          "tags": [
+            "workflow",
+            "recovery",
+            "universal"
+          ]
+        },
+        {
+          "id": "wf_diagnose_then_patch",
+          "category": "workflow",
+          "description": "Diagnose failures from evidence, then apply a minimal patch.",
+          "spec": {
+            "steps": [
+              "collect_evidence",
+              "diagnose",
+              "patch",
+              "verify"
+            ]
+          },
+          "tags": [
+            "workflow",
+            "repair",
+            "universal"
+          ]
+        }
+      ],
+      "seed_elements": {
+        "skill": [
+          "skill_runtime_smoke",
+          "skill_regression_suite",
+          "skill_demo_replay_audit"
+        ],
+        "mcp": [
+          "mcp_runtime_screenshot"
+        ],
+        "tool": [
+          "tool_artifact_inventory",
+          "tool_entrypoint_discover"
+        ],
+        "context": [
+          "ctx_task_spec_anchor",
+          "ctx_probe_digest",
+          "ctx_recent_failures"
+        ],
+        "protocol": [
+          "proto_workspace_boundary",
+          "proto_edit_verify_handoff"
+        ],
+        "workflow": [
+          "wf_probe_first",
+          "wf_plan_patch_verify"
+        ]
+      },
+      "allowed_element_categories": [
+        "skill",
+        "mcp",
+        "tool",
+        "context",
+        "protocol",
+        "workflow"
+      ],
+      "enable_long_term_memory": true,
+      "enable_tool_interface_mutation": true,
+      "enable_executable_policy_mutation": true
     }
   },
   "evolution": {
-    "max_generations": 3,
+    "max_generations": 1,
     "candidates_per_generation": 1,
     "max_model_calls": 3,
     "max_evaluator_queries": 3

@@ -1,4 +1,7 @@
-# 分层实现路线
+# 分层实现路线（旧控制器兼容说明）
+
+本页记录历史控制器层级，仅为旧配置和实现追溯保留，不再表示当前消融实验。
+新的 Harness 演化 L0-L3 消融定义见 [ablation-levels.md](ablation-levels.md)。
 
 Game Loop 按 L0→L4 递增实现。L0-L3 保留为观测与诊断层；新的主实验口径在 L4 聚焦
 Agent/engine Harness，不再把产物谱系继承作为被测方法。

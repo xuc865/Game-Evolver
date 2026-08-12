@@ -543,6 +543,10 @@ def _harness_evolution(
     require_rubric_validation: bool = True,
     element_catalog: list[dict[str, Any]] | None = None,
     seed_elements: dict[str, list[str]] | None = None,
+    enable_long_term_memory: bool | None = None,
+    allowed_element_categories: list[str] | None = None,
+    enable_tool_interface_mutation: bool | None = None,
+    enable_executable_policy_mutation: bool | None = None,
 ) -> dict[str, Any]:
     active_modules = max(1, len(seed_modules)) if max_active_modules is None else max_active_modules
     active_tools = (
@@ -584,6 +588,14 @@ def _harness_evolution(
         payload["seed_elements"] = deepcopy(seed_elements)
     if allowed_niches is not None:
         payload["allowed_niches"] = list(allowed_niches)
+    if allowed_element_categories is not None:
+        payload["allowed_element_categories"] = list(allowed_element_categories)
+    if enable_long_term_memory is not None:
+        payload["enable_long_term_memory"] = enable_long_term_memory
+    if enable_tool_interface_mutation is not None:
+        payload["enable_tool_interface_mutation"] = enable_tool_interface_mutation
+    if enable_executable_policy_mutation is not None:
+        payload["enable_executable_policy_mutation"] = enable_executable_policy_mutation
     return payload
 
 
@@ -638,22 +650,15 @@ def build_method_section(
     *,
     allowed_niches: list[str] | None = None,
     ablation: bool = False,
+    ablation_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     preset = BENCHMARK_PRESETS[bench]
-    if ablation:
-        modules = deepcopy(ABLATION_HARNESS_MODULES)
-        seed_modules = (
-            list(allowed_niches)[:2]
-            if allowed_niches
-            else ["context_compiler", "module_strategy"]
-        )
-        tool_interfaces: list[dict[str, Any]] = []
-    else:
-        modules = deepcopy(preset["harness_modules"])
-        seed_modules = list(preset["seed_modules"])
-        tool_interfaces = deepcopy(preset["tool_interfaces"])
-        if bench in {"gdbench", "gcbench"}:
-            tool_interfaces = deepcopy(GAME_TOOL_INTERFACES)
+    modules = deepcopy(preset["harness_modules"])
+    seed_modules = list(preset["seed_modules"])
+    tool_interfaces = deepcopy(preset["tool_interfaces"])
+    if bench in {"gdbench", "gcbench"}:
+        tool_interfaces = deepcopy(GAME_TOOL_INTERFACES)
+    profile = dict(ablation_profile or {})
 
     max_selected = int(preset["max_selected_probes"])
     harness_payload = _harness_evolution(
@@ -661,13 +666,19 @@ def build_method_section(
         tool_interfaces=tool_interfaces,
         seed_modules=seed_modules,
         allowed_niches=allowed_niches if ablation else None,
-        loop_role="outer" if ablation else "inner",
-        max_active_modules=2 if ablation else min(5, len(modules)),
-        max_active_tool_interfaces=1 if ablation else min(4, len(tool_interfaces) or 1),
-        replay_min_cases=2 if ablation else 3,
-        rubric_validation_sample_size=2 if ablation else 3,
-        element_catalog=None if ablation else deepcopy(INNER_ELEMENT_CATALOG),
-        seed_elements=None if ablation else deepcopy(DEFAULT_INNER_SEED_ELEMENTS),
+        loop_role="inner",
+        max_active_modules=min(5, len(modules)),
+        max_active_tool_interfaces=min(4, len(tool_interfaces) or 1),
+        replay_min_cases=3,
+        rubric_validation_sample_size=3,
+        element_catalog=deepcopy(INNER_ELEMENT_CATALOG),
+        seed_elements=deepcopy(DEFAULT_INNER_SEED_ELEMENTS),
+        enable_long_term_memory=profile.get("enable_long_term_memory"),
+        allowed_element_categories=profile.get("allowed_element_categories"),
+        enable_tool_interface_mutation=profile.get("enable_tool_interface_mutation"),
+        enable_executable_policy_mutation=profile.get(
+            "enable_executable_policy_mutation"
+        ),
     )
     return {
         "level": "L4",

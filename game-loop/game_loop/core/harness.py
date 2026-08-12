@@ -399,6 +399,10 @@ class HarnessEvolutionEngine:
         self.elements = {element.element_id: element for element in config.element_catalog}
         self._load_extended_element_catalog()
 
+    def category_is_mutable(self, category: str) -> bool:
+        allowed = self.config.allowed_element_categories
+        return not allowed or category.casefold() in allowed
+
     def initialize(self, initial_profile: HarnessProfile | None = None) -> HarnessProfile:
         self.profiles.mkdir(parents=True, exist_ok=True)
         profile = initial_profile or self._profile(
@@ -484,6 +488,7 @@ class HarnessEvolutionEngine:
         target_category = resolve_target_category(gradient.target_tags)
         if (
             target_category
+            and self.category_is_mutable(target_category)
             and self.config.element_catalog
             and self.config.enable_usage_driven_mutation
         ):
@@ -502,15 +507,24 @@ class HarnessEvolutionEngine:
                 for addition in mutation.catalog_additions:
                     self.register_element(addition)
                 stats.save(self.root / "element_stats.json")
-        elif self._targets_tool_interface(gradient):
+        elif (
+            self.config.enable_tool_interface_mutation
+            and self._targets_tool_interface(gradient)
+        ):
             active_tool_interfaces = self._mutate_tool_interfaces(
                 active_tool_interfaces, gradient
             )
         elif self._targets_context(gradient):
             context_compiler = self._mutate_context(context_compiler, gradient)
-        elif self._targets_recovery(gradient):
+        elif (
+            self.config.enable_executable_policy_mutation
+            and self._targets_recovery(gradient)
+        ):
             recovery_policy = self._mutate_recovery(recovery_policy, gradient)
-        elif self._targets_validation(gradient):
+        elif (
+            self.config.enable_executable_policy_mutation
+            and self._targets_validation(gradient)
+        ):
             validation_policy = self._mutate_validation(validation_policy, gradient)
         else:
             active = self._mutate_modules(active, gradient)
@@ -887,6 +901,10 @@ class HarnessEvolutionEngine:
 
         if not isinstance(spec, HarnessElementConfig):
             raise TypeError("register_element expects HarnessElementConfig")
+        if not self.category_is_mutable(spec.category):
+            raise ValueError(
+                f"harness element category {spec.category!r} is frozen by this ablation"
+            )
         if spec.element_id in self.elements:
             return
         self.elements[spec.element_id] = spec

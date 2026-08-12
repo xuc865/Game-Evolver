@@ -581,7 +581,7 @@ def run_harness_self_evolution(
         rubric_validation=rubric_validation,
     )
     engine.record_epoch(result)
-    if not result.accepted:
+    if not result.accepted and engine.config.enable_long_term_memory:
         memory.append(
             build_rejection_experience(
                 epoch=epoch,
@@ -1086,8 +1086,10 @@ def _build_dynamic_gradient(
     benchmark_id: str | None = None,
 ) -> HarnessSemanticGradient:
     """Build a semantic gradient for the current epoch based on historical evidence."""
-    memory = HarnessEvolutionMemory(outer_dir / "harness_archive")
-    memory_hint = memory.render_proposer_context(loop_role="outer")
+    memory_hint = ""
+    if harness_config is None or harness_config.enable_long_term_memory:
+        memory = HarnessEvolutionMemory(outer_dir / "harness_archive")
+        memory_hint = memory.render_proposer_context(loop_role="outer")
     element_categories = (
         "skill",
         "mcp",
@@ -1096,6 +1098,8 @@ def _build_dynamic_gradient(
         "protocol",
         "workflow",
     )
+    if harness_config is not None and harness_config.allowed_element_categories:
+        element_categories = tuple(harness_config.allowed_element_categories)
     use_element_evolution = bool(parent.active_elements) or (
         harness_config is not None
         and harness_config.element_catalog
@@ -1138,7 +1142,11 @@ def _build_dynamic_gradient(
         )
 
     epochs_data = read_json(epochs_path)
-    items = epochs_data.get("items", [])
+    items = (
+        epochs_data.get("items", [])
+        if harness_config is None or harness_config.enable_long_term_memory
+        else []
+    )
 
     # Default: rotate through niches
     all_niches = [
@@ -1267,18 +1275,17 @@ def _build_llm_dynamic_gradient(
         "1", "true", "yes", "on",
     }
     active_ids = {item.element_id for item in parent.active_elements}
-    active_counts: dict[str, int] = {}
-    for item in parent.active_elements:
-        active_counts[item.category] = active_counts.get(item.category, 0) + 1
     prior_proposals: list[dict[str, Any]] = []
     existing_proposal_dir = outer_dir / "harness_proposals"
-    if existing_proposal_dir.is_dir():
+    if engine.config.enable_long_term_memory and existing_proposal_dir.is_dir():
         for path in sorted(existing_proposal_dir.glob("epoch_*.json"))[-6:]:
             value = read_json(path)
             if isinstance(value.get("selected"), dict):
                 prior_proposals.append(dict(value["selected"]))
     compatible = []
     for spec in engine.elements.values():
+        if not engine.category_is_mutable(spec.category):
+            continue
         tags = {tag.casefold() for tag in spec.tags}
         searchable = " ".join(
             (spec.element_id, spec.description, *spec.tags)
@@ -1290,8 +1297,6 @@ def _build_llm_dynamic_gradient(
             continue
         if spec.element_id in active_ids:
             continue
-        if active_counts.get(spec.category, 0) >= engine.config.max_active_elements.get(spec.category, 1):
-            continue
         compatible.append({
             "id": spec.element_id,
             "category": spec.category,
@@ -1301,12 +1306,22 @@ def _build_llm_dynamic_gradient(
     if not compatible:
         raise RuntimeError("no benchmark-compatible harness elements available")
 
-    memory = HarnessEvolutionMemory(outer_dir / "harness_archive")
-    memory_hint = memory.render_proposer_context(loop_role=engine.config.loop_role)
+    memory_hint = ""
+    if engine.config.enable_long_term_memory:
+        memory = HarnessEvolutionMemory(outer_dir / "harness_archive")
+        memory_hint = memory.render_proposer_context(loop_role=engine.config.loop_role)
     epochs_path = outer_dir / "harness_archive" / "epochs.json"
     recent_epochs = []
-    if epochs_path.is_file():
+    if engine.config.enable_long_term_memory and epochs_path.is_file():
         recent_epochs = list(read_json(epochs_path).get("items", []))[-4:]
+    allowed_categories = (
+        list(engine.config.allowed_element_categories)
+        or ["skill", "mcp", "tool", "context", "protocol", "workflow"]
+    )
+    executable_mutation = any(
+        category in {"skill", "mcp", "tool", "workflow"}
+        for category in allowed_categories
+    )
     prompt = {
         "role": "You improve the harness used by a game-making agent.",
         "benchmark": config.benchmark.adapter,
@@ -1322,14 +1337,21 @@ def _build_llm_dynamic_gradient(
         "recent_epoch_results": recent_epochs,
         "recent_proposals": prior_proposals,
         "reusable_rejection_memory": memory_hint,
+        "long_term_memory_enabled": engine.config.enable_long_term_memory,
         "task": (
             "Choose exactly one concrete catalog element whose activation is most likely "
             "to improve game quality on this benchmark. Avoid repeating a recently "
             "rejected proposal unless new evidence justifies it. "
             "Do not choose an element for another engine or any visual/image/video tool "
-            "when text_only is true. The selected element must be executable and behavior-changing: "
-            "it must alter the agent's edit/verify workflow, require observable runtime or gameplay "
-            "evidence, and name the concrete artifact/log/state evidence it will produce. Never select "
+            "when text_only is true. The selected element must be behavior-changing. "
+            + (
+                "It must alter the agent's edit/verify workflow, require observable runtime or gameplay "
+                "evidence, and name the concrete artifact/log/state evidence it will produce. "
+                if executable_mutation
+                else "It must improve textual context compilation or protocol instructions without "
+                "adding executable tools, probes, recovery, or validation behavior. "
+            )
+            + "Never select "
             "a cosmetic rename, metadata-only change, duplicate description, or empty wrapper. "
             "For gcbench specifically, require real demo input replay, gameplay state progression, "
             "and verifier runtime logs before accepting a candidate. Return JSON only with diagnosis, "
@@ -1337,7 +1359,7 @@ def _build_llm_dynamic_gradient(
         ),
         "schema": {
             "diagnosis": "short evidence-grounded reason",
-            "category": "skill|mcp|tool|context|protocol|workflow",
+            "category": "|".join(allowed_categories),
             "element_id": "one id from compatible_catalog",
         },
     }
@@ -1352,8 +1374,8 @@ def _build_llm_dynamic_gradient(
                 "role": "system",
                 "content": (
                     "You are the harness-improvement agent. Make one cautious AgentX-style "
-                    "local mutation. The mutation must change executable harness behavior and "
-                    "must be verifiable through deep gameplay evidence, not only profile metadata. "
+                    "local mutation. The mutation must change harness behavior and respect the "
+                    "allowed catalog categories in the request. "
                     "Output a single JSON object and no prose."
                 ),
             },

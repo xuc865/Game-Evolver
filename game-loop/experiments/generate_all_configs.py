@@ -9,6 +9,7 @@ Outputs:
 from __future__ import annotations
 
 import json
+import argparse
 import sys
 from copy import deepcopy
 from pathlib import Path
@@ -45,8 +46,8 @@ MODELS = {
     },
 }
 
-EVOLUTION_3x1 = {
-    "max_generations": 3,
+EVOLUTION_1x1 = {
+    "max_generations": 1,
     "candidates_per_generation": 1,
     "max_model_calls": 3,
     "max_evaluator_queries": 3,
@@ -196,22 +197,46 @@ ALL_BENCHMARKS = [
 ]
 
 ABLATION_LADDER = {
-    "L0": {"arm": "L4_agent_no_harness_evolve", "niches": None},
-    "L1": {"arm": "L4_agent", "niches": ["context_compiler"]},
+    "L0": {
+        "arm": "L4_agent_no_harness_evolve",
+        "profile": {
+            "enable_long_term_memory": False,
+            "allowed_element_categories": ["context", "protocol"],
+            "enable_tool_interface_mutation": False,
+            "enable_executable_policy_mutation": False,
+        },
+    },
+    "L1": {
+        "arm": "L4_agent",
+        "profile": {
+            "enable_long_term_memory": False,
+            "allowed_element_categories": ["context", "protocol"],
+            "enable_tool_interface_mutation": False,
+            "enable_executable_policy_mutation": False,
+        },
+    },
     "L2": {
         "arm": "L4_agent",
-        "niches": ["context_compiler", "module_strategy", "skill_governance"],
+        "profile": {
+            "enable_long_term_memory": False,
+            "allowed_element_categories": [
+                "skill", "mcp", "tool", "context", "protocol", "workflow",
+            ],
+            "enable_tool_interface_mutation": True,
+            "enable_executable_policy_mutation": True,
+        },
     },
     "L3": {
         "arm": "L4_agent",
-        "niches": [
-            "context_compiler",
-            "module_strategy",
-            "skill_governance",
-            "tool_interface",
-        ],
+        "profile": {
+            "enable_long_term_memory": True,
+            "allowed_element_categories": [
+                "skill", "mcp", "tool", "context", "protocol", "workflow",
+            ],
+            "enable_tool_interface_mutation": True,
+            "enable_executable_policy_mutation": True,
+        },
     },
-    "L4": {"arm": "L4_agent", "niches": None},
 }
 
 
@@ -224,6 +249,7 @@ def make_config(
     allowed_niches: list[str] | None = None,
     ablation: bool = False,
     ablation_level: str | None = None,
+    ablation_profile: dict | None = None,
 ) -> dict:
     # Runtime secrets belong to the launcher environment.  Keeping a placeholder
     # here can mask a real value and used to make keyless internal providers look
@@ -254,6 +280,7 @@ def make_config(
         bench,
         allowed_niches=allowed_niches,
         ablation=ablation,
+        ablation_profile=ablation_profile,
     )
 
     config = {
@@ -268,7 +295,7 @@ def make_config(
             "env": env,
         },
         "method": method,
-        "evolution": evolution or deepcopy(EVOLUTION_3x1),
+        "evolution": evolution or deepcopy(EVOLUTION_1x1),
         "reliability": {"pause_on_infrastructure_failure": True},
         "gates": {"max_files": 5000, "max_total_bytes": 1073741824},
         "experiment": {"arm": arm},
@@ -308,60 +335,66 @@ def validate_configs(paths: list[Path]) -> int:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--ablation-only",
+        action="store_true",
+        help="regenerate and validate only the current L0-L3 ablation configs",
+    )
+    args = parser.parse_args()
     written: list[Path] = []
     model_keys = ["kimi", "qwen3.6-27b", "glm5.2", "deepseek_v4", "claude", "gpt55"]
 
-    for mk in model_keys:
-        write_json(V4_DIR / f"gcbench-L4_{mk}.json", make_config("gcbench", model_key=mk))
-        written.append(V4_DIR / f"gcbench-L4_{mk}.json")
-
-    write_json(
-        V4_DIR / "gcbench-L4_agent_no_harness_evolve.json",
-        make_config("gcbench", model_key="kimi", arm="L4_agent_no_harness_evolve"),
-    )
-    write_json(V4_DIR / "gcbench-L4_agent.json", make_config("gcbench", model_key="kimi", arm="L4_agent"))
-    write_json(V4_DIR / "gcbench-L4_champion.json", make_config("gcbench", model_key="kimi", arm="L4_agent"))
-    write_json(
-        V4_DIR / "gcbench-L4_retry3.json",
-        {
-            **make_config("gcbench", model_key="kimi", evolution=EVOLUTION_1x3),
-            "method": {"level": "L0"},
-            "experiment": {"arm": "retry3"},
-        },
-    )
-    written.extend(
-        path
-        for path in V4_DIR.glob("gcbench-L4_*.json")
-        if path not in written
-    )
-
-    for mk in model_keys:
-        write_json(V4_DIR / f"gdbench-L4_{mk}.json", make_config("gdbench", model_key=mk))
-        written.append(V4_DIR / f"gdbench-L4_{mk}.json")
-
-    for bench in ["swebench", "nl2repo", "terminalbench", "weavebench", "taubench"]:
+    if not args.ablation_only:
         for mk in model_keys:
-            path = V4_DIR / f"{bench}-L4_{mk}.json"
-            write_json(path, make_config(bench, model_key=mk))
-            written.append(path)
+            write_json(V4_DIR / f"gcbench-L4_{mk}.json", make_config("gcbench", model_key=mk))
+            written.append(V4_DIR / f"gcbench-L4_{mk}.json")
 
-    for bench in ["verigame", "vgamegym"]:
-        for mk in model_keys:
-            path = V4_DIR / f"{bench}-L4_{mk}.json"
-            write_json(path, make_config(bench, model_key=mk))
-            written.append(path)
-        path = V4_DIR / f"{bench}-L4_agent_no_harness_evolve.json"
         write_json(
-            path,
-            make_config(bench, model_key="kimi", arm="L4_agent_no_harness_evolve"),
+            V4_DIR / "gcbench-L4_agent_no_harness_evolve.json",
+            make_config("gcbench", model_key="kimi", arm="L4_agent_no_harness_evolve"),
         )
-        written.append(path)
+        written.append(V4_DIR / "gcbench-L4_agent_no_harness_evolve.json")
+        write_json(V4_DIR / "gcbench-L4_agent.json", make_config("gcbench", model_key="kimi", arm="L4_agent"))
+        written.append(V4_DIR / "gcbench-L4_agent.json")
+        write_json(V4_DIR / "gcbench-L4_champion.json", make_config("gcbench", model_key="kimi", arm="L4_agent"))
+        written.append(V4_DIR / "gcbench-L4_champion.json")
+        write_json(
+            V4_DIR / "gcbench-L4_retry3.json",
+            {
+                **make_config("gcbench", model_key="kimi", evolution=EVOLUTION_1x3),
+                "method": {"level": "L0"},
+                "experiment": {"arm": "retry3"},
+            },
+        )
+        written.append(V4_DIR / "gcbench-L4_retry3.json")
 
-    written = sorted(set(written))
+        for mk in model_keys:
+            write_json(V4_DIR / f"gdbench-L4_{mk}.json", make_config("gdbench", model_key=mk))
+            written.append(V4_DIR / f"gdbench-L4_{mk}.json")
+
+        for bench in ["swebench", "nl2repo", "terminalbench", "weavebench", "taubench"]:
+            for mk in model_keys:
+                path = V4_DIR / f"{bench}-L4_{mk}.json"
+                write_json(path, make_config(bench, model_key=mk))
+                written.append(path)
+
+        for bench in ["verigame", "vgamegym"]:
+            for mk in model_keys:
+                path = V4_DIR / f"{bench}-L4_{mk}.json"
+                write_json(path, make_config(bench, model_key=mk))
+                written.append(path)
+            path = V4_DIR / f"{bench}-L4_agent_no_harness_evolve.json"
+            write_json(
+                path,
+                make_config(bench, model_key="kimi", arm="L4_agent_no_harness_evolve"),
+            )
+            written.append(path)
+
+        written = sorted(set(written))
 
     for bench in ALL_BENCHMARKS:
         for level, cfg_spec in ABLATION_LADDER.items():
-            niches = cfg_spec["niches"]
             path = ABL_DIR / f"{bench}-{level}_ablation_kimi.json"
             write_json(
                 path,
@@ -369,11 +402,20 @@ def main() -> None:
                     bench,
                     model_key="kimi",
                     arm=cfg_spec["arm"],
-                    allowed_niches=niches,
                     ablation=True,
                     ablation_level=level,
+                    ablation_profile=cfg_spec["profile"],
                 ),
             )
+
+    expected_ablation_files = {
+        ABL_DIR / f"{bench}-{level}_ablation_kimi.json"
+        for bench in ALL_BENCHMARKS
+        for level in ABLATION_LADDER
+    }
+    for stale in ABL_DIR.glob("*_ablation_kimi.json"):
+        if stale not in expected_ablation_files:
+            stale.unlink()
 
     abl_files = sorted(ABL_DIR.glob("*.json"))
     v4_files = sorted(V4_DIR.glob("*.json"))
@@ -381,7 +423,8 @@ def main() -> None:
     print(f"configs-ablation: {len(abl_files)} files")
     print(f"total: {len(v4_files) + len(abl_files)} files")
 
-    errors = validate_configs(v4_files + abl_files)
+    validation_paths = abl_files if args.ablation_only else written + abl_files
+    errors = validate_configs(validation_paths)
     print(f"validation errors: {errors}")
     if errors:
         raise SystemExit(1)

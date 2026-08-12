@@ -205,7 +205,11 @@ class AgentXNestedEvolution:
             rubric_validation=inner_rubric.to_dict(),
         )
         self.inner_engine.record_epoch(inner_result)
-        if not inner_result.accepted and self.inner_memory is not None:
+        if (
+            not inner_result.accepted
+            and self.inner_memory is not None
+            and self.inner_engine.config.enable_long_term_memory
+        ):
             self.inner_memory.append(
                 build_rejection_experience(
                     epoch=epoch,
