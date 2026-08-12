@@ -2058,6 +2058,45 @@ class GameLoopTests(unittest.TestCase):
                 body = json.loads(request.data.decode("utf-8"))
                 self.assertEqual(body["chat_template_kwargs"], {"enable_thinking": False})
 
+    def test_qwen_timeout_switches_endpoint_and_restores_primary(self):
+        from game_loop.chat_agent import LocalChatAgent
+
+        agent = LocalChatAgent.__new__(LocalChatAgent)
+        agent.provider = "qwen"
+        agent.api_base = "http://primary.test/v1"
+        agent.model = "Qwen3.6-27B"
+        agent.api_key = "primary-key"
+        agent.api_keys = ["primary-key"]
+        agent._api_key_index = 0
+        calls = []
+
+        def fake_call(messages, tools=None):
+            calls.append((agent.api_base, agent.model, agent.api_key))
+            if len(calls) == 1:
+                raise RuntimeError("API call exceeded total timeout of 300s")
+            return {"choices": []}
+
+        agent._call_api_primary = fake_call
+        environment = {
+            "GAME_LOOP_QWEN_FALLBACK_API_BASE": "https://openrouter.ai/api/v1",
+            "GAME_LOOP_QWEN_FALLBACK_MODEL": "qwen/qwen3.6-27b",
+            "GAME_LOOP_QWEN_FALLBACK_API_KEY_ENV": "OPENROUTER_API_KEY",
+            "OPENROUTER_API_KEY": "fallback-key",
+        }
+        with patch.dict(os.environ, environment, clear=False):
+            result = agent._call_api([{"role": "user", "content": "hello"}])
+
+        self.assertEqual(result, {"choices": []})
+        self.assertEqual(
+            calls,
+            [
+                ("http://primary.test/v1", "Qwen3.6-27B", "primary-key"),
+                ("https://openrouter.ai/api/v1", "qwen/qwen3.6-27b", "fallback-key"),
+            ],
+        )
+        self.assertEqual(agent.api_base, "http://primary.test/v1")
+        self.assertEqual(agent.model, "Qwen3.6-27B")
+
     def test_chat_agent_retry_budget_and_timeout_are_runtime_configurable(self):
         import urllib.error
         from game_loop.chat_agent import LocalChatAgent
@@ -2170,6 +2209,23 @@ class GameLoopTests(unittest.TestCase):
             provider_key_start_index("gpt55", keys, environment=environment),
             2,
         )
+
+    def test_chat_agent_uses_backbone_provider_and_deepseek_key(self):
+        from game_loop.chat_agent import LocalChatAgent
+
+        environment = {
+            "CODEX_API_BASE": "https://api.deepseek.com/v1",
+            "CODEX_MODEL": "deepseek-v4-flash",
+            "GAME_LOOP_BACKBONE_PROVIDER": "deepseek",
+            "DEEPSEEK_API_KEY": "deepseek-key",
+            "OPENAI_API_KEY": "wrong-gpt-key",
+        }
+        with patch.dict(os.environ, environment, clear=True):
+            agent = LocalChatAgent()
+
+        self.assertEqual(agent.provider, "deepseek")
+        self.assertEqual(agent.api_key, "deepseek-key")
+        self.assertEqual(agent.api_keys[0], "deepseek-key")
 
     def test_chat_agent_has_a_total_timeout_across_retries(self):
         import socket

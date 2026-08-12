@@ -78,7 +78,10 @@ class LocalChatAgent:
     def __init__(self) -> None:
         self.api_base = os.environ.get("CODEX_API_BASE", "").rstrip("/")
         self.model = os.environ.get("CODEX_MODEL", "")
-        self.provider = os.environ.get("CODEX_PROVIDER", "").strip().casefold()
+        self.provider = os.environ.get(
+            "CODEX_PROVIDER",
+            os.environ.get("GAME_LOOP_BACKBONE_PROVIDER", ""),
+        ).strip().casefold()
         self.api_key = self._resolve_api_key(self.provider)
         self.api_keys = self._resolve_api_keys(self.provider, self.api_key)
         self._api_key_index = provider_key_start_index(self.provider, self.api_keys)
@@ -148,6 +151,12 @@ class LocalChatAgent:
 
     @staticmethod
     def _resolve_api_key(provider: str) -> str:
+        if provider in {"deepseek", "deepseek_v4"}:
+            return (
+                os.environ.get("DEEPSEEK_API_KEY", "")
+                or os.environ.get("CODEX_API_KEY", "")
+                or os.environ.get("OPENAI_API_KEY", "")
+            )
         if provider == "claude":
             return (
                 os.environ.get("CODEX_API_KEY_CLAUDE", "")
@@ -254,6 +263,49 @@ class LocalChatAgent:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
+        """Call the primary endpoint, then retry Qwen timeouts via fallback."""
+        try:
+            return self._call_api_primary(messages, tools)
+        except RuntimeError as exc:
+            if "timeout" not in str(exc).casefold():
+                raise
+            fallback = self._qwen_timeout_fallback()
+            if fallback is None:
+                raise
+            base_url, model, api_key = fallback
+            print(
+                f"[chat_agent] primary Qwen call timed out; switching to fallback {base_url} {model}",
+                file=sys.stderr,
+            )
+            original = (self.api_base, self.model, self.api_key, self.api_keys)
+            try:
+                self.api_base = base_url.rstrip("/")
+                self.model = model
+                self.api_key = api_key
+                self.api_keys = [api_key]
+                self._api_key_index = 0
+                return self._call_api_primary(messages, tools)
+            finally:
+                self.api_base, self.model, self.api_key, self.api_keys = original
+
+    def _qwen_timeout_fallback(self) -> tuple[str, str, str] | None:
+        if self.provider != "qwen":
+            return None
+        base_url = os.environ.get("GAME_LOOP_QWEN_FALLBACK_API_BASE", "").strip()
+        model = os.environ.get("GAME_LOOP_QWEN_FALLBACK_MODEL", "").strip()
+        key_env = os.environ.get(
+            "GAME_LOOP_QWEN_FALLBACK_API_KEY_ENV", "OPENROUTER_API_KEY"
+        ).strip()
+        api_key = os.environ.get(key_env, "").strip()
+        if not all((base_url, model, api_key)):
+            return None
+        return base_url, model, api_key
+
+    def _call_api_primary(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         """Make a single /v1/chat/completions API call."""
         url = f"{self.api_base}/chat/completions"
         api_messages = self._bounded_messages_for_api(messages)
@@ -277,6 +329,8 @@ class LocalChatAgent:
             # The flag is supported by the production OpenAI-compatible
             # endpoints used for Qwen3.6 and GLM-5.2.
             payload["chat_template_kwargs"] = {"enable_thinking": False}
+            if "openrouter.ai" in self.api_base.casefold():
+                payload["reasoning"] = {"enabled": False}
 
         extra = self._build_extra_body()
         if extra:

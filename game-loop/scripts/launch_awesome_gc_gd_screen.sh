@@ -34,6 +34,8 @@ queues=(
   "kimi_gdbench_awesome:awesome-kimi-gd"
   "qwen3.6-27b_gcbench_awesome:awesome-qwen-gc"
   "qwen3.6-27b_gdbench_awesome:awesome-qwen-gd"
+  "deepseek_v4_gcbench_awesome:awesome-deepseek-gc"
+  "deepseek_v4_gdbench_awesome:awesome-deepseek-gd"
   "claude_gcbench_awesome:awesome-claude-gc"
   "claude_gdbench_awesome:awesome-claude-gd"
   "gpt55_gcbench_awesome:awesome-gpt55-gc"
@@ -65,7 +67,7 @@ launch_one() {
   fi
 
   log="$LOG_DIR/${session}.log"
-  if [[ "$queue" == claude_* || "$queue" == gpt55_* ]]; then
+  if [[ "$queue" == deepseek_* || "$queue" == claude_* || "$queue" == gpt55_* || "$queue" == qwen3.6-27b_* ]]; then
     if [[ ! -f "$LOCAL_ENV" ]]; then
       printf 'missing local credential file: %s\n' "$LOCAL_ENV" >&2
       return 1

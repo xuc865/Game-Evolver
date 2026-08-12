@@ -7,7 +7,13 @@ import argparse
 import time
 from pathlib import Path
 
-from run_verigame_public_awesome import PROVIDERS, append_progress_notice, read_json, write_json
+from run_verigame_public_awesome import (
+    PROVIDERS,
+    append_progress_notice,
+    prune_rebuildable_dependencies,
+    read_json,
+    write_json,
+)
 
 
 def case_key(item: dict) -> str:
@@ -48,6 +54,7 @@ def main() -> int:
                     attempted_count=attempted,
                     completed_count=completed,
                 )
+                prune_rebuildable_dependencies(Path(str(item.get("attempt_root", ""))))
                 seen.add(key)
                 changed = True
         if changed:

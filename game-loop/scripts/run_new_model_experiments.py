@@ -125,35 +125,52 @@ def historical_run_dir(prefix: str, bench: str, run_id: str) -> Path | None:
 @contextmanager
 def model_queue_lock(model: str):
     lock_dir = RUNS / "provider-queue-locks" / model
+    queue_dir = RUNS / "provider-queue-waiters" / model
     lock_dir.parent.mkdir(parents=True, exist_ok=True)
-    while True:
-        try:
-            lock_dir.mkdir()
-            (lock_dir / "owner.json").write_text(
-                json.dumps({"pid": os.getpid(), "created_at": time.time()}) + "\n",
-                encoding="utf-8",
-            )
-            break
-        except FileExistsError:
-            owner = rj(lock_dir / "owner.json")
-            pid = int(owner.get("pid", 0) or 0)
-            alive = False
-            if pid > 0:
+    queue_dir.mkdir(parents=True, exist_ok=True)
+    waiter = queue_dir / f"{time.time_ns():020d}-{os.getpid():010d}.json"
+    waiter.write_text(
+        json.dumps({"pid": os.getpid(), "created_at": time.time()}) + "\n",
+        encoding="utf-8",
+    )
+    acquired = False
+    try:
+        while True:
+            for candidate in queue_dir.glob("*.json"):
+                pid = int(rj(candidate).get("pid", 0) or 0)
                 try:
                     os.kill(pid, 0)
-                    alive = True
                 except OSError:
-                    pass
-            if not alive:
-                import shutil
-                shutil.rmtree(lock_dir, ignore_errors=True)
-                continue
-            time.sleep(15)
-    try:
+                    candidate.unlink(missing_ok=True)
+            waiters = sorted(queue_dir.glob("*.json"), key=lambda path: path.name)
+            if waiters and waiters[0] == waiter:
+                try:
+                    lock_dir.mkdir()
+                    (lock_dir / "owner.json").write_text(
+                        json.dumps({"pid": os.getpid(), "created_at": time.time()}) + "\n",
+                        encoding="utf-8",
+                    )
+                    acquired = True
+                    waiter.unlink(missing_ok=True)
+                    break
+                except FileExistsError:
+                    owner = rj(lock_dir / "owner.json")
+                    pid = int(owner.get("pid", 0) or 0)
+                    try:
+                        os.kill(pid, 0)
+                    except OSError:
+                        import shutil
+                        shutil.rmtree(lock_dir, ignore_errors=True)
+                        continue
+            time.sleep(0.5)
         yield
     finally:
-        import shutil
-        shutil.rmtree(lock_dir, ignore_errors=True)
+        waiter.unlink(missing_ok=True)
+        if acquired:
+            owner = rj(lock_dir / "owner.json")
+            if int(owner.get("pid", 0) or 0) == os.getpid():
+                import shutil
+                shutil.rmtree(lock_dir, ignore_errors=True)
 
 
 def _case_is_solidly_done(case: dict) -> bool:
@@ -214,7 +231,11 @@ def _recover_paused_gdbench_state(run_dir: Path, state: dict) -> dict | None:
 
 
 def _select_resume_run_dir(
-    prefix: str, bench: str, run_id: str, out_dir: Path
+    prefix: str,
+    bench: str,
+    run_id: str,
+    out_dir: Path,
+    config_fingerprint: str | None = None,
 ) -> tuple[Path, dict | None]:
     historical = historical_run_dir(prefix, bench, run_id)
     if historical is None:
@@ -225,9 +246,22 @@ def _select_resume_run_dir(
         if bench == "gdbench"
         else None
     )
-    if bench == "gdbench" and state.get("status") == "paused_infrastructure":
+    manifest_fingerprint = str(
+        rj(historical / "manifest.json").get("config_fingerprint") or ""
+    )
+    if (
+        recovered is None
+        and state.get("status") != "completed"
+        and config_fingerprint
+        and manifest_fingerprint != config_fingerprint
+    ):
+        # A nonterminal run cannot be resumed under changed experimental
+        # semantics. Keep the old directory as evidence and initialize a new
+        # comparable run in the current root.
+        return out_dir / run_id, None
+    if state.get("status") == "paused_infrastructure":
         # A retained normal evaluator result can be normalized without another
-        # model call. A genuinely incomplete infrastructure episode is
+        # model call. Any genuinely incomplete infrastructure episode is
         # immutable evidence, so retry it in this run root instead of calling
         # evolve on a state that intentionally returns unchanged forever.
         return (historical, recovered) if recovered is not None else (out_dir / run_id, None)
@@ -372,6 +406,9 @@ def run_queue(model: str, bench: str, *, awesome_skills: bool = False) -> None:
         json.dumps(config_value, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
+    from game_loop.config import AppConfig
+
+    config_fingerprint = AppConfig.load(effective_cfg).fingerprint
 
     tasks = discover_tasks(bench)
     done_ids = load_done_ids(out_dir)
@@ -417,7 +454,7 @@ def run_queue(model: str, bench: str, *, awesome_skills: bool = False) -> None:
         if (out_dir / "STOP").exists():
             break
         run_dir, recovered_state = _select_resume_run_dir(
-            prefix, bench, run_id, out_dir
+            prefix, bench, run_id, out_dir, config_fingerprint
         )
         state_path = run_dir / "state.json"
         state_mtime_before = state_path.stat().st_mtime_ns if state_path.is_file() else None

@@ -118,6 +118,54 @@ def test_true_paused_infrastructure_retries_in_current_run_root(tmp_path, monkey
     assert recovered is None
 
 
+def test_paused_gcbench_infrastructure_retries_in_current_run_root(tmp_path, monkeypatch):
+    runs = tmp_path / "runs"
+    historical = runs / "new_model_awesome_qwen_gcbench-resume-old" / "run-one"
+    historical.mkdir(parents=True)
+    (historical / "state.json").write_text(
+        json.dumps({"status": "paused_infrastructure"}),
+        encoding="utf-8",
+    )
+    current = runs / "new_model_awesome_qwen_gcbench-resume-new"
+    current.mkdir()
+    monkeypatch.setattr(runner, "RUNS", runs)
+
+    selected, recovered = runner._select_resume_run_dir(
+        "new_model_awesome_qwen", "gcbench", "run-one", current
+    )
+
+    assert selected == current / "run-one"
+    assert recovered is None
+
+
+def test_nonterminal_run_with_changed_config_restarts_in_current_root(
+    tmp_path, monkeypatch
+):
+    runs = tmp_path / "runs"
+    historical = runs / "new_model_awesome_qwen_gdbench-resume-old" / "run-one"
+    historical.mkdir(parents=True)
+    (historical / "state.json").write_text(
+        json.dumps({"status": "initialized"}), encoding="utf-8"
+    )
+    (historical / "manifest.json").write_text(
+        json.dumps({"config_fingerprint": "old-fingerprint"}), encoding="utf-8"
+    )
+    current = runs / "new_model_awesome_qwen_gdbench-resume-new"
+    current.mkdir()
+    monkeypatch.setattr(runner, "RUNS", runs)
+
+    selected, recovered = runner._select_resume_run_dir(
+        "new_model_awesome_qwen",
+        "gdbench",
+        "run-one",
+        current,
+        "new-fingerprint",
+    )
+
+    assert selected == current / "run-one"
+    assert recovered is None
+
+
 def test_done_ids_exclude_unevaluated_completed_cases(tmp_path):
     (tmp_path / "summary.json").write_text(
         json.dumps(

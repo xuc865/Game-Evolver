@@ -4,10 +4,28 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.run_verigame_public_awesome import append_progress_notice, select_keypoints
+from scripts.run_verigame_public_awesome import (
+    append_progress_notice,
+    prune_rebuildable_dependencies,
+    select_keypoints,
+)
 
 
 class VeriGameProgressNoticeTests(unittest.TestCase):
+    def test_prune_dependencies_preserves_evidence(self):
+        with tempfile.TemporaryDirectory() as td:
+            attempt = Path(td) / "attempt-1"
+            dependencies = attempt / "official_evaluation" / "workspace" / "node_modules"
+            evidence = attempt / "official_evaluation" / "workspace" / "runs" / "result.json"
+            dependencies.mkdir(parents=True)
+            evidence.parent.mkdir(parents=True)
+            (dependencies / "package.js").write_text("generated", encoding="utf-8")
+            evidence.write_text("{}", encoding="utf-8")
+
+            self.assertEqual(prune_rebuildable_dependencies(attempt), 1)
+            self.assertFalse(dependencies.exists())
+            self.assertTrue(evidence.exists())
+
     def test_keypoint_sample_is_stable_and_task_specific(self):
         with tempfile.TemporaryDirectory() as td:
             keypoints = Path(td) / "keypoints.md"

@@ -62,6 +62,22 @@ def write_json(path: Path, value: dict) -> None:
     temporary.replace(path)
 
 
+def prune_rebuildable_dependencies(attempt_root: Path) -> int:
+    """Remove dependency installs while preserving source, evidence, and score artifacts."""
+
+    removed = 0
+    if not attempt_root.is_dir():
+        return removed
+    for current, directories, _files in os.walk(attempt_root):
+        if "node_modules" not in directories:
+            continue
+        dependency_root = Path(current) / "node_modules"
+        shutil.rmtree(dependency_root, ignore_errors=True)
+        directories.remove("node_modules")
+        removed += 1
+    return removed
+
+
 def append_progress_notice(
     item: dict,
     *,
@@ -420,6 +436,7 @@ def run_provider(args: argparse.Namespace, provider: str) -> None:
             )
         except OSError as exc:
             print(f"[{provider}] progress notice failed: {exc}", file=sys.stderr, flush=True)
+        prune_rebuildable_dependencies(Path(item["attempt_root"]))
     summary["finished_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     write_json(summary_path, summary)
 
