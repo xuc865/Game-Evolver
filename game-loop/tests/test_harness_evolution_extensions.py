@@ -83,6 +83,22 @@ class DynamicRubricGeneratorTests(unittest.TestCase):
             self.assertNotIn("primary_score", text)
             self.assertNotIn("hidden rubric", text)
             self.assertIn("skill", rubric.harness_focus)
+            soft_ids = {item.rubric_id for item in rubric.soft_rubrics}
+            self.assertEqual(soft_ids, {
+                "public_feature_completion",
+                "core_gameplay_depth",
+                "interaction_correctness",
+                "progression_and_end_state",
+                "playability_and_balance",
+                "runtime_feedback_quality",
+                "demo_coverage",
+            })
+            self.assertAlmostEqual(sum(item.weight for item in rubric.soft_rubrics), 1.0)
+            self.assertFalse(any(
+                token in rubric_id
+                for rubric_id in soft_ids
+                for token in ("skill", "tool", "mcp", "context", "workflow")
+            ))
 
 
 class ElementStatsMutationTests(unittest.TestCase):

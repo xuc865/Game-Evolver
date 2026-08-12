@@ -92,7 +92,7 @@ def _instruction_excerpt(task_source: Path) -> str:
     ):
         path = task_source / name
         if path.is_file():
-            return path.read_text(encoding="utf-8", errors="replace")[:1500]
+            return path.read_text(encoding="utf-8", errors="replace")[:6000]
     return ""
 
 
@@ -190,95 +190,81 @@ def _build_hard_rubrics(
 
 def _build_soft_rubrics(
     *,
+    task_source: Path,
     benchmark_id: str,
     harness_focus: Sequence[str],
     loop_role: str,
 ) -> tuple[HarnessRubricCriterion, ...]:
     family = _BENCH_FAMILY_HINTS.get(benchmark_id, "game-making")
+    instruction = _instruction_excerpt(task_source)
+    mechanics = _task_mechanics_hint(instruction)
     base = [
         HarnessRubricCriterion(
-            "workflow_coherence",
-            "soft",
-            "Multi-step workflow (plan → edit → verify) is coherent and avoids thrashing.",
-            weight=0.20,
-        ),
-        HarnessRubricCriterion(
-            "playtest_signal_quality",
+            "public_feature_completion",
             "soft",
             (
-                "Runtime/playtest observations meaningfully informed edits "
-                f"(task family: {family})."
+                "Observable gameplay implements the important requirements in the public task "
+                f"instruction, including {mechanics}; nominal files, labels, or planned features "
+                "without executable behavior receive no credit."
+            ),
+            weight=0.25,
+        ),
+        HarnessRubricCriterion(
+            "core_gameplay_depth",
+            "soft",
+            (
+                "The core game loop has meaningful state transitions, consequences, and enough "
+                f"mechanical depth to sustain play in this {family} task."
             ),
             weight=0.20,
         ),
         HarnessRubricCriterion(
-            "feature_progress_visible",
+            "interaction_correctness",
             "soft",
-            "Player-visible mechanics progressed toward the public task goal.",
-            weight=0.20,
-        ),
-        HarnessRubricCriterion(
-            "repair_quality",
-            "soft",
-            "Failures were repaired without regressing previously working behavior.",
+            (
+                "Real player inputs trigger correct, deterministic gameplay responses, and the "
+                "runtime evidence shows those responses rather than only a launch or title screen."
+            ),
             weight=0.15,
         ),
         HarnessRubricCriterion(
-            "exploration_efficiency",
+            "progression_and_end_state",
             "soft",
-            "Agent explored alternatives efficiently under harness budget discipline.",
+            (
+                "The game supports coherent progression and reaches task-appropriate success, "
+                "failure, result, or completion states through actual play."
+            ),
+            weight=0.15,
+        ),
+        HarnessRubricCriterion(
+            "playability_and_balance",
+            "soft",
+            (
+                "The game is practically playable: controls, pacing, challenge, resources, and "
+                "failure recovery do not block or trivialize the intended experience."
+            ),
             weight=0.10,
         ),
+        HarnessRubricCriterion(
+            "runtime_feedback_quality",
+            "soft",
+            (
+                "Runtime presentation clearly communicates actions, state changes, hazards, "
+                "progress, and outcomes through readable visual or textual feedback."
+            ),
+            weight=0.10,
+        ),
+        HarnessRubricCriterion(
+            "demo_coverage",
+            "soft",
+            (
+                "Completed deterministic replay evidence covers the core loop and important "
+                "states; demo JSON or nominal scenarios without successful replay receive no credit."
+            ),
+            weight=0.05,
+        ),
     ]
-    focus_set = set(harness_focus)
-    if "skill" in focus_set:
-        base.append(
-            HarnessRubricCriterion(
-                "skill_selection_usefulness",
-                "soft",
-                "Skill loading/curator modules improved decision quality on this task.",
-                weight=0.05,
-            )
-        )
-    if "tool" in focus_set or "mcp" in focus_set:
-        base.append(
-            HarnessRubricCriterion(
-                "tool_mcp_effectiveness",
-                "soft",
-                "Tool/MCP interfaces produced actionable evidence before patching.",
-                weight=0.05,
-            )
-        )
-    if "context" in focus_set:
-        base.append(
-            HarnessRubricCriterion(
-                "context_compilation_clarity",
-                "soft",
-                "Context compilation kept relevant history and trimmed noise.",
-                weight=0.05,
-            )
-        )
-    if loop_role == "outer":
-        base.append(
-            HarnessRubricCriterion(
-                "meta_harness_stability",
-                "soft",
-                "Outer harness changes improved inner refinement reliability without overfitting.",
-                weight=0.05,
-            )
-        )
-    total = sum(item.weight for item in base)
-    if total > 1.0 + 1e-6:
-        scale = 1.0 / total
-        base = [
-            HarnessRubricCriterion(
-                item.rubric_id,
-                item.kind,
-                item.description,
-                weight=item.weight * scale,
-            )
-            for item in base
-        ]
+    del harness_focus, loop_role
     for item in base:
         _validate_no_leakage(item)
     return tuple(base)
@@ -301,6 +287,7 @@ def generate_dynamic_rubric_set(
         harness_focus=focus,
     )
     soft = _build_soft_rubrics(
+        task_source=task_ref,
         benchmark_id=benchmark_id,
         harness_focus=focus,
         loop_role=loop_role,

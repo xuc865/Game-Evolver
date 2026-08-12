@@ -888,6 +888,11 @@ class LLMRubricJudge:
         prompt = (
             "Score parent and candidate together from their deep runtime evidence. "
             "Apply each rubric identically to both sides. Missing evidence means 0. "
+            "Score the delivered game's observable quality, not how polished the agent process looks. "
+            "Tool calls, MCP use, skill loading, plans, file counts, and verbose logs are never quality "
+            "evidence by themselves and must not compensate for weaker gameplay. Require successful "
+            "runtime evidence of player input, state transitions, feature behavior, progression, and "
+            "outcomes for high soft scores. A nominal implementation or unexecuted demo receives 0. "
             "For gcbench, nominal files or demo JSON without completed real-input replay "
             "logs are not gameplay evidence. Return only JSON matching this schema:\n"
             f"{json.dumps(schema, ensure_ascii=False)}\n"
@@ -895,7 +900,8 @@ class LLMRubricJudge:
             f"Evidence: {json.dumps(evidence_payload, ensure_ascii=False)[:10000]}"
         )
         compact_prompt = (
-            "Return only valid JSON. Score both sides consistently; missing evidence is 0.\n"
+            "Return only valid JSON. Score observable game quality consistently; missing evidence is 0. "
+            "Do not reward tools, skills, plans, logs, or file counts without successful gameplay evidence.\n"
             f"Schema={json.dumps(schema)}\n"
             f"Rubrics={json.dumps(rubric_text, ensure_ascii=False)}\n"
             f"Parent={json.dumps(parent_evidence.to_dict(), ensure_ascii=False)[:3500]}\n"
@@ -1252,7 +1258,9 @@ class HarnessRubricValidator:
         reasons: list[str] = []
         infrastructure_ok = True
         dynamic_payloads: list[dict[str, Any]] = []
-        profile = candidate_profile or parent_profile
+        # Freeze the admission rubric before mutation. A candidate must not
+        # change its own exam by adding a tool, skill, or MCP category.
+        profile = parent_profile or candidate_profile
         for case_id in sample_ids:
             parent_outcome = parents[case_id]
             candidate_outcome = candidates[case_id]

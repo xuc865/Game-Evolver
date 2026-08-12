@@ -471,6 +471,78 @@ class HarnessRubricValidatorTests(unittest.TestCase):
         judge.score_pair.assert_called_once()
         judge.score.assert_not_called()
 
+    @patch("game_loop.core.harness_rubric_validator.generate_dynamic_rubric_set")
+    @patch("game_loop.core.harness_rubric_validator.collect_deep_playtest_evidence")
+    def test_dynamic_rubric_is_frozen_from_parent_profile(
+        self, collect_mock, generate_mock
+    ):
+        collect_mock.return_value = _synthetic_evidence(passed=True)
+        parent = HarnessProfile(
+            harness_id="parent",
+            parent_harness_id=None,
+            active_modules=("a",),
+            active_tool_interfaces=(),
+            active_elements=(),
+            context_compiler=unittest.mock.Mock(),
+            recovery_policy=unittest.mock.Mock(),
+            validation_policy=unittest.mock.Mock(),
+            generation=0,
+            rationale="seed",
+            created_at="now",
+        )
+        candidate = HarnessProfile(
+            harness_id="candidate",
+            parent_harness_id="parent",
+            active_modules=("a",),
+            active_tool_interfaces=(),
+            active_elements=(),
+            context_compiler=unittest.mock.Mock(),
+            recovery_policy=unittest.mock.Mock(),
+            validation_policy=unittest.mock.Mock(),
+            generation=1,
+            rationale="mutation",
+            created_at="now",
+        )
+        dynamic = unittest.mock.Mock()
+        dynamic.hard_rubrics = DEFAULT_HARD_RUBRICS[:1]
+        dynamic.soft_rubrics = DEFAULT_SOFT_RUBRICS[:1]
+        dynamic.to_dict.return_value = {"rubric_id": "frozen-parent"}
+        generate_mock.return_value = dynamic
+        judge = unittest.mock.Mock()
+        score = RubricCaseScores(
+            case_id="case-a",
+            hard={DEFAULT_HARD_RUBRICS[0].rubric_id: 1.0},
+            soft={DEFAULT_SOFT_RUBRICS[0].rubric_id: 0.5},
+            soft_total=0.5,
+            judge="test",
+            evidence_ref="/tmp/run",
+        )
+        judge.score_pair.return_value = (score, score)
+        config = HarnessEvolutionConfig.from_dict({
+            "modules": [{"id": "a", "instruction": "a", "tags": []}],
+            "seed_modules": ["a"],
+            "max_active_modules": 1,
+            "max_active_tool_interfaces": 0,
+            "mutation_width": 1,
+            "rubric_validation_sample_size": 1,
+            "require_rubric_validation": True,
+            "dynamic_rubric_generation": True,
+        })
+        outcome = HarnessEpisodeOutcome(
+            "case-a", "harness", 0.5, True, 1, 1, run_ref="/tmp/run"
+        )
+
+        result = HarnessRubricValidator(config, judge=judge).validate_paired_outcomes(
+            parent_outcomes=[outcome],
+            candidate_outcomes=[outcome],
+            parent_profile=parent,
+            candidate_profile=candidate,
+            case_task_refs={"case-a": Path("/tmp/task")},
+        )
+
+        self.assertTrue(result.accepted)
+        self.assertIs(generate_mock.call_args.kwargs["harness_profile"], parent)
+
     @patch("game_loop.runtime.providers.BackboneProviderSpec.resolve")
     @patch("urllib.request.urlopen")
     def test_llm_pair_judge_scores_both_sides_in_one_response(
