@@ -434,7 +434,7 @@ def mutate_category_elements(
     limit = limits.get(category, 1)
     current = stats.active_in_category(active, category)
     force_merge = "element_merge" in normalized_tags
-    force_add = "element_add" in normalized_tags
+    force_add = bool({"element_add", "element_replace"} & normalized_tags)
 
     merge_pair = None if force_add else stats.merge_target(
         catalog,

@@ -3078,6 +3078,101 @@ class GameLoopTests(unittest.TestCase):
             self.assertEqual(record["shortlist"], ["skill_alpha", "tool_beta"])
             self.assertEqual(record["selected"]["element_id"], "tool_beta")
 
+    def test_outer_proposer_replaces_when_selected_category_is_full(self):
+        from game_loop.cli import _build_llm_dynamic_gradient
+        from game_loop.config import HarnessEvolutionConfig
+
+        class FakeResponse:
+            def __init__(self, value):
+                self.value = value
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return json.dumps({
+                    "choices": [{"message": {"content": json.dumps(self.value)}}]
+                }).encode()
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config = write_config(root, candidates=1, level="L4", max_probe_calls=2)
+            harness_config = HarnessEvolutionConfig.from_dict({
+                "modules": [{
+                    "id": "outer_base",
+                    "instruction": "Inspect evidence before selecting a harness element.",
+                    "tags": ["context"],
+                }],
+                "seed_modules": ["outer_base"],
+                "max_active_modules": 1,
+                "max_active_tool_interfaces": 0,
+                "mutation_width": 1,
+                "replay_min_cases": 1,
+                "require_rubric_validation": False,
+                "enable_usage_driven_mutation": True,
+                "max_active_elements": {"skill": 1},
+                "seed_elements": {"skill": ["skill_active"]},
+                "element_catalog": [
+                    {
+                        "id": "skill_active",
+                        "category": "skill",
+                        "description": "Existing skill.",
+                        "tags": ["universal"],
+                    },
+                    {
+                        "id": "skill_replacement",
+                        "category": "skill",
+                        "description": "Replacement skill.",
+                        "tags": ["universal"],
+                    },
+                ],
+            })
+            outer_dir = root / "outer"
+            engine = HarnessEvolutionEngine(outer_dir, harness_config)
+            parent = engine.initialize()
+            responses = iter([
+                FakeResponse({"element_ids": ["skill_replacement"]}),
+                FakeResponse({
+                    "diagnosis": "replace overlapping behavior",
+                    "category": "skill",
+                    "element_id": "skill_replacement",
+                }),
+            ])
+
+            with patch.dict(os.environ, {
+                "CODEX_API_BASE": "http://example.test/v1",
+                "CODEX_MODEL": "kimi-test",
+                "GAME_LOOP_HARNESS_PROPOSER_ATTEMPTS": "1",
+            }), patch(
+                "game_loop.cli.urllib.request.urlopen",
+                side_effect=lambda *_args, **_kwargs: next(responses),
+            ):
+                gradient = _build_llm_dynamic_gradient(
+                    outer_dir=outer_dir,
+                    epoch=1,
+                    parent=parent,
+                    engine=engine,
+                    config=config,
+                )
+
+            self.assertIn("element_replace", gradient.target_tags)
+            candidate = engine.propose(
+                parent_id=parent.harness_id,
+                gradient=gradient,
+                epoch=1,
+            )
+            self.assertEqual(
+                [item.element_id for item in candidate.active_elements],
+                ["skill_replacement"],
+            )
+            record = json.loads(
+                (outer_dir / "harness_proposals" / "epoch_001.json").read_text()
+            )
+            self.assertEqual(record["selected"]["mutation_mode"], "replace")
+
     def test_admission_case_archives_config_mismatched_resume_dir(self):
         from game_loop.cli import _run_harness_admission_case
 

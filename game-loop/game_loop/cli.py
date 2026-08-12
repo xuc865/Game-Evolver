@@ -1340,15 +1340,14 @@ def _build_llm_dynamic_gradient(
             continue
         if spec.element_id in active_ids:
             continue
-        if (
-            not restricted_ablation
-            and active_counts.get(spec.category, 0)
+        category_full = (
+            active_counts.get(spec.category, 0)
             >= engine.config.max_active_elements.get(spec.category, 1)
-        ):
-            continue
+        )
         compatible.append({
             "id": spec.element_id,
             "category": spec.category,
+            "mutation_mode": "replace" if category_full else "add",
             "description": spec.description,
             "tags": list(spec.tags),
             "spec": dict(spec.spec),
@@ -1578,7 +1577,20 @@ def _build_llm_dynamic_gradient(
         status = "completed"
     record.update(status=status, selected=selected)
     atomic_write_json(proposal_path, record)
-    tags = [selected["category"], "usage_driven", "element_add", f"element_id:{selected['element_id']}"]
+    selected_catalog = next(
+        item for item in compatible if item["id"] == selected["element_id"]
+    )
+    mutation_mode = str(selected_catalog.get("mutation_mode", "add"))
+    selected["mutation_mode"] = mutation_mode
+    record.update(selected=selected)
+    atomic_write_json(proposal_path, record)
+    operation_tag = "element_replace" if mutation_mode == "replace" else "element_add"
+    tags = [
+        selected["category"],
+        "usage_driven",
+        operation_tag,
+        f"element_id:{selected['element_id']}",
+    ]
     if benchmark_tag:
         tags.append(benchmark_tag)
     if text_only:
