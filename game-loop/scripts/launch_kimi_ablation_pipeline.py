@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -16,6 +17,7 @@ TASK = ROOT.parent / "gcbench" / "tasks" / "puzzle-sokoban-dungeon"
 SEED = ROOT / "experiments" / "seed_artifacts" / "puzzle-sokoban-scaffold"
 POOL = ROOT / "experiments" / "fixed-admission-gcbench-balanced.json"
 LEVELS = ("L0", "L1", "L2", "L3")
+TARGET_EPOCHS = 30
 
 
 def level_run_dir(level: str) -> Path:
@@ -80,7 +82,7 @@ python3 -m game_loop.cli harness-self-supervise \
   --outer-dir "$RUN_DIR" --config "$CONFIG" \
   --task-source {str(TASK)!r} --seed-artifact {str(SEED)!r} \
   --fixed-admission-task-pool {str(POOL)!r} --evaluate-seed \
-  --start-epoch 1 --max-epochs 5 --cases 3 --max-epoch-retries 2 \
+  --start-epoch 1 --max-epochs {TARGET_EPOCHS} --cases 3 --max-epoch-retries 2 \
   --run-id-prefix "abl-{level.lower()}" --heartbeat-seconds 30
 champion_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["harness_id"])' "$RUN_DIR/harness_archive/champion.json")"
 profile="$RUN_DIR/harness_archive/profiles/$champion_id.json"
@@ -125,6 +127,13 @@ def launch() -> None:
     RUN_ROOT.mkdir(parents=True, exist_ok=True)
     for level in LEVELS:
         run_dir = prepare_level(level)
+        done = run_dir / "pipeline.done"
+        public_eval = run_dir / "public_eval"
+        if done.is_file():
+            archive_eval = run_dir / "public_eval_5epoch"
+            if public_eval.is_dir() and not archive_eval.exists():
+                shutil.move(str(public_eval), str(archive_eval))
+            done.unlink()
         if sys.platform == "darwin" and Path("/usr/bin/screen").is_file():
             sessions = subprocess.run(
                 ["/usr/bin/screen", "-ls"],
@@ -174,6 +183,19 @@ def status() -> dict[str, object]:
         levels[level] = {
             "completed_epochs": len(items),
             "decisions": ["ACCEPT" if item.get("accepted") else "REJECT" for item in items],
+            "epoch_candidates": [
+                {
+                    "epoch": item.get("epoch"),
+                    "accepted": bool(item.get("accepted")),
+                    "candidate_harness_id": item.get("candidate_harness_id"),
+                    "parent_harness_id": item.get("parent_harness_id"),
+                    "profile": str(
+                        run_dir / "harness_archive" / "profiles"
+                        / f"{item.get('candidate_harness_id')}.json"
+                    ),
+                }
+                for item in items
+            ],
             "failed_infra": [item.get("epoch") for item in failures],
             "heartbeat": heartbeat,
             "public_eval_complete": (run_dir / "public_eval" / "public_eval.json").is_file(),
@@ -181,6 +203,7 @@ def status() -> dict[str, object]:
         }
     return {
         "run_pattern": str(RUN_ROOT / "gcbench-ablation-kimi-l[0-3]-5epoch-v2"),
+        "target_epochs": TARGET_EPOCHS,
         "model": "Kimi-K2.7-Code",
         "levels": levels,
     }
@@ -188,10 +211,29 @@ def status() -> dict[str, object]:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=("launch", "status"), nargs="?", default="status")
+    parser.add_argument("command", choices=("launch", "status", "candidate"), nargs="?", default="status")
+    parser.add_argument("level", choices=LEVELS, nargs="?")
+    parser.add_argument("epoch", type=int, nargs="?")
     args = parser.parse_args()
     if args.command == "launch":
         launch()
+    if args.command == "candidate":
+        if args.level is None or args.epoch is None:
+            parser.error("candidate requires LEVEL and EPOCH")
+        run_dir = level_run_dir(args.level)
+        epochs_path = run_dir / "harness_archive" / "epochs.json"
+        items = json.loads(epochs_path.read_text()).get("items", [])
+        item = next((item for item in items if item.get("epoch") == args.epoch), None)
+        if item is None:
+            raise SystemExit(f"no completed candidate for {args.level} epoch {args.epoch}")
+        candidate_id = item["candidate_harness_id"]
+        profile = run_dir / "harness_archive" / "profiles" / f"{candidate_id}.json"
+        print(json.dumps({"level": args.level, "epoch": args.epoch,
+                          "accepted": bool(item.get("accepted")),
+                          "candidate_harness_id": candidate_id,
+                          "profile": str(profile),
+                          "profile_exists": profile.is_file()}, indent=2))
+        return 0
     print(json.dumps(status(), ensure_ascii=False, indent=2))
     return 0
 
