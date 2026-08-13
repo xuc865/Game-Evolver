@@ -3173,6 +3173,24 @@ class GameLoopTests(unittest.TestCase):
             )
             self.assertEqual(record["selected"]["mutation_mode"], "replace")
 
+    def test_resume_gradient_is_restored_from_existing_plan(self):
+        from game_loop.cli import _gradient_from_plan
+
+        gradient = _gradient_from_plan({
+            "gradient": {
+                "diagnosis": "preserve the original proposal",
+                "target_tags": ["protocol", "element_replace"],
+                "evidence_refs": ["harness_proposals/epoch_023.json"],
+            }
+        })
+
+        self.assertEqual(gradient.diagnosis, "preserve the original proposal")
+        self.assertEqual(gradient.target_tags, ("protocol", "element_replace"))
+        self.assertEqual(
+            gradient.evidence_refs,
+            ("harness_proposals/epoch_023.json",),
+        )
+
     def test_admission_case_archives_config_mismatched_resume_dir(self):
         from game_loop.cli import _run_harness_admission_case
 

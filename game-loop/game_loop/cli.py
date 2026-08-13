@@ -451,31 +451,19 @@ def run_harness_self_evolution(
     if existing_plan_path.is_file():
         existing_plan = read_json(existing_plan_path)
 
-    # ── build gradient ──
-    if os.environ.get("GAME_LOOP_LLM_HARNESS_PROPOSER", "0").strip().casefold() in {
-        "1", "true", "yes", "on",
-    }:
-        gradient = _build_llm_dynamic_gradient(
-            outer_dir=outer_dir,
-            epoch=epoch,
-            parent=parent,
-            engine=engine,
-            config=config,
-        )
-    else:
-        gradient = _build_dynamic_gradient(
-            outer_dir,
-            epoch,
-            parent,
-            engine.config,
-            benchmark_id=config.benchmark.adapter,
-        )
-
-    # ── propose or reuse candidate ──
-    if (existing_plan
+    valid_existing_plan = bool(
+        existing_plan
             and existing_plan.get("parent_harness_id") == parent.harness_id
             and existing_plan.get("config_fingerprint") == config.fingerprint
-            and existing_plan.get("candidate_harness_id")):
+            and existing_plan.get("candidate_harness_id")
+            and isinstance(existing_plan.get("gradient"), dict)
+    )
+
+    # A resumed epoch must reuse both its candidate and its proposal. Calling
+    # the proposer again can overwrite the audit record without changing the
+    # candidate that is actually evaluated.
+    if valid_existing_plan:
+        gradient = _gradient_from_plan(existing_plan)
         candidate = engine.get(existing_plan["candidate_harness_id"])
         print(f"[resume] reusing candidate {candidate.harness_id} from existing plan")
         existing_plan.update({
@@ -485,6 +473,24 @@ def run_harness_self_evolution(
         })
         atomic_write_json(existing_plan_path, existing_plan)
     else:
+        if os.environ.get("GAME_LOOP_LLM_HARNESS_PROPOSER", "0").strip().casefold() in {
+            "1", "true", "yes", "on",
+        }:
+            gradient = _build_llm_dynamic_gradient(
+                outer_dir=outer_dir,
+                epoch=epoch,
+                parent=parent,
+                engine=engine,
+                config=config,
+            )
+        else:
+            gradient = _build_dynamic_gradient(
+                outer_dir,
+                epoch,
+                parent,
+                engine.config,
+                benchmark_id=config.benchmark.adapter,
+            )
         candidate = engine.propose(
             parent_id=parent.harness_id,
             gradient=gradient,
@@ -619,6 +625,17 @@ def run_harness_self_evolution(
           f"pairs={len(result.paired_deltas)} reasons={list(result.reasons)}")
 
     return 0 if result.accepted else 1
+
+
+def _gradient_from_plan(plan: dict[str, Any]) -> HarnessSemanticGradient:
+    payload = plan.get("gradient")
+    if not isinstance(payload, dict):
+        raise ValueError("existing harness evolution plan is missing gradient")
+    return HarnessSemanticGradient(
+        diagnosis=str(payload.get("diagnosis", "")),
+        target_tags=tuple(str(item) for item in payload.get("target_tags", ())),
+        evidence_refs=tuple(str(item) for item in payload.get("evidence_refs", ())),
+    )
 
 
 def _run_paired_harness_admission_case(
