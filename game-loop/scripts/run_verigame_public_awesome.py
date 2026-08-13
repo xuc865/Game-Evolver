@@ -174,7 +174,10 @@ def generate(provider: str, task: Path, attempt_root: Path, timeout: int) -> tup
     config_value = config.to_dict()
     config_value["permission_mode"] = "yolo"
     config_value["max_session_turns"] = MAX_GENERATION_SESSION_TURNS
-    config_value["fallback_on_timeout"] = False
+    # Qwen's local endpoint can accept a request and then stall until the
+    # generation timeout.  Let the configured OpenRouter route take over in
+    # that case; otherwise the fallback only handles early provider failures.
+    config_value["fallback_on_timeout"] = provider == "qwen"
     config_value["exclude_tools"] = [
         name for name in config_value.get("exclude_tools", []) if name != "todo_write"
     ]

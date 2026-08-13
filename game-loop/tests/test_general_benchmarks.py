@@ -10,7 +10,11 @@ from unittest.mock import patch
 
 from game_loop.benchmarks import load_adapter
 from game_loop.core.models import AttemptContext, BackendExecution
-from scripts.general_benchmark_progress import cumulative_accuracy, record_task_notice
+from scripts.general_benchmark_progress import (
+    cumulative_accuracy,
+    record_task_notice,
+    terminalbench_difficulty_stats,
+)
 from scripts.run_new_bench_experiments import (
     _process_tree_rss_kib,
     load_done_ids,
@@ -91,6 +95,42 @@ class GeneralBenchmarkContractTests(unittest.TestCase):
                 cumulative_accuracy(runs, "new_bench_qwen", "taubench"),
                 (1, 2),
             )
+
+    def test_terminalbench_requires_reward_and_passed(self):
+        with tempfile.TemporaryDirectory() as td:
+            runs = Path(td)
+            root = runs / "new_bench_kimi_terminalbench-resume-1"
+            for run_id, payload in (
+                ("missing-reward", {"infrastructure_error": False, "passed": True}),
+                ("missing-passed", {"infrastructure_error": False, "reward": 1}),
+            ):
+                candidate = root / run_id / "generation_001" / "candidate_01"
+                candidate.mkdir(parents=True)
+                (candidate / "terminalbench_execution.json").write_text(
+                    json.dumps(payload), encoding="utf-8"
+                )
+            self.assertEqual(
+                cumulative_accuracy(runs, "new_bench_kimi", "terminalbench"),
+                (0, 0),
+            )
+
+    def test_terminalbench_difficulty_stats_uses_official_metadata(self):
+        with tempfile.TemporaryDirectory() as td:
+            runs = Path(td)
+            candidate = (
+                runs / "new_bench_kimi_terminalbench-resume-1"
+                / "new_bench_kimi_terminalbench_path-tracing"
+                / "generation_001" / "candidate_01"
+            )
+            candidate.mkdir(parents=True)
+            (candidate / "terminalbench_execution.json").write_text(
+                json.dumps({"infrastructure_error": False, "passed": True, "reward": 1}),
+                encoding="utf-8",
+            )
+            stats = terminalbench_difficulty_stats(runs, "new_bench_kimi")
+            self.assertEqual(stats["hard"]["valid"], 1)
+            self.assertEqual(stats["hard"]["passed"], 1)
+            self.assertEqual(stats["hard"]["accuracy"], 1.0)
 
     def test_requested_adapters_are_registered(self):
         for name in ("terminalbench", "taubench", "nl2repo"):

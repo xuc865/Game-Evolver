@@ -7,8 +7,17 @@ import math
 import os
 from pathlib import Path
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10+ is standard here.
+    try:
+        import tomli as tomllib
+    except ModuleNotFoundError:  # pragma: no cover - compatibility fallback.
+        tomllib = None
+
 
 DEFAULT_PROGRESS_FILE = Path("/Users/wangxucong/Desktop/workspace/progress.txt")
+TERMINALBENCH_TASKS = Path(__file__).resolve().parents[1] / "third_party" / "terminal-bench-2"
 
 
 def _read_json(path: Path) -> dict:
@@ -54,7 +63,10 @@ def cumulative_accuracy(runs: Path, prefix: str, bench: str) -> tuple[int, int]:
             candidates.extend(manifest_path.parent.glob("tau2_*/results.json"))
             result = _read_json(candidates[-1]) if candidates else {}
             for simulation in result.get("simulations", []):
-                if not isinstance(simulation, dict) or simulation.get("infrastructure_error") is True:
+                if (
+                    not isinstance(simulation, dict)
+                    or simulation.get("termination_reason") == "infrastructure_error"
+                ):
                     continue
                 reward_info = simulation.get("reward_info")
                 reward = _number(reward_info.get("reward")) if isinstance(reward_info, dict) else None
@@ -81,11 +93,55 @@ def cumulative_accuracy(runs: Path, prefix: str, bench: str) -> tuple[int, int]:
         elif bench == "terminalbench":
             parsed_passed = manifest.get("passed")
             reward = _number(manifest.get("reward"))
-            if not isinstance(parsed_passed, bool) and reward is None:
+            if not isinstance(parsed_passed, bool) or reward is None:
                 continue
             valid += 1
             passed += int(parsed_passed is True)
     return passed, valid
+
+
+def terminalbench_difficulty_stats(runs: Path, prefix: str) -> dict[str, dict[str, int | float | None]]:
+    """Group canonical TerminalBench results by official task difficulty."""
+    stats = {
+        level: {"valid": 0, "passed": 0, "infra": 0, "accuracy": None}
+        for level in ("easy", "medium", "hard")
+    }
+    manifests = _latest_manifests(runs, prefix, "terminalbench")
+    for run_id, manifest_path in manifests.items():
+        task_name = run_id.removeprefix(f"{prefix}_terminalbench_")
+        task_file = TERMINALBENCH_TASKS / task_name / "task.toml"
+        try:
+            task_text = task_file.read_text(encoding="utf-8")
+            if tomllib is not None:
+                metadata = tomllib.loads(task_text).get("metadata", {})
+                level = metadata.get("difficulty")
+            else:
+                level = next(
+                    line.split("=", 1)[1].strip().strip('"')
+                    for line in task_text.splitlines()
+                    if line.strip().startswith("difficulty =")
+                )
+        except (OSError, ValueError, TypeError):
+            continue
+        if level not in stats:
+            continue
+        bucket = stats[level]
+        manifest = _read_json(manifest_path)
+        if manifest.get("infrastructure_error") is True:
+            bucket["infra"] += 1
+            continue
+        if manifest.get("infrastructure_error") is not False:
+            continue
+        passed = manifest.get("passed")
+        reward = _number(manifest.get("reward"))
+        if not isinstance(passed, bool) or reward is None:
+            continue
+        bucket["valid"] += 1
+        bucket["passed"] += int(passed is True)
+    for bucket in stats.values():
+        if bucket["valid"]:
+            bucket["accuracy"] = bucket["passed"] / bucket["valid"]
+    return stats
 
 
 def notice_key(model: str, bench: str, run_id: str, completed_at: str) -> str:
