@@ -36,7 +36,7 @@ SEED_ARTIFACTS = {
     "verigame": ROOT / "experiments" / "public_baseline_seeds" / "verigame",
 }
 
-BENCHES = ["gcbench", "gdbench"]
+BENCHES = ["gcbench", "gdbench", "verigame"]
 MODELS = ["glm5.2", "deepseek_v4", "kimi", "qwen3.6-27b", "claude", "gpt55"]
 
 TASK_SOURCES = {
