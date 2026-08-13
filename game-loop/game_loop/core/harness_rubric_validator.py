@@ -1216,11 +1216,9 @@ def compare_rubric_pair(
                 f"{case_id}: hard rubric {rubric.rubric_id} regressed "
                 f"(parent={old:.0f}, candidate={new:.0f})"
             )
-    if candidate.soft_total + 1e-9 < parent.soft_total:
-        reasons.append(
-            f"{case_id}: soft rubric total regressed "
-            f"(parent={parent.soft_total:.4f}, candidate={candidate.soft_total:.4f})"
-        )
+    # Soft quality is admitted across the complete fixed suite below. Keeping
+    # it out of the per-case gate allows gains on one representative task to
+    # offset evaluator noise or a smaller loss on another task.
     del soft_rubrics  # weights already reflected in soft_total
     return RubricPairComparison(
         case_id=case_id,
@@ -1355,6 +1353,14 @@ class HarnessRubricValidator:
                 "usable rubric validation cases "
                 f"{len(case_results)} < required {self.config.rubric_validation_sample_size}"
             )
+        if infrastructure_ok and len(case_results) == self.config.rubric_validation_sample_size:
+            parent_soft_sum = sum(item.parent.soft_total for item in case_results)
+            candidate_soft_sum = sum(item.candidate.soft_total for item in case_results)
+            if candidate_soft_sum + 1e-9 < parent_soft_sum:
+                reasons.append(
+                    "aggregate soft rubric total regressed "
+                    f"(parent={parent_soft_sum:.4f}, candidate={candidate_soft_sum:.4f})"
+                )
         accepted = not reasons
         return HarnessRubricValidationResult(
             accepted=accepted,

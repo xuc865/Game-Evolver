@@ -386,7 +386,7 @@ class HarnessRubricValidatorTests(unittest.TestCase):
         self.assertEqual(request_payload["reasoning_effort"], "none")
         self.assertTrue(scores.infrastructure_ok)
 
-    def test_hard_and_soft_pair_comparison_enforces_monotonicity(self):
+    def test_pair_comparison_enforces_hard_monotonicity(self):
         parent = _score_artifact(passed=True)
         candidate = _score_artifact(passed=True, richer=True)
         comparison = compare_rubric_pair(
@@ -398,6 +398,84 @@ class HarnessRubricValidatorTests(unittest.TestCase):
         )
         self.assertTrue(comparison.passed)
         self.assertGreaterEqual(candidate.soft_total, parent.soft_total)
+
+    @patch("game_loop.core.harness_rubric_validator.collect_deep_playtest_evidence")
+    def test_validator_allows_per_case_soft_regression_when_suite_sum_improves(
+        self, collect_mock
+    ):
+        collect_mock.return_value = _synthetic_evidence(passed=True)
+        judge = unittest.mock.Mock()
+        hard = {DEFAULT_HARD_RUBRICS[0].rubric_id: 1.0}
+
+        def scores(case_id, soft_total):
+            return RubricCaseScores(
+                case_id=case_id,
+                hard=hard,
+                soft={DEFAULT_SOFT_RUBRICS[0].rubric_id: soft_total},
+                soft_total=soft_total,
+                judge="test",
+                evidence_ref=f"/tmp/{case_id}",
+            )
+
+        judge.score_pair.side_effect = [
+            (scores("case-a", 0.2), scores("case-a", 0.5)),
+            (scores("case-b", 0.4), scores("case-b", 0.3)),
+            (scores("case-c", 0.2), scores("case-c", 0.2)),
+        ]
+        config = HarnessEvolutionConfig.from_dict({
+            "modules": [{"id": "a", "instruction": "a", "tags": []}],
+            "seed_modules": ["a"],
+            "max_active_modules": 1,
+            "max_active_tool_interfaces": 0,
+            "mutation_width": 1,
+            "replay_min_cases": 3,
+            "rubric_validation_sample_size": 3,
+            "require_rubric_validation": True,
+            "hard_rubrics": [DEFAULT_HARD_RUBRICS[0].to_dict()],
+            "soft_rubrics": [DEFAULT_SOFT_RUBRICS[0].to_dict()],
+        })
+        outcomes = [
+            HarnessEpisodeOutcome(case_id, "harness", 0.5, True, 1, 1, run_ref=f"/tmp/{case_id}")
+            for case_id in ("case-a", "case-b", "case-c")
+        ]
+
+        result = HarnessRubricValidator(config, judge=judge).validate_paired_outcomes(
+            parent_outcomes=outcomes,
+            candidate_outcomes=outcomes,
+        )
+
+        self.assertTrue(result.accepted)
+        self.assertTrue(all(item.passed for item in result.case_results))
+
+    @patch("game_loop.core.harness_rubric_validator.collect_deep_playtest_evidence")
+    def test_validator_rejects_when_suite_soft_sum_regresses(self, collect_mock):
+        collect_mock.return_value = _synthetic_evidence(passed=True)
+        judge = unittest.mock.Mock()
+        parent = _score_artifact(passed=True, richer=True)
+        candidate = _score_artifact(passed=True)
+        judge.score_pair.return_value = (parent, candidate)
+        config = HarnessEvolutionConfig.from_dict({
+            "modules": [{"id": "a", "instruction": "a", "tags": []}],
+            "seed_modules": ["a"],
+            "max_active_modules": 1,
+            "max_active_tool_interfaces": 0,
+            "mutation_width": 1,
+            "replay_min_cases": 3,
+            "rubric_validation_sample_size": 3,
+            "require_rubric_validation": True,
+        })
+        outcomes = [
+            HarnessEpisodeOutcome(case_id, "harness", 0.5, True, 1, 1, run_ref=f"/tmp/{case_id}")
+            for case_id in ("case-a", "case-b", "case-c")
+        ]
+
+        result = HarnessRubricValidator(config, judge=judge).validate_paired_outcomes(
+            parent_outcomes=outcomes,
+            candidate_outcomes=outcomes,
+        )
+
+        self.assertFalse(result.accepted)
+        self.assertIn("aggregate soft rubric total regressed", " ".join(result.reasons))
 
     def test_rejects_hard_regression(self):
         parent = _score_artifact(passed=True)
