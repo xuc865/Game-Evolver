@@ -366,7 +366,11 @@ def cmd_harness_self_evolve(args: argparse.Namespace) -> int:
     harness_cfg = config.method.harness_evolution
     if args.skip_rubric_validation:
         harness_cfg = replace(harness_cfg, require_rubric_validation=False)
-    engine = HarnessEvolutionEngine(outer_dir, harness_cfg)
+    engine = HarnessEvolutionEngine(
+        outer_dir,
+        harness_cfg,
+        allow_mutation=not config.experiment.freezes_harness_outer_loop,
+    )
     runner = CommandHarnessReplayRunner(
         runs_root=outer_dir / "replays",
         project_root=Path(__file__).resolve().parents[1],
@@ -1680,7 +1684,11 @@ def cmd_harness_self_supervise(args: argparse.Namespace) -> int:
         raise ValueError("harness self supervise requires L4 harness_evolution config")
 
     outer_dir = args.outer_dir.resolve()
-    engine = HarnessEvolutionEngine(outer_dir, config.method.harness_evolution)
+    engine = HarnessEvolutionEngine(
+        outer_dir,
+        config.method.harness_evolution,
+        allow_mutation=not config.experiment.freezes_harness_outer_loop,
+    )
     if not (outer_dir / "harness_archive" / "champion.json").is_file():
         engine.initialize()
         print(f"[supervisor] initialized seed harness at {outer_dir / 'harness_archive'}")

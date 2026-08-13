@@ -208,7 +208,10 @@ def _episode_config_dict(config: AppConfig) -> dict:
             "max_total_bytes": config.gates.max_total_bytes,
             "fail_suspicious_references": config.gates.fail_suspicious_references,
         },
-        "experiment": {"arm": "L4", "freezes_harness_outer_loop": True},
+        "experiment": {
+            "arm": "L4_agent",
+            "freezes_harness_outer_loop": True,
+        },
     }
 
 

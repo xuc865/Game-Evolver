@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from argparse import Namespace
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
-from game_loop.cli import _build_dynamic_gradient
+from game_loop.cli import _build_dynamic_gradient, cmd_harness_self_supervise
 from game_loop.config import HarnessEvolutionConfig
 from game_loop.core.harness import HarnessEvolutionEngine, HarnessSemanticGradient
+from game_loop.core.episode_runner import _episode_config_dict
 from game_loop.experiment_presets import build_method_section
 
 
@@ -75,6 +77,16 @@ class AblationConfigTests(unittest.TestCase):
                 self.assertEqual(
                     {key: harness.get(key) for key in baseline_keys}, baseline
                 )
+
+    def test_public_eval_episode_uses_single_candidate_agent_arm(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        config = __import__("game_loop.config", fromlist=["AppConfig"]).AppConfig.load(
+            root / "experiments/configs-ablation/gcbench-L1_ablation_kimi.json"
+        )
+        payload = _episode_config_dict(config)
+        self.assertEqual(payload["experiment"]["arm"], "L4_agent")
+        self.assertTrue(payload["experiment"]["freezes_harness_outer_loop"])
+        self.assertEqual(payload["evolution"]["max_generations"], 1)
 
 
 class AblationEngineTests(unittest.TestCase):
@@ -177,6 +189,28 @@ class AblationEngineTests(unittest.TestCase):
                     benchmark_id="gcbench",
                 )
             self.assertIn("context", gradient.target_tags)
+
+    def test_supervisor_constructs_l0_engine_with_mutation_disabled(self) -> None:
+        config = Mock()
+        config.method.harness_evolution = self._config()
+        config.experiment.freezes_harness_outer_loop = True
+        with tempfile.TemporaryDirectory() as raw:
+            args = Namespace(
+                config=Path(raw) / "l0.json",
+                outer_dir=Path(raw) / "run",
+                heartbeat_seconds=30,
+                start_epoch=1,
+                max_epochs=0,
+                max_epoch_retries=1,
+            )
+            with patch("game_loop.cli.AppConfig.load", return_value=config), patch(
+                "game_loop.cli.HarnessEvolutionEngine"
+            ) as engine_cls, patch("game_loop.cli.CommandHarnessReplayRunner"), patch(
+                "game_loop.cli.SupervisorHeartbeatWriter"
+            ):
+                engine_cls.return_value.initialize.return_value = Mock()
+                self.assertEqual(cmd_harness_self_supervise(args), 0)
+        self.assertFalse(engine_cls.call_args.kwargs["allow_mutation"])
 
 
 class GeneratedAblationTests(unittest.TestCase):
