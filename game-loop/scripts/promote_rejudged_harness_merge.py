@@ -56,8 +56,8 @@ def main() -> int:
         [parent.generation, *(int(item.get("epoch", 0)) for item in epochs)]
     ) + 1
     rationale = (
-        "Manual baseline merge after complete historical rejudging under "
-        "frozen-parent-game-quality-v2. Added only deduplicated elements supported "
+        "Manual baseline merge after historical reclassification under "
+        "aggregate-soft-fixed-suite-v3. Added only deduplicated elements supported "
         f"by infrastructure-clean three-case admissions: {', '.join(added)}."
         + (f" Replaced overlapping elements: {', '.join(removed)}." if removed else "")
     )
@@ -79,7 +79,7 @@ def main() -> int:
     audit = {
         "schema_version": "rejudged-harness-merge.v1",
         "promoted_at": promoted_at,
-        "rubric_policy": "frozen-parent-game-quality-v2",
+        "rubric_policy": "aggregate-soft-fixed-suite-v3",
         "previous_champion_harness_id": parent.harness_id,
         "merged_champion_harness_id": merged.harness_id,
         "added_elements": added,
