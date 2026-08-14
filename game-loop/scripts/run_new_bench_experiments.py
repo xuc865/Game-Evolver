@@ -212,6 +212,29 @@ def rj(p: Path) -> dict:
         return {}
 
 
+def taubench_resume_source(
+    prefix: str, bench_dir: str, expected: int
+) -> Path | None:
+    """Return the fullest Tau batch when it still has infra or missing runs."""
+    candidates: list[tuple[int, int, Path, list[dict]]] = []
+    for root in RUNS.glob(f"{prefix}_{bench_dir}-resume-*"):
+        for path in root.glob("*/generation_*/candidate_*/tau2_*/results.json"):
+            simulations = rj(path).get("simulations")
+            if isinstance(simulations, list):
+                candidates.append(
+                    (len(simulations), path.stat().st_mtime_ns, path, simulations)
+                )
+    if not candidates:
+        return None
+    _, _, path, simulations = max(candidates, key=lambda item: (item[0], item[1]))
+    has_infra = any(
+        isinstance(simulation, dict)
+        and simulation.get("termination_reason") == "infrastructure_error"
+        for simulation in simulations
+    )
+    return path if has_infra or len(simulations) < expected else None
+
+
 def _process_tree_rss_kib(root_pid: int) -> int:
     """Return RSS for root_pid and descendants without adding a dependency."""
     completed = subprocess.run(
@@ -366,6 +389,14 @@ def run_queue(model: str, bench: str, *, taubench_domain: str = "airline") -> No
     config_value = json.loads(cfg.read_text(encoding="utf-8"))
     if bench == "taubench":
         backend = config_value.setdefault("backend", {})
+        backend_env = backend.setdefault("env", {})
+        if model == "glm5.2":
+            backend_env["CODEX_API_BASE"] = os.environ.get(
+                "GLM_BASE_URL", backend_env.get("CODEX_API_BASE", "")
+            )
+            backend_env["CODEX_MODEL"] = os.environ.get(
+                "GLM_MODEL", backend_env.get("CODEX_MODEL", "")
+            )
         command = backend.get("command", [])
         if "--domain" in command:
             command[command.index("--domain") + 1] = taubench_domain
@@ -375,6 +406,19 @@ def run_queue(model: str, bench: str, *, taubench_domain: str = "airline") -> No
             command[command.index("--timeout") + 1] = "86400"
         else:
             command.extend(["--timeout", "86400"])
+        if taubench_domain == "banking_knowledge":
+            if "--retrieval-config" in command:
+                command[command.index("--retrieval-config") + 1] = "alltools-qwen"
+            else:
+                command.extend(["--retrieval-config", "alltools-qwen"])
+        resume_source = taubench_resume_source(
+            prefix, bench_dir, TAUBENCH_DOMAIN_TASKS[taubench_domain]
+        )
+        if resume_source:
+            if "--resume-from" in command:
+                command[command.index("--resume-from") + 1] = str(resume_source)
+            else:
+                command.extend(["--resume-from", str(resume_source)])
         backend["timeout_seconds"] = 90000
     evolution = config_value.setdefault("evolution", {})
     evolution["max_generations"] = 1

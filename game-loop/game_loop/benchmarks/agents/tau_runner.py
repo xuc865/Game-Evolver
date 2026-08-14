@@ -19,6 +19,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--task-ids", nargs="*")
     parser.add_argument("--num-tasks", type=int)
     parser.add_argument("--num-trials", type=int, default=1)
+    parser.add_argument("--retrieval-config", default=None)
+    parser.add_argument("--auto-resume", action="store_true")
     parser.add_argument("--save-to", required=True)
     args = parser.parse_args(argv)
     agent_llm = args.agent_llm or os.environ.get("TAU_GAME_MAKING_MODEL") or os.environ.get("CODEX_MODEL")
@@ -39,6 +41,8 @@ def main(argv: list[str] | None = None) -> int:
         task_ids=args.task_ids,
         num_tasks=args.num_tasks,
         num_trials=args.num_trials,
+        retrieval_config=args.retrieval_config,
+        auto_resume=args.auto_resume,
         save_to=args.save_to,
     ))
     return 0

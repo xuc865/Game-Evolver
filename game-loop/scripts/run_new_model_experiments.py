@@ -396,11 +396,23 @@ def run_queue(model: str, bench: str, *, awesome_skills: bool = False) -> None:
             if value == "--evaluator-timeout" and command[index + 1] == "180":
                 command[index + 1] = "600"
                 break
+    elif bench == "verigame":
+        # OpenGame sessions routinely exceed ten minutes while still making
+        # progress. Keep the outer backend deadline above the bridge deadline
+        # so a successful SDK result is not misclassified as infrastructure.
+        config_value.setdefault("backend", {})["timeout_seconds"] = 7500
+        command = config_value["backend"].get("command", [])
+        for index, value in enumerate(command[:-1]):
+            if value == "--timeout":
+                command[index + 1] = "7200"
+                break
+        else:
+            command.extend(["--timeout", "7200"])
     # Bridge commands otherwise fall back to the SDK's 7200s default.  Keep
     # a bounded per-task session so a dead/stalled model endpoint cannot hold a
     # full-matrix queue indefinitely.
     command = config_value["backend"].get("command", [])
-    if bench in {"gdbench", "verigame"} and "--timeout" not in command:
+    if bench == "gdbench" and "--timeout" not in command:
         command.extend(["--timeout", "900"])
     effective_cfg.write_text(
         json.dumps(config_value, indent=2, ensure_ascii=False) + "\n",

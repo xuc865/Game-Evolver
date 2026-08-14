@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -19,11 +20,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--user-llm", default=None)
     parser.add_argument("--num-tasks", type=int, default=None)
     parser.add_argument("--num-trials", type=int, default=1)
+    parser.add_argument("--retrieval-config", default=None)
+    parser.add_argument("--resume-from", type=Path, default=None)
     parser.add_argument("--output-manifest", type=Path, required=True)
     parser.add_argument("--harness-context", type=Path, default=None)
     parser.add_argument("--timeout", type=int, default=3600)
     args = parser.parse_args(argv)
-    model = args.agent_llm or os.environ.get("CODEX_MODEL", "gpt-4.1")
+    model = args.agent_llm or os.environ.get("CODEX_MODEL", "openai/gpt-5.5")
     root = args.tau_root.resolve()  # official source; never used as a writable run root
     output_manifest = require_project_sandbox(args.output_manifest, label="output_manifest")
     result_dir = output_manifest.parent / f"tau2_{time.time_ns()}"
@@ -39,11 +42,30 @@ def main(argv: list[str] | None = None) -> int:
         command += ["--task-ids", *map(str, args.task_ids)]
     if args.num_tasks is not None:
         command += ["--num-tasks", str(args.num_tasks)]
+    if args.retrieval_config:
+        command += ["--retrieval-config", args.retrieval_config]
+    if args.resume_from:
+        source = args.resume_from.resolve()
+        if not source.is_file():
+            raise FileNotFoundError(f"Tau resume source is missing: {source}")
+        result_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, result_dir / "results.json")
+        command.append("--auto-resume")
     error = ""
     started_ns = time.time_ns()
     env = dict(os.environ)
     repo_root = Path(__file__).resolve().parents[2]
     env["PYTHONPATH"] = str(repo_root) + os.pathsep + env.get("PYTHONPATH", "")
+    local_srt_bin = repo_root / ".tools" / "sandbox-runtime" / "node_modules" / ".bin"
+    if local_srt_bin.is_dir():
+        env["PATH"] = str(local_srt_bin) + os.pathsep + env.get("PATH", "")
+    evaluator_key = select_provider_api_key(
+        "gpt55", env, salt=f"{output_manifest}:tau-evaluator"
+    )
+    env["TAU_EVALUATOR_MODEL"] = "openai/gpt-5.5"
+    env["TAU_EVALUATOR_API_BASE"] = "https://xmcode.shop/v1"
+    if evaluator_key:
+        env["TAU_EVALUATOR_API_KEY"] = evaluator_key
     # Tau/LiteLLM is run against the configured OpenAI-compatible deployment.
     # Keep the official source read-only and put all caches/home state in the
     # project sandbox as well.
