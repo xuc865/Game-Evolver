@@ -254,21 +254,55 @@ def cmd_pygame_runtime(args: argparse.Namespace) -> int:
 
 
 def cmd_gdbench_validation(args: argparse.Namespace) -> int:
-    artifact = _artifact_root(Path(args.artifact))
-    project = artifact / "project.godot"
-    scripts = list((artifact / "scripts").glob("*.gd")) if (artifact / "scripts").is_dir() else []
-    passed = project.is_file() and bool(scripts)
-    _emit(
-        {
-            "passed": passed,
-            "score": 1.0 if passed else 0.0,
-            "diagnostics": [
-                f"project.godot={project.is_file()}",
-                f"script_count={len(scripts)}",
-                f"task_source={args.task_source}",
-            ],
-        }
+    import shutil
+    import tempfile
+
+    from game_loop.benchmarks.gdbench_bridge import (
+        _default_godot_path,
+        _godot_backend_error,
+        _copy_hidden_validation,
     )
+
+    artifact = _artifact_root(Path(args.artifact))
+    task_source = Path(args.task_source).resolve()
+    godot = args.godot_bin or _default_godot_path(task_source)
+    backend_error = _godot_backend_error(godot)
+    if backend_error:
+        _emit({"passed": None, "score": None, "infrastructure_error": True,
+               "diagnostics": [backend_error]})
+        return 2
+    with tempfile.TemporaryDirectory(prefix="gdbench-probe-") as td:
+        task = Path(td) / task_source.name
+        shutil.copytree(artifact, task)
+        _copy_hidden_validation(task_source, task)
+        try:
+            imported = subprocess.run(
+                [godot, "--headless", "--import", "--quit", "--path", str(task)],
+                capture_output=True, text=True, timeout=args.timeout, check=False,
+            )
+            validated = subprocess.run(
+                [godot, "--headless", "--path", str(task), "res://scenes/test.tscn"],
+                capture_output=True, text=True, timeout=args.timeout, check=False,
+            )
+        except subprocess.TimeoutExpired:
+            _emit({"passed": None, "score": None, "infrastructure_error": True,
+                   "diagnostics": ["Official validator timed out"]})
+            return 2
+    output = validated.stdout + validated.stderr
+    passed = "VALIDATION_PASSED" in output
+    failed = "VALIDATION_FAILED" in output
+    if not passed and not failed:
+        detail = (output or imported.stdout + imported.stderr).strip()[-2000:]
+        _emit({"passed": None, "score": None, "infrastructure_error": True,
+               "diagnostics": ["Official validator emitted no result marker", detail]})
+        return 2
+    marker = next(
+        (line.strip() for line in output.splitlines()
+         if "VALIDATION_PASSED" in line or "VALIDATION_FAILED" in line),
+        "official validation completed",
+    )
+    _emit({"passed": passed, "score": 1.0 if passed else 0.0,
+           "diagnostics": [marker]})
     return 0 if passed else 1
 
 
@@ -318,6 +352,7 @@ def build_parser() -> argparse.ArgumentParser:
     gdbench.add_argument("--artifact", required=True)
     gdbench.add_argument("--task-source", required=True)
     gdbench.add_argument("--godot-bin", default=None)
+    gdbench.add_argument("--timeout", type=int, default=600)
     gdbench.set_defaults(func=cmd_gdbench_validation)
     return parser
 

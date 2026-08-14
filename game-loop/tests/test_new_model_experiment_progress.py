@@ -39,7 +39,7 @@ def test_case_requires_a_real_evaluation_to_complete():
     assert runner._classify_case(0, state) == "completed"
 
 
-def test_gdbench_no_validation_marker_is_a_valid_negative(tmp_path):
+def test_gdbench_no_validation_marker_is_infrastructure_failure(tmp_path):
     from game_loop.benchmarks.gdbench import GameDevBenchAdapter
 
     result = tmp_path / "result.json"
@@ -58,11 +58,11 @@ def test_gdbench_no_validation_marker_is_a_valid_negative(tmp_path):
 
     evaluation = GameDevBenchAdapter({}).parse_evaluation(result)
 
-    assert evaluation.feasible is True
+    assert evaluation.feasible is False
     assert evaluation.primary_score == 0.0
 
 
-def test_paused_gdbench_result_recovers_without_another_model_call(tmp_path):
+def test_paused_gdbench_result_without_marker_is_not_recovered(tmp_path):
     candidate = tmp_path / "generation_001" / "candidate_01"
     result = candidate / "gdbench_result" / "result.json"
     result.parent.mkdir(parents=True)
@@ -88,11 +88,7 @@ def test_paused_gdbench_result_recovers_without_another_model_call(tmp_path):
 
     recovered = runner._recover_paused_gdbench_state(tmp_path, state)
 
-    assert recovered is not None
-    assert recovered["status"] == "completed"
-    assert recovered["evaluator_queries"] == 1
-    assert recovered["model_calls"] == 1
-    assert recovered["champion_result"]["primary_score"] == 0.0
+    assert recovered is None
 
 
 def test_true_paused_infrastructure_retries_in_current_run_root(tmp_path, monkeypatch):

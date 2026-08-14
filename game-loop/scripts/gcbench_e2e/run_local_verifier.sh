@@ -108,9 +108,8 @@ if [ "$use_local" = "1" ]; then
     "${judge_args[@]}"
   )
   if [ "$judge" = "openai" ] && [ -n "${GAMECRAFT_BENCH_JUDGE_OPENAI_BASE_URL:-${OPENAI_BASE_URL:-}}" ]; then
-    # All four local evolution runs share one judge deployment. Serialize the
-    # complete public-verifier call across processes; fcntl releases the lock
-    # automatically if a verifier is killed or crashes.
+    # All local runs share one judge deployment. Bound complete verifier calls
+    # with cross-process slots; fcntl releases a slot if a verifier is killed.
     judge_lock="${GAMECRAFT_BENCH_JUDGE_LOCK_PATH:-${TMPDIR:-/tmp}/gamecraft-bench-public-judge.lock}"
     verifier_cmd=(
       "$PROJECT_ROOT/scripts/gcbench_e2e/with_judge_lock.py"

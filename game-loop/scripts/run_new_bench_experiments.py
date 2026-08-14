@@ -41,6 +41,12 @@ SEED_ARTIFACTS = {
 
 BENCHES = ["terminalbench", "taubench", "nl2repo"]
 MODELS = ["kimi", "qwen3.6-27b", "glm5.2", "claude", "gpt55", "deepseek_v4"]
+TAUBENCH_DOMAIN_TASKS = {
+    "airline": 50,
+    "retail": 114,
+    "telecom": 114,
+    "banking_knowledge": 97,
+}
 
 TASK_SOURCES = {
     "nl2repo": ROOT / "third_party" / "NL2RepoBench" / "NL2RepoBench_src" / "test_files",
@@ -110,7 +116,7 @@ def discover_tasks(bench: str) -> list[Path]:
     return tasks
 
 
-def load_done_ids(out_dir: Path) -> set[str]:
+def load_done_ids(out_dir: Path, *, taubench_expected: int = 50) -> set[str]:
     done: set[str] = set()
     summary_path = out_dir / "summary.json"
     if summary_path.is_file():
@@ -154,7 +160,7 @@ def load_done_ids(out_dir: Path) -> set[str]:
                             if isinstance(rj(path).get("simulations"), list)
                         ),
                         default=0,
-                    ) < 50:
+                    ) < taubench_expected:
                         continue
                 done.add(run_id)
         except Exception:
@@ -162,11 +168,22 @@ def load_done_ids(out_dir: Path) -> set[str]:
     return done
 
 
-def historical_run_dir(prefix: str, bench: str, run_id: str) -> Path | None:
+def historical_run_dir(
+    prefix: str,
+    bench: str,
+    run_id: str,
+    *,
+    taubench_domain: str = "airline",
+) -> Path | None:
+    bench_dir = (
+        f"{bench}_{taubench_domain}"
+        if bench == "taubench" and taubench_domain != "airline"
+        else bench
+    )
     candidates = sorted(
         (
             run_root / run_id
-            for run_root in RUNS.glob(f"{prefix}_{bench}-resume-*")
+            for run_root in RUNS.glob(f"{prefix}_{bench_dir}-resume-*")
             if (run_root / run_id).is_dir()
         ),
         key=lambda path: path.parent.name,
@@ -319,8 +336,12 @@ def terminalbench_docker_ready() -> tuple[bool, str]:
     return False, "Docker daemon is not running"
 
 
-def run_queue(model: str, bench: str) -> None:
+def run_queue(model: str, bench: str, *, taubench_domain: str = "airline") -> None:
     qid = queue_id(model, bench)
+    if bench == "taubench":
+        if taubench_domain not in TAUBENCH_DOMAIN_TASKS:
+            raise ValueError(f"unsupported TauBench domain: {taubench_domain}")
+        qid = f"{qid}_{taubench_domain}"
     cfg = config_for(bench, model)
     if not cfg.is_file():
         print(f"  SKIP {qid}: missing config {cfg}")
@@ -333,11 +354,28 @@ def run_queue(model: str, bench: str) -> None:
 
     prefix = f"new_bench_{MODEL_CONFIG_SUFFIX[model]}"
     ts = time.strftime("%Y%m%d-%H%M%S")
-    out_dir = RUNS / f"{prefix}_{bench}-resume-{ts}"
+    bench_dir = (
+        f"{bench}_{taubench_domain}"
+        if bench == "taubench" and taubench_domain != "airline"
+        else bench
+    )
+    out_dir = RUNS / f"{prefix}_{bench_dir}-resume-{ts}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     effective_cfg = out_dir / "config.json"
     config_value = json.loads(cfg.read_text(encoding="utf-8"))
+    if bench == "taubench":
+        backend = config_value.setdefault("backend", {})
+        command = backend.get("command", [])
+        if "--domain" in command:
+            command[command.index("--domain") + 1] = taubench_domain
+        else:
+            command.extend(["--domain", taubench_domain])
+        if "--timeout" in command:
+            command[command.index("--timeout") + 1] = "86400"
+        else:
+            command.extend(["--timeout", "86400"])
+        backend["timeout_seconds"] = 90000
     evolution = config_value.setdefault("evolution", {})
     evolution["max_generations"] = 1
     evolution["candidates_per_generation"] = 1
@@ -347,16 +385,17 @@ def run_queue(model: str, bench: str) -> None:
     )
 
     tasks = discover_tasks(bench)
-    done_ids = load_done_ids(out_dir)
+    taubench_expected = TAUBENCH_DOMAIN_TASKS.get(taubench_domain, 50)
+    done_ids = load_done_ids(out_dir, taubench_expected=taubench_expected)
     # also check previous run dirs
     for d in RUNS.iterdir():
-        if d.is_dir() and d.name.startswith(f"{prefix}_{bench}-resume-"):
-            done_ids |= load_done_ids(d)
+        if d.is_dir() and d.name.startswith(f"{prefix}_{bench_dir}-resume-"):
+            done_ids |= load_done_ids(d, taubench_expected=taubench_expected)
 
     queue_list = []
     for task in tasks:
         task_name = task.name if task.is_dir() else task.stem
-        run_id = f"{prefix}_{bench}_{task_name}"
+        run_id = f"{prefix}_{bench_dir}_{task_name}"
         if run_id not in done_ids:
             queue_list.append((task, run_id))
 
@@ -370,6 +409,7 @@ def run_queue(model: str, bench: str) -> None:
         "kind": f"{prefix}_{bench}",
         "model": model,
         "bench": bench,
+        "domain": taubench_domain if bench == "taubench" else None,
         "config": str(cfg),
         "out_dir": str(out_dir),
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
@@ -390,7 +430,12 @@ def run_queue(model: str, bench: str) -> None:
     for idx, (task, run_id) in enumerate(queue_list, 1):
         if (out_dir / "STOP").exists():
             break
-        run_dir = historical_run_dir(prefix, bench, run_id) or (out_dir / run_id)
+        run_dir = historical_run_dir(
+            prefix,
+            bench,
+            run_id,
+            taubench_domain=taubench_domain,
+        ) or (out_dir / run_id)
         log_path = out_dir / f"{run_id}.log"
         started = time.strftime("%Y-%m-%dT%H:%M:%S%z")
         with (out_dir / "runner.log").open("a", encoding="utf-8") as rl:
@@ -531,6 +576,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="General benchmark baseline runner (6×3)")
     parser.add_argument("--queue", type=str, default=None,
                         help="Queue ID: {model}_{bench} e.g. kimi_swebench")
+    parser.add_argument(
+        "--taubench-domain",
+        choices=sorted(TAUBENCH_DOMAIN_TASKS),
+        default="airline",
+        help="TauBench domain (only used with a taubench queue)",
+    )
     parser.add_argument("--launch-all", action="store_true",
                         help="Launch all 16 queues as background processes")
     parser.add_argument("--dry-run", action="store_true")
@@ -553,7 +604,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Invalid queue ID: {args.queue}. Expected one of the configured model/benchmark pairs")
             return 1
         os.environ.setdefault("SKIP_LOOP_EVOLVE", "1")
-        run_queue(model, bench)
+        run_queue(model, bench, taubench_domain=args.taubench_domain)
         return 0
 
     print(__doc__)

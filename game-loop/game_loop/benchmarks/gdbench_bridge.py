@@ -6,6 +6,7 @@ import multiprocessing as mp
 import os
 import queue
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -83,6 +84,15 @@ def doctor(
 
 
 def _default_godot_path(gdbench_root: Path) -> str:
+    # Prefer a local engine.  The Docker wrapper is a useful fallback, but its
+    # executable can resolve while the daemon is down; that previously turned
+    # every validator invocation into an apparent benchmark failure.
+    for candidate in (
+        shutil.which("godot"),
+        "/Applications/Godot.app/Contents/MacOS/Godot",
+    ):
+        if candidate and Path(candidate).is_file():
+            return str(Path(candidate).resolve())
     start = gdbench_root.resolve()
     for root in (start, *start.parents):
         for candidate in (
@@ -92,6 +102,23 @@ def _default_godot_path(gdbench_root: Path) -> str:
             if candidate.is_file():
                 return str(candidate)
     return "godot"
+
+
+def _godot_backend_error(godot_path: str) -> str | None:
+    try:
+        completed = subprocess.run(
+            [godot_path, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return f"Godot backend unavailable: {exc}"
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip()
+        return f"Godot backend unavailable: {detail or f'exit {completed.returncode}'}"
+    return None
 
 
 def run_bridge(
@@ -164,11 +191,23 @@ def run_bridge(
             )
             runner.tasks_dir = tasks_dir
             runner.results_dir = evaluation_root / "results"
-            native = _run_official_validation_with_timeout(
-                runner=runner,
-                task_name=task_name,
-                timeout_seconds=evaluator_timeout,
+            backend_error = _godot_backend_error(runner.godot_path)
+            native = (
+                {
+                    "task_name": task_name,
+                    "success": False,
+                    "message": backend_error,
+                    "infrastructure_error": True,
+                }
+                if backend_error
+                else _run_official_validation_with_timeout(
+                    runner=runner,
+                    task_name=task_name,
+                    timeout_seconds=evaluator_timeout,
+                )
             )
+            if native.get("message") == "No validation result found in output":
+                native["infrastructure_error"] = True
             result.update(native)
             result["solver_success"] = True
 
@@ -180,6 +219,7 @@ def run_bridge(
         json.dumps({"validation": {
             "success": bool(result.get("success", False)),
             "message": str(result.get("message", "")),
+            "infrastructure_error": bool(result.get("infrastructure_error", False)),
         }, "solver": {"success": submission.status == "completed"}}, indent=2) + "\n",
         encoding="utf-8",
     )

@@ -73,10 +73,13 @@ class GameDevBenchAdapter(BenchmarkAdapter):
         success = bool(validation.get("success", False))
         message = str(validation.get("message", value.get("message", ""))).strip()
         solver = value.get("solver", {}) if isinstance(value.get("solver"), dict) else {}
+        infrastructure_error = bool(validation.get("infrastructure_error", False))
         infrastructure_markers = (
             "project.godot not found",
             "validation timed out",
             "error running validation",
+            "godot backend unavailable",
+            "no validation result found in output",
             "opengame failed",
         )
         solver_success = bool(solver.get("success", True))
@@ -84,6 +87,7 @@ class GameDevBenchAdapter(BenchmarkAdapter):
             success
             or (
                 solver_success
+                and not infrastructure_error
                 and not any(marker in message.lower() for marker in infrastructure_markers)
             )
         )
@@ -93,7 +97,10 @@ class GameDevBenchAdapter(BenchmarkAdapter):
             objectives={"task_correctness": 1.0 if success else 0.0},
             constraints={"project_loadable": feasible, "hidden_validation": success},
             diagnostics=[] if success or not message else [message],
-            evaluator={"name": "GameDevBench hidden validation"},
+            evaluator={
+                "name": "GameDevBench hidden validation",
+                "infrastructure_failure": infrastructure_error or not feasible,
+            },
             cost={"agent_usd": float(solver.get("cost_usd", value.get("cost_usd", 0.0)) or 0.0)},
             terminal_success=success,
             raw_result_ref=str(path.resolve()),
