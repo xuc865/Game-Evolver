@@ -26,6 +26,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from game_loop.benchmarks.runtime_config import runtime_config_from_environment
+from game_loop.config import HarnessEvolutionConfig
+from game_loop.core.harness import HarnessEvolutionEngine, HarnessProfile
+from game_loop.experiment_presets import build_inner_harness_evolution
 from game_loop.runtime import GameTask, OpenGameRuntime, OpenGameRuntimeConfig
 
 
@@ -34,9 +37,11 @@ TASKS = OFFICIAL / "spec"
 SEED = ROOT / "experiments" / "public_baseline_seeds" / "verigame"
 OFFICIAL_WRAPPER = ROOT / "scripts" / "run_gamegen_verifier_official.py"
 PROVIDERS = {
+    "claude": "claude",
     "kimi": "Kimi-K2.7-Code",
     "qwen": "Qwen3.6-27B",
     "glm": "GLM-5.2-W4AFP8",
+    "gpt55": "gpt-5.5",
     "deepseek": "deepseek-v4-flash",
 }
 REQUIRED_ARTIFACTS = ("package.json", "src", "data.md", "state_injection_api.md")
@@ -60,6 +65,15 @@ def write_json(path: Path, value: dict) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     temporary.replace(path)
+
+
+def render_harness_context(path: Path | None) -> tuple[str, str | None]:
+    if path is None:
+        return "", None
+    profile = HarnessProfile.from_dict(read_json(path.resolve()))
+    config = HarnessEvolutionConfig.from_dict(build_inner_harness_evolution("gcbench"))
+    engine = HarnessEvolutionEngine(ROOT / "experiments" / ".harness-render-only", config, allow_mutation=False)
+    return engine.render(profile), profile.harness_id
 
 
 def prune_rebuildable_dependencies(attempt_root: Path) -> int:
@@ -132,8 +146,8 @@ def select_keypoints(keypoints: Path, task_name: str, sample_size: int) -> str:
     return ",".join(identifier for identifier in identifiers if identifier in selected)
 
 
-def generation_prompt(specification: str) -> str:
-    return (
+def generation_prompt(specification: str, harness_context: str = "") -> str:
+    prompt = (
         "# GameGen-Verifier public generation test\n\n"
         "Implement the supplied game specification as a runnable Vite/TypeScript web game. "
         "Use the available awesome game-development skills when relevant. This artifact will "
@@ -161,9 +175,12 @@ def generation_prompt(specification: str) -> str:
         "immediately and return the final response.\n\n"
         "## Public specification\n\n" + specification
     )
+    if harness_context:
+        prompt += "\n\n" + harness_context
+    return prompt
 
 
-def generate(provider: str, task: Path, attempt_root: Path, timeout: int) -> tuple[Path | None, dict]:
+def generate(provider: str, task: Path, attempt_root: Path, timeout: int, harness_context: str = "") -> tuple[Path | None, dict]:
     episode = attempt_root / "generation_episode"
     config = runtime_config_from_environment(
         provider=provider, timeout_seconds=min(timeout, MAX_GENERATION_SECONDS)
@@ -186,7 +203,7 @@ def generate(provider: str, task: Path, attempt_root: Path, timeout: int) -> tup
     game_task = GameTask(
         task_id=f"verigame-{task.stem}",
         benchmark_id="gamegen-verifier-public",
-        prompt=generation_prompt(task.read_text(encoding="utf-8")),
+        prompt=generation_prompt(task.read_text(encoding="utf-8"), harness_context),
         task_source_ref=str(task.resolve()),
         workspace_seed_ref=str(SEED.resolve()),
         artifact_relpath=".",
@@ -330,7 +347,7 @@ def evaluate_official(
 def run_case(
     provider: str, task: Path, case_dir: Path, shared_root: Path,
     generation_timeout: int, evaluation_timeout: int, only_keypoints: str,
-    keypoint_sample_size: int,
+    keypoint_sample_size: int, harness_context: str, harness_id: str | None,
 ) -> dict:
     attempt_root = case_dir / f"attempt-{int(time.time())}"
     attempt_root.mkdir(parents=True, exist_ok=False)
@@ -354,7 +371,7 @@ def run_case(
                 write_json(attempt_root / "generation_result.json", generation)
                 break
         if artifact is None:
-            artifact, generation = generate(provider, task, attempt_root, generation_timeout)
+            artifact, generation = generate(provider, task, attempt_root, generation_timeout, harness_context)
         if artifact is None:
             raise RuntimeError("generation did not produce all official evaluator inputs")
         keypoints = ensure_shared_keypoints(task, shared_root, evaluation_timeout)
@@ -379,6 +396,7 @@ def run_case(
         "evolution_enabled": False,
         "provider": provider,
         "model": PROVIDERS[provider],
+        "harness_id": harness_id,
         "task": task.stem,
         "status": status,
         "started_at": started,
@@ -399,6 +417,7 @@ def run_provider(args: argparse.Namespace, provider: str) -> None:
     tasks = task_files()[:1] if args.smoke else task_files()
     provider_root = args.output_root.resolve() / provider
     provider_root.mkdir(parents=True, exist_ok=True)
+    harness_context, harness_id = render_harness_context(args.harness_profile)
     summary_path = provider_root / "summary.json"
     summary = read_json(summary_path)
     summary.update({
@@ -409,6 +428,8 @@ def run_provider(args: argparse.Namespace, provider: str) -> None:
         "evaluator_implementation": "official-github-reference-implementation",
         "provider": provider,
         "model": PROVIDERS[provider],
+        "harness_id": harness_id,
+        "harness_profile": None if args.harness_profile is None else str(args.harness_profile.resolve()),
         "planned_count": len(tasks),
         "keypoint_sample_size": args.keypoint_sample_size,
     })
@@ -422,7 +443,7 @@ def run_provider(args: argparse.Namespace, provider: str) -> None:
         item = run_case(
             provider, task, provider_root / task.stem, args.output_root.resolve() / "_shared_keypoints",
             args.generation_timeout, args.evaluation_timeout, args.only_keypoints,
-            args.keypoint_sample_size,
+            args.keypoint_sample_size, harness_context, harness_id,
         )
         by_task[task.stem] = item
         summary["cases"] = [by_task[name] for name in sorted(by_task)]
@@ -453,6 +474,7 @@ def main() -> int:
     parser.add_argument("--only-keypoints", default="")
     parser.add_argument("--keypoint-sample-size", type=int, default=DEFAULT_KEYPOINT_SAMPLE_SIZE)
     parser.add_argument("--smoke", action="store_true")
+    parser.add_argument("--harness-profile", type=Path, default=None)
     args = parser.parse_args()
     if not all((OFFICIAL.is_dir(), TASKS.is_dir(), SEED.is_dir(), OFFICIAL_WRAPPER.is_file())):
         raise SystemExit("official VeriGame public-test prerequisites are missing")

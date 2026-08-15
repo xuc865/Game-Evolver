@@ -27,6 +27,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from game_loop.cache_keys import build_cache_key_headers
 from game_loop.runtime.credentials import provider_api_keys, provider_key_start_index
 
 _BASE_SYSTEM_PROMPT = """\
@@ -263,18 +264,25 @@ class LocalChatAgent:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        """Call the primary endpoint, then retry Qwen timeouts via fallback."""
+        """Call the primary endpoint, then use an explicitly configured fallback."""
         try:
             return self._call_api_primary(messages, tools)
         except RuntimeError as exc:
-            if "timeout" not in str(exc).casefold():
-                raise
-            fallback = self._qwen_timeout_fallback()
+            detail = str(exc).casefold()
+            recoverable = (
+                "timeout" in detail
+                or "api stream error" in detail
+                or "url error" in detail
+                or any(f"api error {code}" in detail for code in (402, 403, 408, 429, 500, 502, 503, 504, 524))
+            )
+            fallback = self._configured_fallback() if recoverable else None
+            if fallback is None and "timeout" in detail:
+                fallback = self._qwen_timeout_fallback()
             if fallback is None:
                 raise
             base_url, model, api_key = fallback
             print(
-                f"[chat_agent] primary Qwen call timed out; switching to fallback {base_url} {model}",
+                f"[chat_agent] primary call failed; switching to fallback {base_url} {model}",
                 file=sys.stderr,
             )
             original = (self.api_base, self.model, self.api_key, self.api_keys)
@@ -288,8 +296,20 @@ class LocalChatAgent:
             finally:
                 self.api_base, self.model, self.api_key, self.api_keys = original
 
+    @staticmethod
+    def _configured_fallback() -> tuple[str, str, str] | None:
+        base_url = os.environ.get("GAME_LOOP_CHAT_FALLBACK_API_BASE", "").strip()
+        model = os.environ.get("GAME_LOOP_CHAT_FALLBACK_MODEL", "").strip()
+        key_env = os.environ.get(
+            "GAME_LOOP_CHAT_FALLBACK_API_KEY_ENV", "OPENROUTER_API_KEY"
+        ).strip()
+        api_key = os.environ.get(key_env, "").strip()
+        if not all((base_url, model, api_key)):
+            return None
+        return base_url, model, api_key
+
     def _qwen_timeout_fallback(self) -> tuple[str, str, str] | None:
-        if self.provider != "qwen":
+        if getattr(self, "provider", "") != "qwen":
             return None
         base_url = os.environ.get("GAME_LOOP_QWEN_FALLBACK_API_BASE", "").strip()
         model = os.environ.get("GAME_LOOP_QWEN_FALLBACK_MODEL", "").strip()
@@ -364,9 +384,13 @@ class LocalChatAgent:
                     f"API call exceeded total timeout of {total_timeout}s"
                 )
             data = json.dumps(payload).encode("utf-8")
+            attempt_headers = dict(headers)
+            attempt_headers.update(build_cache_key_headers())
             if api_keys:
-                headers["Authorization"] = f"Bearer {api_keys[key_index]}"
-            req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+                attempt_headers["Authorization"] = f"Bearer {api_keys[key_index]}"
+            req = urllib.request.Request(
+                url, data=data, headers=attempt_headers, method="POST"
+            )
             try:
                 with urllib.request.urlopen(
                     req, timeout=max(1, min(api_timeout, int(remaining)))

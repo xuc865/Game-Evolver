@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Any
 
 from game_loop.benchmarks import load_adapter
+from game_loop.cache_keys import build_cache_key_headers
+from game_loop.runtime.credentials import select_provider_api_key
 from game_loop.core.attribution import AttributionReport, TrajectoryAttributor
 from game_loop.core.agentx_runtime import (
     AgentXRuntimeConfig,
@@ -21,6 +23,10 @@ from game_loop.core.agentx_runtime import (
     build_agentx_replay_cases,
 )
 from game_loop.config import AppConfig, HarnessEvolutionConfig
+from game_loop.experiment_presets import (
+    build_inner_harness_evolution,
+    build_outer_harness_evolution,
+)
 from game_loop.core.harness_evolution_memory import (
     HarnessEvolutionMemory,
     build_rejection_experience,
@@ -1483,8 +1489,24 @@ def _build_llm_dynamic_gradient(
     ]
     model_name = model.casefold()
     proposer_max_tokens = 256 if "qwen" in model_name else 1200
+    shortlist_max_tokens = 1024 if "deepseek" in model_name else 256
     proposer_timeout = int(os.environ.get("GAME_LOOP_HARNESS_PROPOSER_TIMEOUT_SECONDS", "120"))
     proposer_attempts = int(os.environ.get("GAME_LOOP_HARNESS_PROPOSER_ATTEMPTS", "4"))
+    provider = os.environ.get(
+        "CODEX_PROVIDER",
+        config.backend.env.get(
+            "CODEX_PROVIDER",
+            config.backend.env.get("GAME_LOOP_BACKBONE_PROVIDER", ""),
+        ),
+    ).strip().casefold()
+    proposer_api_key = (
+        select_provider_api_key(
+            provider,
+            salt=f"{outer_dir}:harness-proposer:{epoch}",
+        )
+        or os.environ.get("CODEX_API_KEY", "")
+        or "EMPTY"
+    )
     proposal_dir = outer_dir / "harness_proposals"
     proposal_dir.mkdir(parents=True, exist_ok=True)
     proposal_path = proposal_dir / f"epoch_{epoch:03d}.json"
@@ -1526,14 +1548,25 @@ def _build_llm_dynamic_gradient(
             }
             if any(name in model_name for name in ("qwen", "glm", "kimi")):
                 payload_body["chat_template_kwargs"] = {"enable_thinking": False}
+            request_headers = {
+                "Authorization": f"Bearer {proposer_api_key}",
+                "Content-Type": "application/json",
+                "User-Agent": "game-loop/1.0",
+            }
+            request_headers.update(
+                build_cache_key_headers(
+                    default_key=config.backend.env.get("CODEX_CACHE_KEY", ""),
+                    default_header=config.backend.env.get(
+                        "CODEX_CACHE_KEY_HEADER", "X-Cache-Key"
+                    ),
+                    default_mode=config.backend.env.get("CODEX_CACHE_KEY_MODE", "static"),
+                )
+            )
             request = urllib.request.Request(
                 base_url + "/chat/completions",
                 data=json.dumps(payload_body).encode("utf-8"),
                 method="POST",
-                headers={
-                    "Authorization": f"Bearer {os.environ.get('CODEX_API_KEY') or 'EMPTY'}",
-                    "Content-Type": "application/json",
-                },
+                headers=request_headers,
             )
             try:
                 with urllib.request.urlopen(request, timeout=proposer_timeout) as response:
@@ -1558,7 +1591,7 @@ def _build_llm_dynamic_gradient(
         ),
         "schema": {"element_ids": ["one to three ids from catalog_index"]},
     })
-    shortlist_value = request_stage("shortlist", shortlist_prompt, 256)
+    shortlist_value = request_stage("shortlist", shortlist_prompt, shortlist_max_tokens)
     valid_ids = {item["id"] for item in compatible}
     shortlist: list[str] = []
     if shortlist_value is not None:

@@ -26,6 +26,9 @@ if str(ROOT) not in sys.path:
 
 from game_loop.benchmarks.vgamegym_eval import candidate_execution_failure, infrastructure_failure, normalize_official_result
 from game_loop.benchmarks.runtime_config import runtime_config_from_environment
+from game_loop.config import HarnessEvolutionConfig
+from game_loop.core.harness import HarnessEvolutionEngine, HarnessProfile
+from game_loop.experiment_presets import build_inner_harness_evolution
 from game_loop.runtime import GameTask, OpenGameRuntime
 from game_loop.utils import atomic_write_json, read_json, utc_now
 
@@ -77,6 +80,15 @@ def _read_dataset(path: Path) -> list[dict[str, Any]]:
         seen.add(task_id)
         rows.append({"id": task_id, "requirement": requirement})
     return rows
+
+
+def _render_harness_context(path: Path | None) -> tuple[str, str | None]:
+    if path is None:
+        return "", None
+    profile = HarnessProfile.from_dict(read_json(path.resolve()))
+    config = HarnessEvolutionConfig.from_dict(build_inner_harness_evolution("gcbench"))
+    engine = HarnessEvolutionEngine(ROOT / "experiments" / ".harness-render-only", config, allow_mutation=False)
+    return engine.render(profile), profile.harness_id
 
 
 def _task_dir(root: Path, task_id: str) -> Path:
@@ -310,10 +322,11 @@ def _summary(root: Path, model: str, total: int) -> dict[str, Any]:
     }
 
 
-def run_model(*, model: str, output_root: Path, limit: int | None, evaluator_timeout: int, evaluator_retries: int, retry_generation: bool, generation_retries: int = 3, shard_index: int = 0, shard_count: int = 1, awesome_skills: bool = True) -> int:
+def run_model(*, model: str, output_root: Path, limit: int | None, evaluator_timeout: int, evaluator_retries: int, retry_generation: bool, generation_retries: int = 3, shard_index: int = 0, shard_count: int = 1, awesome_skills: bool = True, harness_profile: Path | None = None) -> int:
     rows = _read_dataset(DATASET)
     model_root = (output_root / model).resolve()
     model_root.mkdir(parents=True, exist_ok=True)
+    harness_context, harness_id = _render_harness_context(harness_profile)
     canonical_shards_path = output_root.resolve() / ".canonical_shard_count"
     if limit is None and canonical_shards_path.is_file():
         canonical_shards = int(canonical_shards_path.read_text(encoding="utf-8").strip())
@@ -370,7 +383,9 @@ def run_model(*, model: str, output_root: Path, limit: int | None, evaluator_tim
     atomic_write_json(model_root / "run_manifest.json", {
         "schema_version": "vgamegym-full-awesome-v1", "model": model,
         "dataset": str(DATASET.resolve()), "dataset_tasks": len(rows),
-        "awesome_skills": awesome_skills, "runtime": config.to_dict(redact_environment=True), "started_at": utc_now(),
+        "awesome_skills": awesome_skills, "harness_id": harness_id,
+        "harness_profile": None if harness_profile is None else str(harness_profile.resolve()),
+        "runtime": config.to_dict(redact_environment=True), "started_at": utc_now(),
     })
     selected = rows if limit is None else rows[:max(0, limit)]
     if shard_count > 1:
@@ -488,6 +503,8 @@ def run_model(*, model: str, output_root: Path, limit: int | None, evaluator_tim
                 "editing until it is complete.\n\n"
                 "## Public requirement\n\n" + str(row["requirement"])
             )
+            if harness_context:
+                prompt += "\n\n" + harness_context
             task = GameTask(task_id=f"vgg-{task_id}", benchmark_id="vgamegym", prompt=prompt,
                             task_source_ref=str(public_task), workspace_seed_ref=None, artifact_relpath=".",
                             constraints={"engine": "pygame", "evaluation_modalities": ["code", "screenshot", "video"]})
@@ -591,10 +608,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--generation-retries", type=int, default=3)
     parser.add_argument("--shard-index", type=int, default=0)
     parser.add_argument("--shard-count", type=int, default=1)
+    parser.add_argument("--harness-profile", type=Path, default=None)
     args = parser.parse_args(argv)
     if args.shard_count < 1 or not 0 <= args.shard_index < args.shard_count:
         parser.error("--shard-index must be within --shard-count")
-    return run_model(model=args.model, output_root=args.output_root, limit=args.limit, evaluator_timeout=args.evaluator_timeout, evaluator_retries=args.evaluator_retries, retry_generation=args.retry_generation, generation_retries=args.generation_retries, shard_index=args.shard_index, shard_count=args.shard_count, awesome_skills=not args.baseline)
+    return run_model(model=args.model, output_root=args.output_root, limit=args.limit, evaluator_timeout=args.evaluator_timeout, evaluator_retries=args.evaluator_retries, retry_generation=args.retry_generation, generation_retries=args.generation_retries, shard_index=args.shard_index, shard_count=args.shard_count, awesome_skills=not args.baseline, harness_profile=args.harness_profile)
 
 
 if __name__ == "__main__":

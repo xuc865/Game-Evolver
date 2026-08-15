@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, Sequence
+from typing import Protocol
 
 from game_loop.core.attribution import AttributionReport
 from game_loop.core.harness import (
@@ -18,6 +19,10 @@ from game_loop.core.harness_evolution_memory import (
     build_rejection_experience,
 )
 from game_loop.core.harness_rubric_validator import HarnessRubricValidator
+from game_loop.core.outer_harness_library import (
+    OuterHarnessLibraryAgent,
+    OuterLibraryUpdate,
+)
 from game_loop.utils import atomic_write_json, read_json, utc_now
 
 
@@ -119,6 +124,7 @@ class AgentXNestedEvolution:
         outer_rubric_validator: HarnessRubricValidator | None = None,
         inner_memory: HarnessEvolutionMemory | None = None,
         outer_memory: HarnessEvolutionMemory | None = None,
+        outer_library_agent: OuterHarnessLibraryAgent | None = None,
         outer_enabled: bool = False,
     ):
         if inner_engine.config.mutation_width != 1 or outer_engine.config.mutation_width != 1:
@@ -137,6 +143,7 @@ class AgentXNestedEvolution:
         )
         self.inner_memory = inner_memory
         self.outer_memory = outer_memory
+        self.outer_library_agent = outer_library_agent
         self.outer_enabled = outer_enabled
         self.state_path = self.run_dir / "nested_evolution.json"
 
@@ -144,6 +151,8 @@ class AgentXNestedEvolution:
         self.run_dir.mkdir(parents=True, exist_ok=True)
         inner = self.inner_engine.initialize()
         outer = self.outer_engine.initialize()
+        if self.outer_library_agent is not None:
+            self.outer_library_agent.store.initialize(self.outer_engine.elements.values())
         atomic_write_json(self.state_path, {
             "schema_version": self.schema_version,
             "terminology": {
@@ -168,6 +177,20 @@ class AgentXNestedEvolution:
             raise RuntimeError("nested evolution is not initialized")
         inner_parent = self.inner_engine.champion()
         frozen_outer = self.outer_engine.champion()
+        outer_element_ids_used: tuple[str, ...] = ()
+        outer_preparation_error: str | None = None
+        if self.outer_library_agent is not None:
+            try:
+                outer_element_ids_used = (
+                    self.outer_library_agent.store.element_ids_for_inner_proposal(
+                        frozen_outer
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001 - isolate outer metadata failure.
+                outer_element_ids_used = tuple(
+                    element.element_id for element in frozen_outer.active_elements
+                )
+                outer_preparation_error = f"{type(exc).__name__}: {exc}"
         inner_gradient = self.inner_gradient_proposer.propose_inner(
             report,
             proposer_harness=frozen_outer,
@@ -220,15 +243,108 @@ class AgentXNestedEvolution:
                     rubric_validation=inner_rubric.to_dict(),
                 )
             )
-        self.outer_engine.record_element_usage(
-            profile=frozen_outer,
-            success=inner_result.accepted,
-        )
+        legacy_outer_stats_error: str | None = None
+        try:
+            self.outer_engine.record_element_usage(
+                profile=frozen_outer,
+                success=inner_result.accepted,
+            )
+        except Exception as exc:  # noqa: BLE001 - inner result is already committed.
+            legacy_outer_stats_error = f"{type(exc).__name__}: {exc}"
+        outer_usage_error: str | None = None
+        if self.outer_library_agent is not None:
+            try:
+                outer_usage_update = self.outer_library_agent.store.record_inner_epoch(
+                    element_ids=outer_element_ids_used,
+                    result=inner_result,
+                )
+            except Exception as exc:  # noqa: BLE001 - inner result is already committed.
+                outer_usage_update = None
+                outer_usage_error = f"{type(exc).__name__}: {exc}"
+        else:
+            outer_usage_update = None
 
         frozen_inner = self.inner_engine.champion()
         outer_result: HarnessEpochResult | None = None
         outer_validation: dict[str, object]
-        if self.outer_enabled:
+        outer_gradient = None
+        if self.outer_enabled and self.outer_library_agent is not None:
+            outer_failure = outer_preparation_error or outer_usage_error
+            try:
+                revision = self.outer_library_agent.store.revision()
+            except Exception:  # noqa: BLE001 - preserve the completed inner epoch.
+                revision = 0
+            if outer_failure is not None:
+                update = OuterLibraryUpdate(
+                    epoch=epoch,
+                    status="failed_infrastructure_or_validation",
+                    revision_before=revision,
+                    revision_after=revision,
+                    shortlist=(),
+                    operations=(),
+                    additions=(),
+                    error=outer_failure,
+                )
+            else:
+                try:
+                    state = read_json(self.state_path)
+                    update = self.outer_library_agent.evolve(
+                        epoch=epoch,
+                        inner_history=list(state.get("epochs", [])),
+                        latest_inner_result=inner_result,
+                        current_inner_element_ids=outer_element_ids_used,
+                    )
+                except Exception as exc:  # noqa: BLE001 - outer failure is non-fatal.
+                    update = OuterLibraryUpdate(
+                        epoch=epoch,
+                        status="failed_infrastructure_or_validation",
+                        revision_before=revision,
+                        revision_after=revision,
+                        shortlist=(),
+                        operations=(),
+                        additions=(),
+                        error=f"{type(exc).__name__}: {exc}",
+                    )
+            engine_catalog_sync_error: str | None = None
+            try:
+                # Profile activation remains a separate content-addressed decision.
+                self.outer_engine.elements.update(
+                    self.outer_library_agent.store.catalog()
+                )
+            except Exception as exc:  # noqa: BLE001 - legacy sync is best effort.
+                engine_catalog_sync_error = f"{type(exc).__name__}: {exc}"
+            outer_parent = self.outer_engine.champion()
+            outer_reasons = [update.error] if update.error else []
+            if not update.applied and not outer_reasons:
+                outer_reasons.append(update.status)
+            if engine_catalog_sync_error is not None:
+                outer_reasons.append(engine_catalog_sync_error)
+            outer_validation = {
+                "accepted": update.applied,
+                "mode": "outer_element_library_management",
+                "inner_epoch_accepted": inner_result.accepted,
+                "target_inner_harness_id": frozen_inner.harness_id,
+                "record_element_stats": False,
+                "library_update": update.to_dict(),
+                "reasons": outer_reasons,
+                "engine_catalog_sync_error": engine_catalog_sync_error,
+                "created_at": utc_now(),
+            }
+            outer_result = HarnessEpochResult(
+                epoch=epoch,
+                parent_harness_id=outer_parent.harness_id,
+                candidate_harness_id=outer_parent.harness_id,
+                accepted=update.applied,
+                paired_deltas=(),
+                median_delta=None,
+                reasons=tuple(outer_validation["reasons"]),
+                excluded_pairs=(),
+                parent_outcomes=(),
+                candidate_outcomes=(),
+                created_at=utc_now(),
+                rubric_validation=outer_validation,
+            )
+        elif self.outer_enabled:
             # The outer epoch starts only after the complete inner epoch. Its
             # target is the resulting inner champion and remains frozen while
             # the outer harness-generation element library is updated.
@@ -250,7 +366,13 @@ class AgentXNestedEvolution:
                 "inner_epoch_accepted": inner_result.accepted,
                 "target_inner_harness_id": frozen_inner.harness_id,
                 "record_element_stats": False,
-                "reasons": [],
+                "reasons": [
+                    item for item in (
+                        outer_preparation_error,
+                        outer_usage_error,
+                        legacy_outer_stats_error,
+                    ) if item is not None
+                ],
                 "created_at": utc_now(),
             }
             outer_result = HarnessEpochResult(
@@ -272,7 +394,11 @@ class AgentXNestedEvolution:
             del outer_cases
             outer_validation = {
                 "accepted": True,
-                "mode": "outer_evolution_disabled",
+                "mode": (
+                    "outer_evolution_frozen_metadata_only"
+                    if self.outer_library_agent is not None
+                    else "outer_evolution_disabled"
+                ),
                 "inner_epoch_accepted": inner_result.accepted,
                 "target_inner_harness_id": frozen_inner.harness_id,
                 "record_element_stats": False,
@@ -289,8 +415,13 @@ class AgentXNestedEvolution:
         state["epochs"].append({
             **result.to_dict(),
             "inner_gradient": inner_gradient.to_dict(),
-            "outer_gradient": None if not self.outer_enabled else outer_gradient.to_dict(),
+            "outer_gradient": None if outer_gradient is None else outer_gradient.to_dict(),
             "inner_rubric_validation": inner_rubric.to_dict(),
+            "outer_element_ids_used_for_inner_proposal": list(outer_element_ids_used),
+            "outer_element_usage_update": outer_usage_update,
+            "outer_element_preparation_error": outer_preparation_error,
+            "outer_element_usage_error": outer_usage_error,
+            "legacy_outer_element_stats_error": legacy_outer_stats_error,
             "outer_element_library_update": outer_validation,
             "completed_at": utc_now(),
         })

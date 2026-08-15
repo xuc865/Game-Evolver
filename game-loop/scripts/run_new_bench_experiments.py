@@ -13,6 +13,7 @@ Usage:
 from __future__ import annotations
 
 import json
+import math
 import os
 import signal
 import shlex
@@ -161,6 +162,26 @@ def load_done_ids(out_dir: Path, *, taubench_expected: int = 50) -> set[str]:
                         ),
                         default=0,
                     ) < taubench_expected:
+                        continue
+                if bench == "terminalbench":
+                    manifests = sorted(
+                        (out_dir / run_id).glob(
+                            "generation_*/candidate_*/terminalbench_execution.json"
+                        ),
+                        key=lambda path: path.stat().st_mtime,
+                        reverse=True,
+                    )
+                    if not manifests:
+                        continue
+                    manifest = rj(manifests[0])
+                    reward = manifest.get("reward")
+                    if (
+                        manifest.get("infrastructure_error") is not False
+                        or isinstance(reward, bool)
+                        or not isinstance(reward, (int, float))
+                        or not math.isfinite(float(reward))
+                        or not isinstance(manifest.get("passed"), bool)
+                    ):
                         continue
                 done.add(run_id)
         except Exception:
@@ -387,16 +408,22 @@ def run_queue(model: str, bench: str, *, taubench_domain: str = "airline") -> No
 
     effective_cfg = out_dir / "config.json"
     config_value = json.loads(cfg.read_text(encoding="utf-8"))
+    backend = config_value.setdefault("backend", {})
+    backend_env = backend.setdefault("env", {})
+    if model == "glm5.2":
+        backend_env["CODEX_API_BASE"] = os.environ.get(
+            "GLM_BASE_URL", backend_env.get("CODEX_API_BASE", "")
+        )
+        backend_env["CODEX_MODEL"] = os.environ.get(
+            "GLM_MODEL", backend_env.get("CODEX_MODEL", "")
+        )
+        backend_env["CODEX_CACHE_KEY_HEADER"] = os.environ.get(
+            "GLM_CACHE_KEY_HEADER", "X-Cache-Key"
+        )
+        backend_env["CODEX_CACHE_KEY_MODE"] = os.environ.get(
+            "GLM_CACHE_KEY_MODE", "random"
+        )
     if bench == "taubench":
-        backend = config_value.setdefault("backend", {})
-        backend_env = backend.setdefault("env", {})
-        if model == "glm5.2":
-            backend_env["CODEX_API_BASE"] = os.environ.get(
-                "GLM_BASE_URL", backend_env.get("CODEX_API_BASE", "")
-            )
-            backend_env["CODEX_MODEL"] = os.environ.get(
-                "GLM_MODEL", backend_env.get("CODEX_MODEL", "")
-            )
         command = backend.get("command", [])
         if "--domain" in command:
             command[command.index("--domain") + 1] = taubench_domain
@@ -474,12 +501,24 @@ def run_queue(model: str, bench: str, *, taubench_domain: str = "airline") -> No
     for idx, (task, run_id) in enumerate(queue_list, 1):
         if (out_dir / "STOP").exists():
             break
-        run_dir = historical_run_dir(
+        historical_dir = historical_run_dir(
             prefix,
             bench,
             run_id,
             taubench_domain=taubench_domain,
-        ) or (out_dir / run_id)
+        )
+        # Benchmark retries and GLM endpoint/model/cache-key changes must not
+        # reuse a stopped evolution state. Prior manifests still determine
+        # which canonical tasks are already valid.
+        run_dir = (
+            historical_dir
+            if (
+                historical_dir is not None
+                and model != "glm5.2"
+                and bench != "terminalbench"
+            )
+            else out_dir / run_id
+        )
         log_path = out_dir / f"{run_id}.log"
         started = time.strftime("%Y-%m-%dT%H:%M:%S%z")
         with (out_dir / "runner.log").open("a", encoding="utf-8") as rl:

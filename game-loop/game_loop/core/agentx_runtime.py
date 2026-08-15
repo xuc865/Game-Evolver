@@ -1,23 +1,20 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
 
 from game_loop.config import AppConfig
 from game_loop.core.agentx import (
     AgentXNestedEvolution,
-    InnerGradientProposer,
-    NestedReplayOracle,
-    OuterGradientProposer,
     PairedOutcomes,
 )
 from game_loop.core.attribution import AttributionReport
 from game_loop.core.episode_runner import run_frozen_harness_episode
 from game_loop.core.harness import (
     HarnessEpochResult,
-    HarnessEvolutionEngine,
     HarnessEvolutionConfig,
+    HarnessEvolutionEngine,
     HarnessProfile,
     HarnessReplayCase,
     HarnessSemanticGradient,
@@ -28,6 +25,10 @@ from game_loop.core.harness_rubric_validator import (
     HeuristicRubricJudge,
     TaskPoolEntry,
     sample_task_pool,
+)
+from game_loop.core.outer_harness_library import (
+    OuterHarnessLibraryAgent,
+    OuterHarnessLibraryStore,
 )
 
 
@@ -63,8 +64,13 @@ class AttributionDrivenInnerGradientProposer:
         "workflow",
     )
 
-    def __init__(self, memory: HarnessEvolutionMemory | None = None):
+    def __init__(
+        self,
+        memory: HarnessEvolutionMemory | None = None,
+        outer_library_store: OuterHarnessLibraryStore | None = None,
+    ):
         self.memory = memory
+        self.outer_library_store = outer_library_store
 
     def propose_inner(
         self,
@@ -79,9 +85,27 @@ class AttributionDrivenInnerGradientProposer:
             memory_hint = self.memory.render_proposer_context(loop_role="inner")
         outer_tags: list[str] = []
         outer_notes: list[str] = []
-        for element in proposer_harness.active_elements:
-            outer_notes.append(f"{element.category}:{element.element_id}")
-            raw_tags = element.spec.get("inner_tags", ())
+        if self.outer_library_store is not None:
+            try:
+                elements = self.outer_library_store.details_for_inner_proposal(
+                    proposer_harness
+                )
+            except Exception:  # noqa: BLE001 - fall back to the frozen profile.
+                elements = []
+        else:
+            elements = []
+        if not elements:
+            elements = [
+                {
+                    "id": element.element_id,
+                    "category": element.category,
+                    "spec": element.spec,
+                }
+                for element in proposer_harness.active_elements
+            ]
+        for element in elements:
+            outer_notes.append(f"{element['category']}:{element['id']}")
+            raw_tags = dict(element.get("spec", {})).get("inner_tags", ())
             if isinstance(raw_tags, list):
                 outer_tags.extend(str(tag) for tag in raw_tags)
         counts = dict(report.outcome_counts)
@@ -283,6 +307,10 @@ def build_agentx_nested_evolution(
         if runtime.outer_harness.enable_long_term_memory
         else None
     )
+    outer_library_agent = OuterHarnessLibraryAgent(
+        OuterHarnessLibraryStore(run_dir / "outer_element_library")
+    )
+    outer_library_agent.store.initialize(outer_engine.elements.values())
     judge = HeuristicRubricJudge() if offline_rubric_judge else None
     oracle = HarnessLoopNestedReplayOracle(
         config=runtime.app_config,
@@ -298,7 +326,10 @@ def build_agentx_nested_evolution(
         run_dir=run_dir,
         inner_engine=inner_engine,
         outer_engine=outer_engine,
-        inner_gradient_proposer=AttributionDrivenInnerGradientProposer(inner_memory),
+        inner_gradient_proposer=AttributionDrivenInnerGradientProposer(
+            inner_memory,
+            outer_library_agent.store,
+        ),
         outer_gradient_proposer=InnerOutcomeOuterGradientProposer(outer_memory),
         replay_oracle=oracle,
         inner_rubric_validator=HarnessRubricValidator(
@@ -311,6 +342,7 @@ def build_agentx_nested_evolution(
         ),
         inner_memory=inner_memory,
         outer_memory=outer_memory,
+        outer_library_agent=outer_library_agent,
         outer_enabled=outer_enabled,
     )
 

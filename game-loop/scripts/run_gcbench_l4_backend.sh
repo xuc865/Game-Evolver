@@ -65,6 +65,7 @@ _resume_agent_after_timeout() {
   local instruction
   instruction="$(cat "$INSTRUCTION_FILE")"
   instruction+=$'\n\n## Infrastructure recovery\nThe previous agent process was interrupted by a backbone API timeout. The workspace preserves all completed edits. Inspect the existing project first, continue from its current state, finish missing gameplay and demo traces, run the headless smoke test, and stop as soon as the deliverables are complete. Do not restart the implementation from scratch.'
+  GAME_LOOP_CHAT_MAX_TURNS="${GAME_LOOP_CHAT_RECOVERY_MAX_TURNS:-${GAME_LOOP_CHAT_MAX_TURNS:-60}}" \
   GAME_LOOP_CHAT_MAX_OUTPUT_TOKENS="${GAME_LOOP_CHAT_RECOVERY_MAX_OUTPUT_TOKENS:-2048}" \
   GAME_LOOP_CHAT_API_MAX_RETRIES="${GAME_LOOP_CHAT_RECOVERY_API_MAX_RETRIES:-4}" \
   GAME_LOOP_CHAT_API_TOTAL_TIMEOUT_SECONDS="${GAME_LOOP_CHAT_RECOVERY_API_TOTAL_TIMEOUT_SECONDS:-300}" \

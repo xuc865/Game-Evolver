@@ -2130,6 +2130,45 @@ class GameLoopTests(unittest.TestCase):
         self.assertEqual(agent.api_base, "http://primary.test/v1")
         self.assertEqual(agent.model, "Qwen3.6-27B")
 
+    def test_configured_fallback_handles_primary_capacity_error(self):
+        from game_loop.chat_agent import LocalChatAgent
+
+        agent = LocalChatAgent.__new__(LocalChatAgent)
+        agent.provider = "deepseek"
+        agent.api_base = "https://api.deepseek.com"
+        agent.model = "deepseek-v4-flash"
+        agent.api_key = "primary-key"
+        agent.api_keys = ["primary-key"]
+        agent._api_key_index = 0
+        calls = []
+
+        def fake_call(messages, tools=None):
+            calls.append((agent.api_base, agent.model, agent.api_key))
+            if len(calls) == 1:
+                raise RuntimeError("API error 429: capacity")
+            return {"choices": []}
+
+        agent._call_api_primary = fake_call
+        environment = {
+            "GAME_LOOP_CHAT_FALLBACK_API_BASE": "https://openrouter.ai/api/v1",
+            "GAME_LOOP_CHAT_FALLBACK_MODEL": "deepseek/deepseek-v4-flash",
+            "GAME_LOOP_CHAT_FALLBACK_API_KEY_ENV": "OPENROUTER_API_KEY",
+            "OPENROUTER_API_KEY": "fallback-key",
+        }
+        with patch.dict(os.environ, environment, clear=False):
+            result = agent._call_api([{"role": "user", "content": "hello"}])
+
+        self.assertEqual(result, {"choices": []})
+        self.assertEqual(
+            calls,
+            [
+                ("https://api.deepseek.com", "deepseek-v4-flash", "primary-key"),
+                ("https://openrouter.ai/api/v1", "deepseek/deepseek-v4-flash", "fallback-key"),
+            ],
+        )
+        self.assertEqual(agent.api_base, "https://api.deepseek.com")
+        self.assertEqual(agent.model, "deepseek-v4-flash")
+
     def test_chat_agent_retry_budget_and_timeout_are_runtime_configurable(self):
         import urllib.error
         from game_loop.chat_agent import LocalChatAgent
@@ -2147,6 +2186,8 @@ class GameLoopTests(unittest.TestCase):
             {
                 "GAME_LOOP_CHAT_API_MAX_RETRIES": "2",
                 "GAME_LOOP_CHAT_API_TIMEOUT_SECONDS": "42",
+                "CODEX_CACHE_KEY_HEADER": "X-Test-Cache-Key",
+                "CODEX_CACHE_KEY": "cache-value",
             },
             clear=False,
         ), patch(
@@ -2157,6 +2198,71 @@ class GameLoopTests(unittest.TestCase):
                 agent._call_api([{"role": "user", "content": "ping"}])
         self.assertEqual(urlopen.call_count, 2)
         self.assertEqual(urlopen.call_args.kwargs["timeout"], 42)
+        self.assertEqual(
+            dict(
+                (key.casefold(), value)
+                for key, value in urlopen.call_args.args[0].header_items()
+            ).get("x-test-cache-key"),
+            "cache-value",
+        )
+
+    def test_chat_agent_refreshes_random_cache_key_for_network_retry(self):
+        import re
+        from game_loop.chat_agent import LocalChatAgent
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return b'{"choices": []}'
+
+        agent = LocalChatAgent.__new__(LocalChatAgent)
+        agent.api_base = "http://example.test/v1"
+        agent.model = "test-model"
+        agent.api_key = ""
+        agent.thinking_mode = ""
+        requests = []
+
+        def fake_urlopen(request, timeout):
+            requests.append(request)
+            if len(requests) == 1:
+                raise TimeoutError("temporary route timeout")
+            return Response()
+
+        with patch.dict(
+            os.environ,
+            {
+                "GAME_LOOP_CHAT_API_MAX_RETRIES": "2",
+                "GAME_LOOP_CHAT_API_TIMEOUT_SECONDS": "30",
+                "GAME_LOOP_CHAT_API_TOTAL_TIMEOUT_SECONDS": "100",
+                "CODEX_CACHE_KEY_HEADER": "X-Cache-Key",
+                "CODEX_CACHE_KEY_MODE": "random",
+            },
+            clear=False,
+        ), patch(
+            "game_loop.chat_agent.urllib.request.urlopen",
+            side_effect=fake_urlopen,
+        ), patch("game_loop.chat_agent.time.sleep"):
+            result = agent._call_api([{"role": "user", "content": "ping"}])
+
+        self.assertEqual(result, {"choices": []})
+        keys = [
+            dict((key.casefold(), value) for key, value in request.header_items())[
+                "x-cache-key"
+            ]
+            for request in requests
+        ]
+        pattern = re.compile(
+            r"^(scene|ui|coding|player|reviewer|master)-harness:[A-Za-z0-9]{8}$"
+        )
+        self.assertEqual(len(keys), 2)
+        self.assertRegex(keys[0], pattern)
+        self.assertRegex(keys[1], pattern)
+        self.assertNotEqual(keys[0], keys[1])
 
     def test_gpt55_rotates_fallback_key_on_retryable_http_error(self):
         import urllib.error
@@ -3032,6 +3138,9 @@ class GameLoopTests(unittest.TestCase):
             engine = HarnessEvolutionEngine(outer_dir, harness_config)
             parent = engine.initialize()
             requests = []
+            request_cache_keys = []
+            request_auth = []
+            request_user_agents = []
             responses = iter([
                 FakeResponse({"element_ids": ["skill_alpha", "tool_beta"]}),
                 FakeResponse({
@@ -3043,11 +3152,27 @@ class GameLoopTests(unittest.TestCase):
 
             def fake_urlopen(request, timeout):
                 requests.append(json.loads(request.data.decode()))
+                request_cache_keys.append(
+                    dict(
+                        (key.casefold(), value)
+                        for key, value in request.header_items()
+                    ).get("x-cache-key")
+                )
+                headers = dict(
+                    (key.casefold(), value) for key, value in request.header_items()
+                )
+                request_auth.append(headers.get("authorization"))
+                request_user_agents.append(headers.get("user-agent"))
                 return next(responses)
 
             with patch.dict(os.environ, {
                 "CODEX_API_BASE": "http://example.test/v1",
                 "CODEX_MODEL": "kimi-test",
+                "CODEX_PROVIDER": "gpt55",
+                "CODEX_API_KEY": "wrong-generic-key",
+                "CODEX_API_KEY_GPT55": "provider-specific-key",
+                "CODEX_CACHE_KEY_HEADER": "X-Cache-Key",
+                "CODEX_CACHE_KEY": "coding-harness:51ae39d1",
                 "GAME_LOOP_HARNESS_PROPOSER_ATTEMPTS": "1",
             }), patch("game_loop.cli.urllib.request.urlopen", side_effect=fake_urlopen):
                 gradient = _build_llm_dynamic_gradient(
@@ -3059,6 +3184,15 @@ class GameLoopTests(unittest.TestCase):
                 )
 
             self.assertEqual(len(requests), 2)
+            self.assertEqual(
+                request_cache_keys,
+                ["coding-harness:51ae39d1", "coding-harness:51ae39d1"],
+            )
+            self.assertEqual(
+                request_auth,
+                ["Bearer provider-specific-key", "Bearer provider-specific-key"],
+            )
+            self.assertEqual(request_user_agents, ["game-loop/1.0", "game-loop/1.0"])
             first_prompt = json.loads(requests[0]["messages"][1]["content"])
             second_prompt = json.loads(requests[1]["messages"][1]["content"])
             self.assertNotIn("ALPHA_SECRET_DESCRIPTION", json.dumps(first_prompt))

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from tau2.agent.llm_agent import LLMAgent
 
+from game_loop.cache_keys import build_cache_key_headers
+
 from .context import compose_benchmark_instruction, load_harness_context
 
 
@@ -16,6 +18,12 @@ class GameMakingTauAgent(LLMAgent):
             harness_context=load_harness_context(),
             benchmark_name="TauBench",
         )
+
+    def _generate_next_message(self, message, state):
+        headers = build_cache_key_headers()
+        if headers:
+            self.llm_args["extra_headers"] = headers
+        return super()._generate_next_message(message, state)
 
 
 def create_game_making_tau_agent(

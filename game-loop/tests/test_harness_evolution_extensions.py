@@ -2,27 +2,37 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
+from unittest import mock
 
 from game_loop.config import HarnessElementConfig, HarnessEvolutionConfig
 from game_loop.core.harness import (
     ContextCompilerPolicy,
     HarnessActiveElement,
+    HarnessEpochResult,
     HarnessProfile,
     RecoveryPolicy,
     ValidationPolicy,
 )
 from game_loop.core.harness_element_stats import (
+    ElementStat,
     HarnessElementStatsStore,
     compose_merged_element,
     element_similarity,
+    inner_harness_score_and_hard_regression,
     mutate_category_elements,
     resolve_target_category,
 )
 from game_loop.core.harness_evolution_loop import HarnessBenchLoopRunner
 from game_loop.core.harness_rubric_generator import generate_dynamic_rubric_set
 from game_loop.core.harness_rubric_validator import TaskPoolEntry
+from game_loop.core.outer_harness_library import (
+    OuterHarnessLibraryAgent,
+    OuterHarnessLibraryStore,
+)
 from game_loop.harness_element_catalog import INNER_ELEMENT_CATALOG
+from game_loop.utils import atomic_write_json, read_json
 
 
 def _profile(*, elements: tuple[HarnessActiveElement, ...] = ()) -> HarnessProfile:
@@ -102,6 +112,74 @@ class DynamicRubricGeneratorTests(unittest.TestCase):
 
 
 class ElementStatsMutationTests(unittest.TestCase):
+    def test_score_moments_and_hard_regression_survive_reload(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "stats.json"
+            stats = HarnessElementStatsStore(root=Path(td))
+            stats.touch(category="skill", element_id="x", success=True, score=2.0)
+            stats.touch(
+                category="skill",
+                element_id="x",
+                success=False,
+                score=4.0,
+                hard_regression=True,
+            )
+            stats.save(path)
+            loaded = HarnessElementStatsStore.load(path).items["skill:x"]
+            self.assertEqual(loaded.score_count, 2)
+            self.assertAlmostEqual(loaded.score_total, 6.0)
+            self.assertAlmostEqual(loaded.score_mean, 3.0)
+            self.assertAlmostEqual(loaded.score_variance, 1.0)
+            self.assertTrue(loaded.hard_regression_ever)
+            self.assertEqual(loaded.hard_regression_count, 1)
+
+    def test_old_element_stat_json_is_backward_compatible(self):
+        stat = ElementStat.from_dict({
+            "element_id": "old",
+            "category": "workflow",
+            "usage_count": 3,
+            "success_count": 2,
+        })
+        self.assertEqual(stat.score_count, 0)
+        self.assertIsNone(stat.score_mean)
+        self.assertFalse(stat.hard_regression_ever)
+
+        recovered = ElementStat.from_dict({
+            "element_id": "partial-v2",
+            "category": "workflow",
+            "score_count": 2,
+            "score_total": 6.0,
+            "score_variance": 1.0,
+        })
+        self.assertAlmostEqual(recovered.score_variance, 1.0)
+
+    def test_partial_infrastructure_failure_does_not_record_partial_score(self):
+        result = replace(
+            _epoch_result(),
+            rubric_validation={
+                "case_results": [
+                    {
+                        "parent": {"infrastructure_ok": True, "hard": {"runtime": 1}},
+                        "candidate": {
+                            "infrastructure_ok": True,
+                            "hard": {"runtime": 1},
+                            "soft_total": 4.0,
+                        },
+                    },
+                    {
+                        "parent": {"infrastructure_ok": True, "hard": {"runtime": 1}},
+                        "candidate": {
+                            "infrastructure_ok": False,
+                            "hard": {},
+                        },
+                    },
+                ]
+            },
+        )
+        score, hard_regression = inner_harness_score_and_hard_regression(result)
+        self.assertIsNone(score)
+        self.assertFalse(hard_regression)
+
     def test_explicit_category_precedes_usage_control_alias(self):
         self.assertEqual(
             resolve_target_category(("workflow", "usage_driven", "godot")),
@@ -163,6 +241,660 @@ class ElementStatsMutationTests(unittest.TestCase):
         self.assertIn(result.operation, {"add", "compose", "replace", "derive"})
         if result.operation == "compose":
             self.assertEqual(len(result.catalog_additions), 1)
+
+
+def _outer_element(
+    element_id: str,
+    category: str = "workflow",
+    *,
+    description: str | None = None,
+) -> HarnessElementConfig:
+    return HarnessElementConfig.from_dict({
+        "id": element_id,
+        "category": category,
+        "description": description or f"shared evidence workflow {element_id}",
+        "spec": {"inner_tags": ["evidence_first"], "rule": "probe then verify"},
+        "tags": [category, "evidence", "verify"],
+    })
+
+
+def _epoch_result(epoch: int = 1) -> HarnessEpochResult:
+    return HarnessEpochResult(
+        epoch=epoch,
+        parent_harness_id="parent",
+        candidate_harness_id="candidate",
+        accepted=True,
+        paired_deltas=(0.1,),
+        median_delta=0.1,
+        reasons=(),
+        excluded_pairs=(),
+        parent_outcomes=(),
+        candidate_outcomes=(),
+        created_at="now",
+        rubric_validation={
+            "case_results": [
+                {
+                    "parent": {"hard": {"runtime": 1}, "soft_total": 2.0},
+                    "candidate": {
+                        "infrastructure_ok": True,
+                        "hard": {"runtime": 1},
+                        "soft_total": 3.0,
+                    },
+                }
+            ]
+        },
+    )
+
+
+class OuterHarnessLibraryTests(unittest.TestCase):
+    def test_progressive_disclosure_and_failed_plan_preserve_revision(self):
+        with tempfile.TemporaryDirectory() as td:
+            store = OuterHarnessLibraryStore(Path(td) / "library")
+            store.initialize((_outer_element("a"), _outer_element("b")))
+            calls = []
+
+            def request(stage, payload):
+                calls.append((stage, payload))
+                if stage == "shortlist":
+                    self.assertNotIn("description", str(payload["catalog_index"]))
+                    self.assertNotIn("spec", str(payload["catalog_index"]))
+                    return {"shortlist": ["a"]}
+                self.assertEqual([item["id"] for item in payload["disclosed_elements"]], ["a"])
+                return {"operations": [{"element_id": "a", "operation": "unchanged"}]}
+
+            update = OuterHarnessLibraryAgent(store, request).evolve(
+                epoch=1,
+                inner_history=[],
+                latest_inner_result=_epoch_result(),
+            )
+            self.assertEqual([stage for stage, _ in calls], ["shortlist", "plan"])
+            self.assertEqual(update.status, "failed_infrastructure_or_validation")
+            self.assertEqual(update.revision_before, update.revision_after)
+            self.assertEqual(store.revision(), 0)
+
+    def test_undisclosed_element_cannot_be_changed(self):
+        with tempfile.TemporaryDirectory() as td:
+            store = OuterHarnessLibraryStore(Path(td) / "library")
+            store.initialize((_outer_element("a"), _outer_element("b")))
+            plan = {
+                "operations": [
+                    {"element_id": "a", "operation": "unchanged"},
+                    {
+                        "element_id": "b",
+                        "operation": "modify",
+                        "correction_hypothesis": "change b",
+                        "replacement": {
+                            "id": "b",
+                            "category": "workflow",
+                            "description": "changed",
+                            "spec": {"rule": "changed"},
+                            "tags": ["workflow"],
+                        },
+                    },
+                ],
+                "additions": [],
+            }
+            with self.assertRaisesRegex(ValueError, "undisclosed element b"):
+                store.apply_plan(epoch=1, shortlist=("a",), plan=plan)
+            self.assertEqual(store.revision(), 0)
+
+    def test_delete_requires_low_score_even_after_hard_regression(self):
+        with tempfile.TemporaryDirectory() as td:
+            store = OuterHarnessLibraryStore(Path(td) / "library")
+            store.initialize((_outer_element("high"), _outer_element("low")))
+            stats = HarnessElementStatsStore.load(store.stats_path)
+            for _ in range(5):
+                stats.touch(
+                    category="workflow",
+                    element_id="high",
+                    success=False,
+                    score=10.0,
+                    hard_regression=True,
+                )
+                stats.touch(
+                    category="workflow",
+                    element_id="low",
+                    success=False,
+                    score=0.0,
+                )
+            stats.save(store.stats_path)
+            plan = {
+                "operations": [
+                    {
+                        "element_id": "high",
+                        "operation": "delete",
+                        "modification_inadequate_reason": "cannot repair",
+                    },
+                    {"element_id": "low", "operation": "unchanged"},
+                ],
+                "additions": [],
+            }
+            with self.assertRaisesRegex(ValueError, "low-score evidence"):
+                store.apply_plan(epoch=1, shortlist=("high",), plan=plan)
+            self.assertEqual(store.revision(), 0)
+
+    def test_add_requires_evidence_from_an_actual_failed_epoch(self):
+        with tempfile.TemporaryDirectory() as td:
+            store = OuterHarnessLibraryStore(Path(td) / "library")
+            store.initialize((_outer_element("current"),))
+            added = _outer_element("new_boundary", "protocol")
+            plan = {
+                "operations": [
+                    {"element_id": "current", "operation": "unchanged"}
+                ],
+                "additions": [
+                    {
+                        "operation": "add",
+                        "capability_boundary_evidence": "epoch 2 exposed a missing boundary",
+                        "supporting_epoch_ids": [2],
+                        "element": {
+                            "id": added.element_id,
+                            "category": added.category,
+                            "description": added.description,
+                            "spec": added.spec,
+                            "tags": list(added.tags),
+                        },
+                    }
+                ],
+            }
+            with self.assertRaisesRegex(ValueError, "failed epoch ids"):
+                store.apply_plan(
+                    epoch=3,
+                    shortlist=(),
+                    plan=plan,
+                    failed_history_epochs=(1,),
+                )
+            self.assertEqual(store.revision(), 0)
+
+    def test_applies_all_five_operations_atomically(self):
+        with tempfile.TemporaryDirectory() as td:
+            store = OuterHarnessLibraryStore(Path(td) / "library")
+            elements = (
+                _outer_element("merge_a", description="probe evidence and verify runtime"),
+                _outer_element("merge_b", description="probe evidence and verify runtime"),
+                _outer_element("delete_me", "skill"),
+                _outer_element("modify_me", "context"),
+                _outer_element("keep_me", "tool"),
+            )
+            store.initialize(elements)
+            stats = HarnessElementStatsStore.load(store.stats_path)
+            for _ in range(5):
+                stats.touch(
+                    category="skill",
+                    element_id="delete_me",
+                    success=False,
+                    score=0.0,
+                    hard_regression=True,
+                )
+            for _ in range(3):
+                stats.touch(
+                    category="context",
+                    element_id="modify_me",
+                    success=False,
+                    score=0.25,
+                    hard_regression=True,
+                )
+            stats.touch(
+                category="workflow",
+                element_id="merge_a",
+                success=True,
+                score=2.0,
+            )
+            stats.touch(
+                category="workflow",
+                element_id="merge_b",
+                success=False,
+                score=4.0,
+                hard_regression=True,
+            )
+            stats.save(store.stats_path)
+            merged = _outer_element("merged", description="probe evidence and verify runtime")
+            replacement = _outer_element(
+                "modify_me", "context", description="improved context selection"
+            )
+            added = _outer_element("added", "protocol")
+            plan = {
+                "operations": [
+                    {
+                        "element_id": "merge_a",
+                        "operation": "merge",
+                        "merge_with": "merge_b",
+                        "merged_element": {
+                            "id": merged.element_id,
+                            "category": merged.category,
+                            "description": merged.description,
+                            "spec": merged.spec,
+                            "tags": list(merged.tags),
+                        },
+                    },
+                    {
+                        "element_id": "merge_b",
+                        "operation": "merge",
+                        "merge_with": "merge_a",
+                        "merged_element": {
+                            "id": merged.element_id,
+                            "category": merged.category,
+                            "description": merged.description,
+                            "spec": merged.spec,
+                            "tags": list(merged.tags),
+                        },
+                    },
+                    {
+                        "element_id": "delete_me",
+                        "operation": "delete",
+                        "modification_inadequate_reason": "duplicates a harmful boundary",
+                    },
+                    {
+                        "element_id": "modify_me",
+                        "operation": "modify",
+                        "correction_hypothesis": "narrowing context selection removes stale evidence",
+                        "replacement": {
+                            "id": replacement.element_id,
+                            "category": replacement.category,
+                            "description": replacement.description,
+                            "spec": replacement.spec,
+                            "tags": list(replacement.tags),
+                        },
+                    },
+                    {"element_id": "keep_me", "operation": "unchanged"},
+                ],
+                "additions": [
+                    {
+                        "operation": "add",
+                        "capability_boundary_evidence": "three failures lack this protocol",
+                        "supporting_epoch_ids": [1],
+                        "element": {
+                            "id": added.element_id,
+                            "category": added.category,
+                            "description": added.description,
+                            "spec": added.spec,
+                            "tags": list(added.tags),
+                        },
+                    }
+                ],
+            }
+            update = store.apply_plan(
+                epoch=1,
+                shortlist=(
+                    "merge_a",
+                    "merge_b",
+                    "delete_me",
+                    "modify_me",
+                    "keep_me",
+                ),
+                plan=plan,
+                failed_history_epochs=(1,),
+                current_inner_element_ids=("merge_a", "delete_me", "modify_me"),
+            )
+            store.write_epoch_record(1, {
+                "epoch": 1,
+                "status": update.status,
+                "shortlist": [
+                    "merge_a",
+                    "merge_b",
+                    "delete_me",
+                    "modify_me",
+                    "keep_me",
+                ],
+                "plan": plan,
+                "update": update.to_dict(),
+            })
+            self.assertEqual(update.status, "applied")
+            self.assertEqual(store.revision(), 1)
+            catalog = store.catalog()
+            self.assertEqual(set(catalog), {"merged", "modify_me", "keep_me", "added"})
+            self.assertEqual(catalog["modify_me"].description, "improved context selection")
+            merged_metadata = store.metadata()["merged"]
+            self.assertEqual(merged_metadata["usage_count"], 2)
+            self.assertEqual(merged_metadata["score_total"], 6.0)
+            self.assertAlmostEqual(merged_metadata["score_variance"], 1.0)
+            self.assertTrue(merged_metadata["hard_regression_ever"])
+            selected_ids = {
+                item["id"] for item in store.latest_progressive_selection()
+            }
+            self.assertEqual(selected_ids, {"merged", "modify_me", "added"})
+
+    def test_shortlisted_unchanged_non_active_element_is_not_activated(self):
+        with tempfile.TemporaryDirectory() as td:
+            store = OuterHarnessLibraryStore(Path(td) / "library")
+            store.initialize((_outer_element("active"), _outer_element("observed")))
+            plan = {
+                "operations": [
+                    {"element_id": "active", "operation": "unchanged"},
+                    {"element_id": "observed", "operation": "unchanged"},
+                ],
+                "additions": [],
+            }
+            update = store.apply_plan(
+                epoch=1,
+                shortlist=("observed",),
+                plan=plan,
+                current_inner_element_ids=("active",),
+            )
+            store.write_epoch_record(1, {
+                "epoch": 1,
+                "status": update.status,
+                "shortlist": ["observed"],
+                "plan": plan,
+                "update": update.to_dict(),
+            })
+            self.assertEqual(update.next_inner_element_ids, ("active",))
+            self.assertEqual(
+                [item["id"] for item in store.latest_progressive_selection()],
+                ["active"],
+            )
+
+    def test_current_selection_generator_is_consumed_once(self):
+        with tempfile.TemporaryDirectory() as td:
+            store = OuterHarnessLibraryStore(Path(td) / "library")
+            store.initialize((_outer_element("active"), _outer_element("other")))
+            plan = {
+                "operations": [
+                    {"element_id": "active", "operation": "unchanged"},
+                    {"element_id": "other", "operation": "unchanged"},
+                ],
+                "additions": [],
+            }
+            current = (element_id for element_id in ("active", "active"))
+            update = store.apply_plan(
+                epoch=1,
+                shortlist=(),
+                plan=plan,
+                current_inner_element_ids=current,
+            )
+            self.assertEqual(update.next_inner_element_ids, ("active",))
+
+    def test_duplicate_and_excessive_additions_are_rejected(self):
+        with tempfile.TemporaryDirectory() as td:
+            store = OuterHarnessLibraryStore(Path(td) / "library")
+            existing = _outer_element(
+                "existing",
+                "protocol",
+                description="inspect runtime evidence and verify the result",
+            )
+            store.initialize((existing,))
+            unchanged = [{"element_id": "existing", "operation": "unchanged"}]
+
+            duplicate = _outer_element(
+                "duplicate",
+                "protocol",
+                description="inspect runtime evidence and verify the result",
+            )
+            duplicate_plan = {
+                "operations": unchanged,
+                "additions": [{
+                    "operation": "add",
+                    "capability_boundary_evidence": "failed epoch lacked this protocol",
+                    "supporting_epoch_ids": [1],
+                    "element": {
+                        "id": duplicate.element_id,
+                        "category": duplicate.category,
+                        "description": duplicate.description,
+                        "spec": duplicate.spec,
+                        "tags": list(duplicate.tags),
+                    },
+                }],
+            }
+            with self.assertRaisesRegex(ValueError, "duplicates an existing capability"):
+                store.apply_plan(
+                    epoch=2,
+                    shortlist=(),
+                    plan=duplicate_plan,
+                    failed_history_epochs=(1,),
+                )
+
+            excessive_plan = {
+                "operations": unchanged,
+                "additions": [
+                    {
+                        "operation": "add",
+                        "capability_boundary_evidence": f"boundary {index}",
+                        "supporting_epoch_ids": [1],
+                        "element": {
+                            "id": f"new_{index}",
+                            "category": "protocol",
+                            "description": f"distinct protocol boundary {index}",
+                            "spec": {"rule": f"distinct_{index}"},
+                            "tags": [f"boundary_{index}"],
+                        },
+                    }
+                    for index in range(3)
+                ],
+            }
+            with self.assertRaisesRegex(ValueError, "at most 2"):
+                store.apply_plan(
+                    epoch=2,
+                    shortlist=(),
+                    plan=excessive_plan,
+                    failed_history_epochs=(1,),
+                )
+
+    def test_applied_update_surfaces_final_audit_record_failure(self):
+        with tempfile.TemporaryDirectory() as td:
+            store = OuterHarnessLibraryStore(Path(td) / "library")
+            store.initialize((_outer_element("current"),))
+            added = _outer_element("boundary", "protocol")
+
+            def request(stage, payload):
+                if stage == "shortlist":
+                    return {"shortlist": []}
+                return {
+                    "operations": [
+                        {"element_id": "current", "operation": "unchanged"}
+                    ],
+                    "additions": [{
+                        "operation": "add",
+                        "capability_boundary_evidence": "epoch 1 exposed a boundary",
+                        "supporting_epoch_ids": [1],
+                        "element": {
+                            "id": added.element_id,
+                            "category": added.category,
+                            "description": added.description,
+                            "spec": added.spec,
+                            "tags": list(added.tags),
+                        },
+                    }],
+                }
+
+            agent = OuterHarnessLibraryAgent(store, request)
+            real_write = store.write_epoch_record
+            write_count = 0
+
+            def fail_final_write(epoch, payload):
+                nonlocal write_count
+                write_count += 1
+                if write_count == 3:
+                    raise OSError("simulated final audit failure")
+                return real_write(epoch, payload)
+
+            with mock.patch.object(store, "write_epoch_record", fail_final_write):
+                update = agent.evolve(
+                    epoch=2,
+                    inner_history=[{"epoch": 1, "accepted": False}],
+                    latest_inner_result=_epoch_result(2),
+                    current_inner_element_ids=("current",),
+                )
+            self.assertTrue(update.applied)
+            self.assertEqual((update.revision_before, update.revision_after), (0, 1))
+            self.assertIn("audit_record_error", update.error)
+            self.assertEqual(store.revision(), 1)
+            self.assertIn("boundary", store.catalog())
+
+    def test_inner_epoch_attribution_is_scored_and_idempotent(self):
+        with tempfile.TemporaryDirectory() as td:
+            store = OuterHarnessLibraryStore(Path(td) / "library")
+            store.initialize((_outer_element("used"), _outer_element("unused")))
+            result = _epoch_result()
+            first = store.record_inner_epoch(element_ids=("used",), result=result)
+            second = store.record_inner_epoch(element_ids=("used",), result=result)
+            self.assertEqual(first, second)
+            (store.usage_dir / "inner_epoch_001.json").unlink()
+            store.record_inner_epoch(element_ids=("used",), result=result)
+            metadata = store.metadata()
+            self.assertEqual(metadata["used"]["usage_count"], 1)
+            self.assertEqual(metadata["used"]["score_total"], 3.0)
+            self.assertEqual(metadata["used"]["attributed_inner_epochs"], [1])
+            self.assertEqual(metadata["unused"]["usage_count"], 0)
+            with self.assertRaisesRegex(ValueError, "conflicting"):
+                store.record_inner_epoch(element_ids=("unused",), result=result)
+
+    def test_catalog_and_stats_rollback_when_second_commit_write_fails(self):
+        with tempfile.TemporaryDirectory() as td:
+            store = OuterHarnessLibraryStore(Path(td) / "library")
+            store.initialize((_outer_element("current"),))
+            before_catalog = store.catalog()
+            before_stats = store.metadata()
+            added = _outer_element("boundary", "protocol")
+            plan = {
+                "operations": [
+                    {"element_id": "current", "operation": "unchanged"}
+                ],
+                "additions": [
+                    {
+                        "operation": "add",
+                        "capability_boundary_evidence": "failed epoch lacks protocol",
+                        "supporting_epoch_ids": [1],
+                        "element": {
+                            "id": added.element_id,
+                            "category": added.category,
+                            "description": added.description,
+                            "spec": added.spec,
+                            "tags": list(added.tags),
+                        },
+                    }
+                ],
+            }
+            from game_loop.core import outer_harness_library as library_module
+
+            real_write = library_module.atomic_write_json
+            failed_once = False
+
+            def flaky_write(path, payload):
+                nonlocal failed_once
+                if (
+                    Path(path) == store.catalog_path
+                    and isinstance(payload, dict)
+                    and payload.get("revision") == 1
+                    and not failed_once
+                ):
+                    failed_once = True
+                    raise OSError("simulated catalog commit failure")
+                return real_write(path, payload)
+
+            with mock.patch.object(  # noqa: SIM117 - retain Python 3.9 syntax.
+                library_module, "atomic_write_json", flaky_write
+            ):
+                with self.assertRaisesRegex(OSError, "simulated catalog"):
+                    store.apply_plan(
+                        epoch=2,
+                        shortlist=(),
+                        plan=plan,
+                        failed_history_epochs=(1,),
+                    )
+            self.assertEqual(store.revision(), 0)
+            self.assertEqual(store.catalog(), before_catalog)
+            self.assertEqual(store.metadata(), before_stats)
+            self.assertFalse(store.transaction_path.exists())
+
+    def test_pending_catalog_transaction_rolls_back_on_restart(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "library"
+            store = OuterHarnessLibraryStore(root)
+            seed = _outer_element("current")
+            store.initialize((seed,))
+            before_catalog = read_json(store.catalog_path)
+            before_stats = read_json(store.stats_path)
+            atomic_write_json(store.transaction_path, {
+                "schema_version": "outer-library-transaction.v1",
+                "before_catalog": before_catalog,
+                "before_stats": before_stats,
+            })
+            corrupted_catalog = dict(before_catalog)
+            corrupted_catalog["revision"] = 99
+            corrupted_catalog["items"] = []
+            atomic_write_json(store.catalog_path, corrupted_catalog)
+            atomic_write_json(store.stats_path, {
+                "schema_version": "harness-element-stats.v2",
+                "items": {},
+            })
+
+            restarted = OuterHarnessLibraryStore(root)
+            restarted.initialize((seed,))
+            self.assertEqual(read_json(restarted.catalog_path), before_catalog)
+            recovered_stats = read_json(restarted.stats_path)
+            self.assertEqual(
+                recovered_stats["items"], before_stats["items"]
+            )
+            self.assertFalse(restarted.transaction_path.exists())
+
+    def test_progressive_shortlist_cannot_expand_to_entire_library(self):
+        with tempfile.TemporaryDirectory() as td:
+            store = OuterHarnessLibraryStore(Path(td) / "library")
+            store.initialize(tuple(_outer_element(f"e{i}") for i in range(6)))
+
+            def request(stage, payload):
+                self.assertEqual(stage, "shortlist")
+                self.assertEqual(payload["shortlist_limit"], 2)
+                return {"shortlist": [item["id"] for item in payload["catalog_index"]]}
+
+            update = OuterHarnessLibraryAgent(store, request).evolve(
+                epoch=1,
+                inner_history=[],
+                latest_inner_result=_epoch_result(),
+            )
+            self.assertEqual(update.status, "failed_infrastructure_or_validation")
+            self.assertIn("progressive disclosure limit", update.error)
+            self.assertEqual(store.revision(), 0)
+
+    def test_merge_rejects_structural_but_semantically_different_elements(self):
+        with tempfile.TemporaryDirectory() as td:
+            store = OuterHarnessLibraryStore(Path(td) / "library")
+            left = HarnessElementConfig.from_dict({
+                "id": "left",
+                "category": "workflow",
+                "description": "render sprites and animate characters",
+                "spec": {"mode": "visual_animation"},
+                "tags": ["workflow", "shared"],
+            })
+            right = HarnessElementConfig.from_dict({
+                "id": "right",
+                "category": "workflow",
+                "description": "recover database transactions after deadlock",
+                "spec": {"mode": "database_recovery"},
+                "tags": ["workflow", "shared"],
+            })
+            store.initialize((left, right))
+            merged_payload = {
+                "id": "merged",
+                "category": "workflow",
+                "description": "merged",
+                "spec": {"mode": "merged"},
+                "tags": ["workflow"],
+            }
+            plan = {
+                "operations": [
+                    {
+                        "element_id": "left",
+                        "operation": "merge",
+                        "merge_with": "right",
+                        "merged_element": merged_payload,
+                    },
+                    {
+                        "element_id": "right",
+                        "operation": "merge",
+                        "merge_with": "left",
+                        "merged_element": merged_payload,
+                    },
+                ],
+                "additions": [],
+            }
+            with self.assertRaisesRegex(ValueError, "similar same-category"):
+                store.apply_plan(
+                    epoch=1,
+                    shortlist=("left", "right"),
+                    plan=plan,
+                )
+            self.assertEqual(store.revision(), 0)
 
 
 class BenchLoopRunnerTests(unittest.TestCase):

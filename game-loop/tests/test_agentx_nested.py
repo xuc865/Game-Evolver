@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from game_loop.config import HarnessEvolutionConfig
 from game_loop.core.agentx import AgentXNestedEvolution, PairedOutcomes
@@ -17,6 +18,10 @@ from game_loop.core.harness import (
     HarnessEvolutionEngine,
     HarnessReplayCase,
     HarnessSemanticGradient,
+)
+from game_loop.core.outer_harness_library import (
+    OuterHarnessLibraryAgent,
+    OuterHarnessLibraryStore,
 )
 from game_loop.harness_element_catalog import (
     DEFAULT_OUTER_SEED_ELEMENTS,
@@ -109,6 +114,298 @@ class DeterministicNestedOracle:
 
 
 class AgentXNestedEvolutionTests(unittest.TestCase):
+    @staticmethod
+    def _outer_config_with_elements():
+        return HarnessEvolutionConfig.from_dict({
+            "modules": [
+                {"id": "outer_base", "instruction": "outer base", "tags": ["context"]},
+                {"id": "outer_alt", "instruction": "outer alt", "tags": ["strategy"]},
+            ],
+            "seed_modules": ["outer_base"],
+            "max_active_modules": 2,
+            "max_active_tool_interfaces": 0,
+            "mutation_width": 1,
+            "replay_min_cases": 2,
+            "promotion_delta_min": 0.05,
+            "max_case_regression": 0.05,
+            "require_rubric_validation": False,
+            "element_catalog": OUTER_ELEMENT_CATALOG,
+            "seed_elements": DEFAULT_OUTER_SEED_ELEMENTS,
+        })
+
+    @staticmethod
+    def _cases():
+        return (
+            HarnessReplayCase("case-a", "/task/a", "/seed/a"),
+            HarnessReplayCase("case-b", "/task/b", "/seed/b"),
+        )
+
+    @staticmethod
+    def _report():
+        return AttributionReport(
+            run_refs=("trace://one",),
+            outcome_counts={"probe_failed": 2},
+            repeated_failures=(),
+            infrastructure_events=0,
+        )
+
+    def test_frozen_outer_library_records_metadata_without_api_call(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            inner_engine = HarnessEvolutionEngine(root / "inner", evolution_config("inner"))
+            outer_engine = HarnessEvolutionEngine(
+                root / "outer", self._outer_config_with_elements()
+            )
+            store = OuterHarnessLibraryStore(root / "nested" / "outer_element_library")
+
+            def forbidden_request(_stage, _payload):
+                raise AssertionError("frozen outer evolution must not call the API")
+
+            coordinator = AgentXNestedEvolution(
+                run_dir=root / "nested",
+                inner_engine=inner_engine,
+                outer_engine=outer_engine,
+                inner_gradient_proposer=AttributionDrivenInnerGradientProposer(
+                    outer_library_store=store
+                ),
+                outer_gradient_proposer=InnerOutcomeOuterGradientProposer(),
+                replay_oracle=DeterministicNestedOracle(),
+                outer_library_agent=OuterHarnessLibraryAgent(store, forbidden_request),
+            )
+            coordinator.initialize()
+            seed_ids = {
+                item.element_id for item in outer_engine.champion().active_elements
+            }
+            result = coordinator.run_epoch(
+                epoch=1,
+                report=self._report(),
+                inner_cases=self._cases(),
+                outer_cases=self._cases(),
+            )
+            self.assertIsNone(result.outer)
+            metadata = store.metadata()
+            self.assertTrue(seed_ids)
+            self.assertTrue(all(metadata[item]["usage_count"] == 1 for item in seed_ids))
+            state = json.loads((root / "nested" / "nested_evolution.json").read_text())
+            epoch = state["epochs"][0]
+            self.assertEqual(
+                set(epoch["outer_element_ids_used_for_inner_proposal"]), seed_ids
+            )
+            self.assertEqual(
+                epoch["outer_element_library_update"]["mode"],
+                "outer_evolution_frozen_metadata_only",
+            )
+
+    def test_enabled_outer_library_runs_after_inner_and_api_failure_is_isolated(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            inner_engine = HarnessEvolutionEngine(root / "inner", evolution_config("inner"))
+            outer_engine = HarnessEvolutionEngine(
+                root / "outer", self._outer_config_with_elements()
+            )
+            store = OuterHarnessLibraryStore(root / "nested" / "outer_element_library")
+            observed = {}
+
+            def failing_request(stage, payload):
+                observed["stage"] = stage
+                observed["latest_inner_accepted"] = payload["latest_inner_result"]["accepted"]
+                observed["usage_counts"] = {
+                    item["id"]: item["usage"]["usage_count"]
+                    for item in payload["catalog_index"]
+                }
+                raise TimeoutError("outer provider unavailable")
+
+            coordinator = AgentXNestedEvolution(
+                run_dir=root / "nested",
+                inner_engine=inner_engine,
+                outer_engine=outer_engine,
+                inner_gradient_proposer=AttributionDrivenInnerGradientProposer(
+                    outer_library_store=store
+                ),
+                outer_gradient_proposer=InnerOutcomeOuterGradientProposer(),
+                replay_oracle=DeterministicNestedOracle(),
+                outer_library_agent=OuterHarnessLibraryAgent(store, failing_request),
+                outer_enabled=True,
+            )
+            coordinator.initialize()
+            inner_seed = inner_engine.champion().harness_id
+            result = coordinator.run_epoch(
+                epoch=1,
+                report=self._report(),
+                inner_cases=self._cases(),
+                outer_cases=self._cases(),
+            )
+            self.assertTrue(result.inner.accepted)
+            self.assertNotEqual(inner_engine.champion().harness_id, inner_seed)
+            self.assertFalse(result.outer.accepted)
+            self.assertEqual(observed["stage"], "shortlist")
+            self.assertTrue(observed["latest_inner_accepted"])
+            self.assertGreater(max(observed["usage_counts"].values()), 0)
+            self.assertEqual(store.revision(), 0)
+            state = json.loads((root / "nested" / "nested_evolution.json").read_text())
+            update = state["epochs"][0]["outer_element_library_update"]["library_update"]
+            self.assertEqual(update["status"], "failed_infrastructure_or_validation")
+
+    def test_outer_metadata_failure_does_not_invalidate_completed_inner_epoch(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            inner_engine = HarnessEvolutionEngine(root / "inner", evolution_config("inner"))
+            outer_engine = HarnessEvolutionEngine(
+                root / "outer", self._outer_config_with_elements()
+            )
+            store = OuterHarnessLibraryStore(root / "nested" / "outer_element_library")
+            api_called = False
+
+            def request(_stage, _payload):
+                nonlocal api_called
+                api_called = True
+                return {}
+
+            coordinator = AgentXNestedEvolution(
+                run_dir=root / "nested",
+                inner_engine=inner_engine,
+                outer_engine=outer_engine,
+                inner_gradient_proposer=AttributionDrivenInnerGradientProposer(
+                    outer_library_store=store
+                ),
+                outer_gradient_proposer=InnerOutcomeOuterGradientProposer(),
+                replay_oracle=DeterministicNestedOracle(),
+                outer_library_agent=OuterHarnessLibraryAgent(store, request),
+                outer_enabled=True,
+            )
+            coordinator.initialize()
+            inner_seed = inner_engine.champion().harness_id
+            with mock.patch.object(
+                store,
+                "record_inner_epoch",
+                side_effect=OSError("simulated metadata disk failure"),
+            ):
+                result = coordinator.run_epoch(
+                    epoch=1,
+                    report=self._report(),
+                    inner_cases=self._cases(),
+                    outer_cases=self._cases(),
+                )
+            self.assertTrue(result.inner.accepted)
+            self.assertNotEqual(inner_engine.champion().harness_id, inner_seed)
+            self.assertFalse(result.outer.accepted)
+            self.assertFalse(api_called)
+            state = json.loads((root / "nested" / "nested_evolution.json").read_text())
+            self.assertIn(
+                "simulated metadata disk failure",
+                state["epochs"][0]["outer_element_usage_error"],
+            )
+
+    def test_enabled_outer_library_applies_complete_unchanged_plan(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            inner_engine = HarnessEvolutionEngine(root / "inner", evolution_config("inner"))
+            outer_engine = HarnessEvolutionEngine(
+                root / "outer", self._outer_config_with_elements()
+            )
+            store = OuterHarnessLibraryStore(root / "nested" / "outer_element_library")
+            stages = []
+
+            def request(stage, payload):
+                stages.append(stage)
+                if stage == "shortlist":
+                    return {"shortlist": [payload["catalog_index"][0]["id"]]}
+                return {
+                    "operations": [
+                        {"element_id": element_id, "operation": "unchanged"}
+                        for element_id in payload["all_element_ids"]
+                    ],
+                    "additions": [],
+                }
+
+            coordinator = AgentXNestedEvolution(
+                run_dir=root / "nested",
+                inner_engine=inner_engine,
+                outer_engine=outer_engine,
+                inner_gradient_proposer=AttributionDrivenInnerGradientProposer(
+                    outer_library_store=store
+                ),
+                outer_gradient_proposer=InnerOutcomeOuterGradientProposer(),
+                replay_oracle=DeterministicNestedOracle(),
+                outer_library_agent=OuterHarnessLibraryAgent(store, request),
+                outer_enabled=True,
+            )
+            coordinator.initialize()
+            outer_seed = outer_engine.champion().harness_id
+            result = coordinator.run_epoch(
+                epoch=1,
+                report=self._report(),
+                inner_cases=self._cases(),
+                outer_cases=self._cases(),
+            )
+            self.assertEqual(stages, ["shortlist", "plan"])
+            self.assertTrue(result.outer.accepted)
+            self.assertEqual(result.outer.parent_harness_id, outer_seed)
+            self.assertEqual(result.outer.candidate_harness_id, outer_seed)
+            self.assertEqual(store.revision(), 0)
+            record = json.loads(
+                (store.epochs_dir / "epoch_001.json").read_text()
+            )
+            self.assertEqual(record["status"], "unchanged")
+
+    def test_outer_audit_write_failure_is_recorded_in_nested_state(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            inner_engine = HarnessEvolutionEngine(root / "inner", evolution_config("inner"))
+            outer_engine = HarnessEvolutionEngine(
+                root / "outer", self._outer_config_with_elements()
+            )
+            store = OuterHarnessLibraryStore(root / "nested" / "outer_element_library")
+
+            def request(stage, payload):
+                if stage == "shortlist":
+                    return {"shortlist": [payload["catalog_index"][0]["id"]]}
+                return {
+                    "operations": [
+                        {"element_id": element_id, "operation": "unchanged"}
+                        for element_id in payload["all_element_ids"]
+                    ],
+                    "additions": [],
+                }
+
+            coordinator = AgentXNestedEvolution(
+                run_dir=root / "nested",
+                inner_engine=inner_engine,
+                outer_engine=outer_engine,
+                inner_gradient_proposer=AttributionDrivenInnerGradientProposer(
+                    outer_library_store=store
+                ),
+                outer_gradient_proposer=InnerOutcomeOuterGradientProposer(),
+                replay_oracle=DeterministicNestedOracle(),
+                outer_library_agent=OuterHarnessLibraryAgent(store, request),
+                outer_enabled=True,
+            )
+            coordinator.initialize()
+            real_write = store.write_epoch_record
+            write_count = 0
+
+            def fail_final_write(epoch, payload):
+                nonlocal write_count
+                write_count += 1
+                if write_count == 3:
+                    raise OSError("simulated outer audit failure")
+                return real_write(epoch, payload)
+
+            with mock.patch.object(store, "write_epoch_record", fail_final_write):
+                result = coordinator.run_epoch(
+                    epoch=1,
+                    report=self._report(),
+                    inner_cases=self._cases(),
+                    outer_cases=self._cases(),
+                )
+            self.assertTrue(result.inner.accepted)
+            self.assertTrue(result.outer.accepted)
+            self.assertEqual(store.revision(), 0)
+            state = json.loads((root / "nested" / "nested_evolution.json").read_text())
+            validation = state["epochs"][0]["outer_element_library_update"]
+            self.assertIn("audit_record_error", validation["library_update"]["error"])
+            self.assertIn("audit_record_error", validation["reasons"][0])
+
     def test_inner_and_outer_harnesses_promote_only_after_separate_paired_replays(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

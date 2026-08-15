@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Launch isolated GLM L0-L3 harness ablations and final public evaluations."""
+"""Launch isolated DeepSeek L0-L3 harness ablations and final public evaluations."""
 
 from __future__ import annotations
 
@@ -18,18 +18,16 @@ SEED = ROOT / "experiments" / "seed_artifacts" / "puzzle-sokoban-scaffold"
 POOL = ROOT / "experiments" / "fixed-admission-gcbench-balanced.json"
 LEVELS = ("L0", "L1", "L2", "L3")
 TARGET_EPOCHS = 30
-MODEL = "GLM-5.2-W4AFP8"
-API_BASE = "http://11.213.4.72:80/v1"
-CACHE_KEY_HEADER = "X-Cache-Key"
-CACHE_KEY_MODE = "random"
+MODEL = "deepseek-v4-flash"
+API_BASE = "https://api.deepseek.com"
 
 
 def level_run_dir(level: str) -> Path:
-    return RUN_ROOT / f"gcbench-ablation-glm-{level.lower()}-30epoch-v1"
+    return RUN_ROOT / f"gcbench-ablation-deepseek-{level.lower()}-30epoch-v2"
 
 
 def screen_name(level: str) -> str:
-    return f"gcbench-ablation-glm-{level.lower()}-30epoch-v1"
+    return f"gcbench-ablation-deepseek-{level.lower()}-30epoch-v2"
 
 
 def _write(path: Path, content: str, *, executable: bool = False) -> None:
@@ -44,20 +42,21 @@ def prepare_config(level: str, run_dir: Path) -> Path:
     payload = json.loads(source.read_text(encoding="utf-8"))
     backend = payload["backend"]
     backend["timeout_seconds"] = 2400
-    backend["inactivity_timeout_seconds"] = 420
+    backend["inactivity_timeout_seconds"] = 600
     backend["env"] = {
         "CODEX_API_BASE": API_BASE,
         "CODEX_MODEL": MODEL,
         "CODEX_LLM_SERVICE": "openai",
         "CODEX_MULTIMODAL": "false",
-        "CODEX_CACHE_KEY_HEADER": CACHE_KEY_HEADER,
-        "CODEX_CACHE_KEY_MODE": CACHE_KEY_MODE,
-        "GAME_LOOP_BACKBONE_PROVIDER": "glm",
+        "GAME_LOOP_BACKBONE_PROVIDER": "deepseek",
         "GAME_LOOP_CHAT_MAX_TURNS": "45",
         "GAME_LOOP_CHAT_MAX_OUTPUT_TOKENS": "8192",
         "GAME_LOOP_CHAT_API_MAX_RETRIES": "4",
-        "GAME_LOOP_CHAT_API_TIMEOUT_SECONDS": "60",
-        "GAME_LOOP_CHAT_API_TOTAL_TIMEOUT_SECONDS": "300",
+        "GAME_LOOP_CHAT_API_TIMEOUT_SECONDS": "180",
+        "GAME_LOOP_CHAT_API_TOTAL_TIMEOUT_SECONDS": "600",
+        "GAME_LOOP_CHAT_FALLBACK_API_BASE": "https://openrouter.ai/api/v1",
+        "GAME_LOOP_CHAT_FALLBACK_MODEL": "deepseek/deepseek-v4-flash",
+        "GAME_LOOP_CHAT_FALLBACK_API_KEY_ENV": "OPENROUTER_API_KEY",
         "GAME_LOOP_CHAT_TEMPERATURE": "0",
         "GAME_LOOP_TOOL_READ_MAX_CHARS": "2500",
         "GAME_LOOP_TOOL_STDOUT_MAX_CHARS": "2500",
@@ -68,7 +67,7 @@ def prepare_config(level: str, run_dir: Path) -> Path:
         "GAME_LOOP_HARNESS_PROPOSER_ATTEMPTS": "4",
         "GAME_LOOP_TEXT_ONLY": "1",
     }
-    config = run_dir / "config.glm.json"
+    config = run_dir / "config.deepseek.json"
     _write(config, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
     return config
 
@@ -101,13 +100,11 @@ export PYTHONPATH="$ROOT"
 export PYTHONUNBUFFERED=1
 export CODEX_API_BASE={API_BASE!r}
 export CODEX_MODEL={MODEL!r}
-export CODEX_API_KEY="${{CODEX_API_KEY:-EMPTY}}"
+export CODEX_API_KEY="${{DEEPSEEK_API_KEY:?DEEPSEEK_API_KEY is required}}"
 export CODEX_LLM_SERVICE=openai
 export CODEX_MULTIMODAL=false
-export CODEX_CACHE_KEY_HEADER={CACHE_KEY_HEADER!r}
-export CODEX_CACHE_KEY_MODE={CACHE_KEY_MODE!r}
-unset CODEX_CACHE_KEY
-export GAME_LOOP_BACKBONE_PROVIDER=glm
+unset CODEX_CACHE_KEY CODEX_CACHE_KEY_HEADER CODEX_CACHE_KEY_MODE
+export GAME_LOOP_BACKBONE_PROVIDER=deepseek
 export GAME_LOOP_LLM_HARNESS_PROPOSER=1
 export GAME_LOOP_HARNESS_PROPOSER_TIMEOUT_SECONDS=120
 export GAME_LOOP_HARNESS_PROPOSER_ATTEMPTS=4
@@ -116,8 +113,11 @@ export GAME_LOOP_CHAT_MAX_TURNS=45
 export GAME_LOOP_TARGET_TURNS=30
 export GAME_LOOP_CHAT_MAX_OUTPUT_TOKENS=8192
 export GAME_LOOP_CHAT_API_MAX_RETRIES=4
-export GAME_LOOP_CHAT_API_TIMEOUT_SECONDS=60
-export GAME_LOOP_CHAT_API_TOTAL_TIMEOUT_SECONDS=300
+export GAME_LOOP_CHAT_API_TIMEOUT_SECONDS=180
+export GAME_LOOP_CHAT_API_TOTAL_TIMEOUT_SECONDS=600
+export GAME_LOOP_CHAT_FALLBACK_API_BASE=https://openrouter.ai/api/v1
+export GAME_LOOP_CHAT_FALLBACK_MODEL=deepseek/deepseek-v4-flash
+export GAME_LOOP_CHAT_FALLBACK_API_KEY_ENV=OPENROUTER_API_KEY
 export GAME_LOOP_TEXT_ONLY=1
 export GAME_LOOP_REQUIRE_GCB_DEMOS=1
 if [[ ! -f "$RUN_DIR/harness_archive/champion.json" ]]; then
@@ -128,14 +128,14 @@ python3 -m game_loop.cli harness-self-supervise \
   --task-source {str(TASK)!r} --seed-artifact {str(SEED)!r} \
   --fixed-admission-task-pool {str(POOL)!r} --evaluate-seed \
   --start-epoch 1 --max-epochs {TARGET_EPOCHS} --cases 3 --max-epoch-retries 2 \
-  --run-id-prefix "abl-glm-{level.lower()}" --heartbeat-seconds 30
+  --run-id-prefix "abl-deepseek-{level.lower()}" --heartbeat-seconds 30
 champion_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["harness_id"])' "$RUN_DIR/harness_archive/champion.json")"
 profile="$RUN_DIR/harness_archive/profiles/$champion_id.json"
 mkdir -p "$RUN_DIR/public_eval"
 python3 -m game_loop.cli harness-eval-public \
   --config "$CONFIG" --harness-profile "$profile" \
   --task-source {str(TASK)!r} --seed-artifact {str(SEED)!r} \
-  --run-dir "$RUN_DIR/public_eval" --run-id-prefix "abl-glm-{level.lower()}-public"
+  --run-dir "$RUN_DIR/public_eval" --run-id-prefix "abl-deepseek-{level.lower()}-public"
 touch "$RUN_DIR/pipeline.done"
 """,
         executable=True,
@@ -220,7 +220,7 @@ def status() -> dict[str, object]:
             "pipeline_done": (run_dir / "pipeline.done").is_file(),
         }
     return {
-        "run_pattern": str(RUN_ROOT / "gcbench-ablation-glm-l[0-3]-30epoch-v1"),
+        "run_pattern": str(RUN_ROOT / "gcbench-ablation-deepseek-l[0-3]-30epoch-v2"),
         "target_epochs": TARGET_EPOCHS,
         "model": MODEL,
         "levels": levels,

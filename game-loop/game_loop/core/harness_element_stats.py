@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, field
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from game_loop.utils import atomic_write_json, read_json, utc_now
 
 if TYPE_CHECKING:
     from game_loop.config import HarnessElementConfig
-    from game_loop.core.harness import HarnessActiveElement, HarnessEpochResult, HarnessProfile
+    from game_loop.core.harness import (
+        HarnessActiveElement,
+        HarnessEpochResult,
+        HarnessProfile,
+    )
 
 ELEMENT_CATEGORIES = frozenset({
     "skill",
@@ -53,12 +57,31 @@ class ElementStat:
     category: str
     usage_count: int = 0
     success_count: int = 0
+    score_count: int = 0
+    score_total: float = 0.0
+    score_sum_squares: float = 0.0
+    hard_regression_ever: bool = False
+    hard_regression_count: int = 0
+    attributed_inner_epochs: list[int] = field(default_factory=list)
 
     @property
     def accuracy(self) -> float:
         if self.usage_count <= 0:
             return 0.0
         return self.success_count / self.usage_count
+
+    @property
+    def score_mean(self) -> float | None:
+        if self.score_count <= 0:
+            return None
+        return self.score_total / self.score_count
+
+    @property
+    def score_variance(self) -> float | None:
+        if self.score_count <= 0:
+            return None
+        mean = self.score_total / self.score_count
+        return max(0.0, self.score_sum_squares / self.score_count - mean * mean)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -67,20 +90,105 @@ class ElementStat:
             "usage_count": self.usage_count,
             "success_count": self.success_count,
             "accuracy": self.accuracy,
+            "score_count": self.score_count,
+            "score_total": self.score_total,
+            "score_sum_squares": self.score_sum_squares,
+            "score_mean": self.score_mean,
+            "score_variance": self.score_variance,
+            "hard_regression_ever": self.hard_regression_ever,
+            "hard_regression_count": self.hard_regression_count,
+            "attributed_inner_epochs": list(self.attributed_inner_epochs),
         }
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "ElementStat":
+        score_count = int(value.get("score_count", 0))
+        score_total = float(value.get("score_total", 0.0))
+        raw_sum_squares = value.get("score_sum_squares")
+        if raw_sum_squares is None and score_count > 0:
+            mean = score_total / score_count
+            variance = float(value.get("score_variance", 0.0) or 0.0)
+            score_sum_squares = score_count * (variance + mean * mean)
+        else:
+            score_sum_squares = float(raw_sum_squares or 0.0)
         return cls(
             element_id=str(value["element_id"]),
             category=str(value.get("category", "skill")),
             usage_count=int(value.get("usage_count", 0)),
             success_count=int(value.get("success_count", 0)),
+            score_count=score_count,
+            score_total=score_total,
+            score_sum_squares=score_sum_squares,
+            hard_regression_ever=bool(value.get("hard_regression_ever", False)),
+            hard_regression_count=int(value.get("hard_regression_count", 0)),
+            attributed_inner_epochs=sorted({
+                int(item) for item in value.get("attributed_inner_epochs", [])
+            }),
         )
 
 
 def element_stat_key(category: str, element_id: str) -> str:
     return f"{category}:{element_id}"
+
+
+def inner_harness_score_and_hard_regression(
+    result: "HarnessEpochResult",
+) -> tuple[float | None, bool]:
+    """Return the aggregate candidate soft score and any paired hard regression."""
+
+    validation = result.rubric_validation or {}
+    overall_infrastructure = validation.get("infrastructure_ok")
+    if overall_infrastructure is not None and overall_infrastructure is not True:
+        return None, False
+    if any(
+        not outcome.infrastructure_ok
+        for outcome in (*result.parent_outcomes, *result.candidate_outcomes)
+    ):
+        return None, False
+    candidate_soft_scores: list[float] = []
+    hard_regression = False
+    for case in validation.get("case_results", []):
+        if not isinstance(case, dict):
+            continue
+        parent = case.get("parent", {})
+        candidate = case.get("candidate", {})
+        if not isinstance(parent, dict) or not isinstance(candidate, dict):
+            continue
+        for side in (parent, candidate):
+            infrastructure_ok = side.get("infrastructure_ok")
+            if infrastructure_ok is not None and infrastructure_ok is not True:
+                return None, False
+        soft_total = candidate.get("soft_total")
+        if isinstance(soft_total, (int, float)):
+            candidate_soft_scores.append(float(soft_total))
+        parent_hard = parent.get("hard", {})
+        candidate_hard = candidate.get("hard", {})
+        if isinstance(parent_hard, dict) and isinstance(candidate_hard, dict):
+            for rubric_id, parent_value in parent_hard.items():
+                candidate_value = candidate_hard.get(rubric_id)
+                if (
+                    isinstance(parent_value, (int, float))
+                    and isinstance(candidate_value, (int, float))
+                    and float(candidate_value) < float(parent_value)
+                ):
+                    hard_regression = True
+                    break
+
+    if not hard_regression:
+        hard_regression = any(
+            "hard rubric" in str(reason).casefold()
+            and any(token in str(reason).casefold() for token in ("regress", "decreas", "dropped"))
+            for reason in result.reasons
+        )
+    if candidate_soft_scores:
+        return sum(candidate_soft_scores), hard_regression
+
+    fallback_scores = [
+        float(outcome.final_score)
+        for outcome in result.candidate_outcomes
+        if outcome.infrastructure_ok and outcome.final_score is not None
+    ]
+    return (sum(fallback_scores) if fallback_scores else None), hard_regression
 
 
 def _policy_value(policy: dict[str, Any], key: str) -> Any:
@@ -144,15 +252,41 @@ class HarnessElementStatsStore:
             },
         )
 
-    def touch(self, *, category: str, element_id: str, success: bool) -> None:
+    def touch(
+        self,
+        *,
+        category: str,
+        element_id: str,
+        success: bool,
+        score: float | None = None,
+        hard_regression: bool = False,
+        attribution_epoch: int | None = None,
+    ) -> bool:
         key = element_stat_key(category, element_id)
         stat = self.items.get(key)
         if stat is None:
             stat = ElementStat(element_id=element_id, category=category)
             self.items[key] = stat
+        if (
+            attribution_epoch is not None
+            and attribution_epoch in stat.attributed_inner_epochs
+        ):
+            return False
         stat.usage_count += 1
         if success:
             stat.success_count += 1
+        if score is not None:
+            numeric_score = float(score)
+            stat.score_count += 1
+            stat.score_total += numeric_score
+            stat.score_sum_squares += numeric_score * numeric_score
+        if hard_regression:
+            stat.hard_regression_ever = True
+            stat.hard_regression_count += 1
+        if attribution_epoch is not None:
+            stat.attributed_inner_epochs.append(attribution_epoch)
+            stat.attributed_inner_epochs.sort()
+        return True
 
     def record_epoch(
         self,
@@ -161,8 +295,15 @@ class HarnessElementStatsStore:
         result: "HarnessEpochResult",
     ) -> None:
         success = result.accepted
+        score, hard_regression = inner_harness_score_and_hard_regression(result)
         for element in profile.active_elements:
-            self.touch(category=element.category, element_id=element.element_id, success=success)
+            self.touch(
+                category=element.category,
+                element_id=element.element_id,
+                success=success,
+                score=score,
+                hard_regression=hard_regression,
+            )
 
     def active_in_category(
         self,
