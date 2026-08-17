@@ -1,0 +1,76 @@
+{
+  "constraints": {
+    "architecture_intact": true,
+    "deterministic_smoothing_test_complete": true,
+    "gdscript_compiles": true,
+    "godot_validation_complete": true
+  },
+  "details": {
+    "gdscript_files": 470,
+    "godot": {
+      "compile_errors": false,
+      "compiler_error_count": 0,
+      "complete": true,
+      "diagnostics": [],
+      "return_code": 0
+    },
+    "scene_files": 123,
+    "smoothing": {
+      "behavior": {
+        "checks": {
+          "bounded_extrapolation": false,
+          "deterministic_api": false,
+          "midpoint_interpolation": false,
+          "telemetry": false
+        },
+        "complete": true,
+        "diagnostics": [
+          "smoothing contract failed: bounded_extrapolation",
+          "smoothing contract failed: deterministic_api",
+          "smoothing contract failed: midpoint_interpolation",
+          "smoothing contract failed: telemetry"
+        ],
+        "metrics": {},
+        "score": 0.0
+      },
+      "behavior_score": 0.0,
+      "contract": {
+        "adaptive_delay": false,
+        "bounded_extrapolation": false,
+        "buffered_samples": true,
+        "deterministic_ingest_api": false,
+        "deterministic_sampling_api": false,
+        "interpolation": true,
+        "npcs_routed": true,
+        "players_routed": true,
+        "telemetry": false,
+        "teleport_snap": true
+      },
+      "diagnostics": [
+        "smoothing contract failed: bounded_extrapolation",
+        "smoothing contract failed: deterministic_api",
+        "smoothing contract failed: midpoint_interpolation",
+        "smoothing contract failed: telemetry"
+      ],
+      "score": 0.375,
+      "static_score": 0.5,
+      "test_complete": true
+    }
+  },
+  "diagnostics": [
+    "smoothing contract failed: bounded_extrapolation",
+    "smoothing contract failed: deterministic_api",
+    "smoothing contract failed: midpoint_interpolation",
+    "smoothing contract failed: telemetry"
+  ],
+  "objectives": {
+    "architecture_integrity": 1.0,
+    "gameplay_quality": 0.833333,
+    "maintainability": 0.4,
+    "network_smoothing": 0.375,
+    "runtime_health": 1.0
+  },
+  "primary_score": 0.673333,
+  "schema_version": "tinymmo-evaluation-v1",
+  "status": "completed"
+}

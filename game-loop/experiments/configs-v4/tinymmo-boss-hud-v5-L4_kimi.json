@@ -1,0 +1,213 @@
+{
+  "benchmark": {
+    "adapter": "tinymmo",
+    "options": {
+      "godot_bin": "/Applications/Godot.app/Contents/MacOS/Godot",
+      "runtime_dependency_root": "/Users/wangxucong/Desktop/workspace/harness-game/game-loop/third_party/godot-sqlite-v4.8-macos",
+      "seed_evaluation_path": "/Users/wangxucong/Desktop/workspace/harness-game/game-loop/experiments/tinymmo/boss-hud-v2-v5-reevaluation.json"
+    }
+  },
+  "backend": {
+    "command": [
+      "bash",
+      "scripts/run_tinymmo_backend.sh",
+      "{candidate_workspace}",
+      "{instruction_file}",
+      "{output_manifest}",
+      "{evaluation_path}"
+    ],
+    "cwd": "/Users/wangxucong/Desktop/workspace/harness-game/game-loop",
+    "timeout_seconds": 3600,
+    "inactivity_timeout_seconds": 900,
+    "env": {
+      "CODEX_API_BASE": "http://29.116.237.135:8080/v1",
+      "CODEX_MODEL": "Kimi-K2.7-Code",
+      "GAME_LOOP_BACKBONE_PROVIDER": "kimi",
+      "GODOT_BIN": "/Applications/Godot.app/Contents/MacOS/Godot",
+      "TINYMMO_EVALUATOR_SCRIPT": "evaluate_tinymmo_boss_hud.py",
+      "GAME_LOOP_CHAT_MAX_TURNS": "30",
+      "GAME_LOOP_WORKSPACE_EDIT_GATE_TURN": "6"
+    }
+  },
+  "method": {
+    "level": "L4",
+    "observation_contract": "two_timescale_agent_harness_evolution_plus_benchmark_evaluator_and_validity_gates",
+    "fixed_probes": [],
+    "max_probe_calls": 6,
+    "active_selection": {
+      "max_selected_probes": 1,
+      "min_observations_per_probe": 1
+    },
+    "probe_families": [
+      {
+        "id": "tinymmo_structure_coverage",
+        "gene": {
+          "name": "min_gdscript_files",
+          "initial": 400,
+          "minimum": 400,
+          "maximum": 480,
+          "step": 10,
+          "difficulty_direction": "increasing"
+        },
+        "probe": {
+          "command": [
+            "python3",
+            "scripts/probe_tinymmo_structure.py",
+            "--artifact",
+            "{artifact_dir}",
+            "--min-gdscript-files",
+            "[[min_gdscript_files]]"
+          ],
+          "cwd": "/Users/wangxucong/Desktop/workspace/harness-game/game-loop",
+          "timeout_seconds": 30,
+          "selection_mode": "regression_anchor",
+          "parser": "json_stdout",
+          "tags": ["RepairConstraint", "architecture", "coverage"]
+        },
+        "archive_capacity": 8
+      }
+    ],
+    "harness_evolution": {
+      "loop_role": "inner",
+      "modules": [
+        {
+          "id": "late_subscriber_recovery",
+          "category": "repair",
+          "instruction": "Edit only source/common/gameplay/dungeon/boss_controller.gd and preserve its existing BossController, HostileNpc boss body, slam/enrage combat, _instance(), and WorldServer.curr.data_push.rpc_id implementation. Add a 1000-2000 ms active-state heartbeat using the existing _physics_process and _push_boss_state(true). Keep all event pushes immediate and never send every frame.",
+          "tags": ["networking", "hud", "recovery"]
+        },
+        {
+          "id": "runtime_evidence_first",
+          "category": "observability",
+          "instruction": "Run Godot import/compile validation after the focused production change and before finishing. Treat runtime evidence as authoritative.",
+          "tags": ["godot", "evidence", "testing"]
+        },
+        {
+          "id": "minimal_patch",
+          "category": "workflow",
+          "instruction": "Use the replace_in_file tool for exact local edits to the existing roughly 289-line boss_controller.gd. Add one named interval constant, one last/next-push timestamp, and one elapsed-time guard. Never use write_file on this existing controller. Do not invent RoomNode signals, add exported boss state, rebuild the HUD, create a synchronization framework, or alter combat tuning.",
+          "tags": ["scope", "delivery"]
+        },
+        {
+          "id": "revision_consistency",
+          "category": "protocol",
+          "instruction": "Every heartbeat is a normal authoritative boss.state update with a newer revision and clock-safe cast_remaining_ms. Preserve stale packet rejection and lifecycle cleanup.",
+          "tags": ["ordering", "authority", "lifecycle"]
+        },
+        {
+          "id": "real_scene_only",
+          "category": "strategy",
+          "instruction": "Integrate through the existing final dungeon RoomNode and production HUD. Do not create a standalone showcase, alternate main scene, fake boss, or playtest-only main path.",
+          "tags": ["production", "playtest"]
+        },
+        {
+          "id": "bounded_recovery_evidence",
+          "category": "observability",
+          "instruction": "Inspect the production BossController after editing: recovery must be driven by elapsed monotonic time, limited to active encounters, and retain immediate event pushes. Then compile the whole Godot project.",
+          "tags": ["boundedness", "evidence"]
+        },
+        {
+          "id": "rejection_escape",
+          "category": "strategy",
+          "instruction": "If rejected, inspect the exact failed contract or integration invariant and change the implementation rather than layering on cosmetic effects.",
+          "tags": ["exploration", "feedback"]
+        }
+      ],
+      "tool_interfaces": [
+        {
+          "id": "godot_headless",
+          "kind": "engine_probe",
+          "description": "Run bounded Godot 4.6.3 validation inside the candidate workspace.",
+          "command": [
+            "/Applications/Godot.app/Contents/MacOS/Godot",
+            "--headless",
+            "--editor",
+            "--path",
+            "{candidate_workspace}",
+            "--quit"
+          ],
+          "cwd": "/Users/wangxucong/Desktop/workspace/harness-game/game-loop",
+          "safety_scope": "candidate_workspace_only",
+          "tags": ["godot", "runtime"]
+        }
+      ],
+      "seed_modules": [
+        "runtime_evidence_first",
+        "late_subscriber_recovery",
+        "real_scene_only",
+        "revision_consistency",
+        "minimal_patch"
+      ],
+      "seed_tool_interfaces": ["godot_headless"],
+      "max_active_modules": 5,
+      "max_active_tool_interfaces": 1,
+      "mutation_width": 1,
+      "replay_min_cases": 1,
+      "promotion_delta_min": 0.02,
+      "max_case_regression": 0.02,
+      "require_rubric_validation": false,
+      "dynamic_rubric_generation": false,
+      "hard_rubrics": [
+        {
+          "rubric_id": "architecture_intact",
+          "kind": "hard",
+          "description": "Client, gateway, master, world server, byte-packed protocol, RoomNode, and final dungeon path remain intact."
+        },
+        {
+          "rubric_id": "godot_compiles",
+          "kind": "hard",
+          "description": "Godot 4.6.3 completes validation without GDScript parse or compile errors."
+        },
+        {
+          "rubric_id": "real_scene_integration",
+          "kind": "hard",
+          "description": "Late subscribers recover through the real final-room BossController and production HUD, not a standalone demo."
+        }
+      ],
+      "soft_rubrics": [
+        {
+          "rubric_id": "late_join_visibility",
+          "kind": "soft",
+          "description": "A client entering after the initial boss push receives authoritative encounter state within 1-2 seconds.",
+          "weight": 0.50
+        },
+        {
+          "rubric_id": "network_boundedness",
+          "kind": "soft",
+          "description": "Recovery traffic is low-frequency while meaningful encounter events remain immediate.",
+          "weight": 0.30
+        },
+        {
+          "rubric_id": "ordering_and_lifecycle",
+          "kind": "soft",
+          "description": "Heartbeat revisions, cast timing, stale rejection, and end cleanup remain correct.",
+          "weight": 0.20
+        }
+      ]
+    }
+  },
+  "evolution": {
+    "max_generations": 1,
+    "candidates_per_generation": 3,
+    "delta_min": 0.02,
+    "objective_regression_epsilon": 0.001,
+    "stop_after_rejections": 3,
+    "feedback_disclosure": "DIAGNOSTICS",
+    "stop_on_terminal_success": false,
+    "max_model_calls": 3,
+    "max_evaluator_queries": 3
+  },
+  "reliability": {
+    "pause_on_infrastructure_failure": true,
+    "count_infrastructure_attempts_in_evaluator_budget": false
+  },
+  "gates": {
+    "max_files": 5000,
+    "max_total_bytes": 1073741824,
+    "fail_suspicious_references": true
+  },
+  "experiment": {
+    "arm": "L4_agent",
+    "freezes_harness_outer_loop": true
+  }
+}

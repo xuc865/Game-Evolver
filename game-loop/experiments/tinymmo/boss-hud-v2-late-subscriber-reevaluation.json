@@ -1,0 +1,65 @@
+{
+  "constraints": {
+    "architecture_intact": true,
+    "gdscript_compiles": true,
+    "godot_validation_complete": true,
+    "real_dungeon_path_preserved": true
+  },
+  "details": {
+    "boss_hud_integration": {
+      "boss_hud_files": [
+        "source/client/ui/hud/boss_encounter_hud.gd"
+      ],
+      "checks": {
+        "authoritative_health": true,
+        "boss_name_visible": true,
+        "bounded_updates": true,
+        "cast_payload": true,
+        "cast_visible": true,
+        "cleanup_on_disconnect": true,
+        "cleanup_on_end": true,
+        "cleanup_on_instance_change": true,
+        "client_subscribes": true,
+        "clock_safe_cast_timing": true,
+        "encounter_end_push": true,
+        "health_bar_visible": true,
+        "hud_production_integration": true,
+        "late_subscriber_recovery": false,
+        "monotonic_revision": true,
+        "numeric_health_visible": true,
+        "phase_payload": true,
+        "phase_visible": true,
+        "real_final_room": true,
+        "room_controller_path": true,
+        "server_pushes_boss_state": true,
+        "stable_encounter_id": true,
+        "stale_update_guard": true
+      },
+      "diagnostics": [
+        "boss HUD integration missing: late_subscriber_recovery"
+      ],
+      "score": 0.9565217391304348,
+      "state_heartbeat_ms": null
+    },
+    "godot": {
+      "compile_errors": false,
+      "compiler_error_count": 0,
+      "complete": true,
+      "diagnostics": [],
+      "return_code": 0
+    }
+  },
+  "diagnostics": [
+    "boss HUD integration missing: late_subscriber_recovery"
+  ],
+  "objectives": {
+    "architecture_integrity": 1.0,
+    "boss_hud_production_integration": 0.956522,
+    "maintainability": 0.666667,
+    "real_scene_coverage": 1.0,
+    "runtime_health": 1.0
+  },
+  "primary_score": 0.957246,
+  "schema_version": "tinymmo-boss-hud-evaluation-v1",
+  "status": "completed"
+}

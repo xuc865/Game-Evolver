@@ -40,11 +40,16 @@ def run_bridge(
     )
     submission = runtime.run(task, episode_dir=bridge_root / "opengame_episode")
     artifact = Path(submission.artifact_ref) if submission.artifact_ref else None
+    salvage_note = None
+    if artifact is None and submission.status != "completed":
+        artifact = _salvage_workspace_artifact(submission)
+        if artifact is not None:
+            salvage_note = "artifact_salvaged_after_runtime_failure"
     evaluation_dir = bridge_root / "evaluation"
     evaluation_path = evaluation_dir / "result.json"
 
     specification_path = public_task_root.resolve() / "specification.md"
-    if submission.status != "completed" or artifact is None:
+    if artifact is None:
         evaluation = _infrastructure_failure("OpenGame did not produce a VeriGame artifact")
     elif worker is None:
         evaluation = _infrastructure_failure(
@@ -71,9 +76,34 @@ def run_bridge(
             "artifact_dir": "" if artifact is None else str(artifact.resolve()),
             "evaluation_path": str(evaluation_path),
             "submission": submission.to_dict(),
+            "diagnostics": [] if salvage_note is None else [salvage_note],
         },
     )
     return 0 if status == "completed" else 2
+
+
+def _salvage_workspace_artifact(submission) -> Path | None:
+    """Use a real workspace artifact when the SDK timed out after writing files."""
+    metadata = getattr(submission, "metadata", {})
+    if not isinstance(metadata, dict):
+        return None
+    episode_root = metadata.get("episode_root")
+    if not isinstance(episode_root, str) or not episode_root.strip():
+        return None
+    workspace = (Path(episode_root) / "workspace").resolve()
+    if not workspace.is_dir() or not _has_verigame_artifact(workspace):
+        return None
+    return workspace
+
+
+def _has_verigame_artifact(workspace: Path) -> bool:
+    if (workspace / "index.html").is_file() or (workspace / "game.html").is_file():
+        return True
+    if (workspace / "package.json").is_file() and any(
+        path.is_file() for path in (workspace / "src").rglob("*")
+    ):
+        return True
+    return False
 
 
 def _infrastructure_failure(error: str) -> dict[str, object]:

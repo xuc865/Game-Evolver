@@ -1,0 +1,225 @@
+{
+  "benchmark": {
+    "adapter": "tinymmo",
+    "options": {
+      "godot_bin": "/Applications/Godot.app/Contents/MacOS/Godot",
+      "runtime_dependency_root": "/Users/wangxucong/Desktop/workspace/harness-game/game-loop/third_party/godot-sqlite-v4.8-macos",
+      "seed_evaluation_path": "/Users/wangxucong/Desktop/workspace/harness-game/game-loop/experiments/tinymmo/boss-demo-v9-seed-evaluation.json"
+    }
+  },
+  "backend": {
+    "command": [
+      "bash",
+      "scripts/run_tinymmo_backend.sh",
+      "{candidate_workspace}",
+      "{instruction_file}",
+      "{output_manifest}",
+      "{evaluation_path}"
+    ],
+    "cwd": "/Users/wangxucong/Desktop/workspace/harness-game/game-loop",
+    "timeout_seconds": 3600,
+    "inactivity_timeout_seconds": 900,
+    "env": {
+      "CODEX_API_BASE": "http://29.116.237.135:8080/v1",
+      "CODEX_MODEL": "Kimi-K2.7-Code",
+      "GAME_LOOP_BACKBONE_PROVIDER": "kimi",
+      "GODOT_BIN": "/Applications/Godot.app/Contents/MacOS/Godot",
+      "TINYMMO_EVALUATOR_SCRIPT": "evaluate_tinymmo_boss_demo.py",
+      "GAME_LOOP_CHAT_MAX_TURNS": "40",
+      "GAME_LOOP_WORKSPACE_EDIT_GATE_TURN": "8"
+    }
+  },
+  "method": {
+    "level": "L4",
+    "observation_contract": "two_timescale_agent_harness_evolution_plus_benchmark_evaluator_and_validity_gates",
+    "fixed_probes": [],
+    "max_probe_calls": 6,
+    "active_selection": {
+      "max_selected_probes": 1,
+      "min_observations_per_probe": 1
+    },
+    "probe_families": [
+      {
+        "id": "tinymmo_structure_coverage",
+        "gene": {
+          "name": "min_gdscript_files",
+          "initial": 400,
+          "minimum": 400,
+          "maximum": 480,
+          "step": 10,
+          "difficulty_direction": "increasing"
+        },
+        "probe": {
+          "command": [
+            "python3",
+            "scripts/probe_tinymmo_structure.py",
+            "--artifact",
+            "{artifact_dir}",
+            "--min-gdscript-files",
+            "[[min_gdscript_files]]"
+          ],
+          "cwd": "/Users/wangxucong/Desktop/workspace/harness-game/game-loop",
+          "timeout_seconds": 30,
+          "selection_mode": "regression_anchor",
+          "parser": "json_stdout",
+          "tags": ["RepairConstraint", "architecture", "coverage"]
+        },
+        "archive_capacity": 8
+      }
+    ],
+    "harness_evolution": {
+      "loop_role": "inner",
+      "modules": [
+        {
+          "id": "real_state_driven_spectacle",
+          "category": "strategy",
+          "instruction": "Improve the production BossEncounterHUD using only real boss.state payload transitions. Never create a preview payload, alternate scene, fake Boss, or timer-driven state that is not anchored to an authoritative encounter update.",
+          "tags": ["production", "demo", "authority"]
+        },
+        {
+          "id": "encounter_visual_hierarchy",
+          "category": "gameplay",
+          "instruction": "Make the persistent Boss frame screenshot-obvious at 960x540: roughly 560-680 px wide with a health bar at least 520x24, strong name hierarchy, numeric HP, and professional contrast. Preserve gameplay visibility.",
+          "tags": ["hud", "readability", "visual"]
+        },
+        {
+          "id": "transition_state_machine",
+          "category": "protocol",
+          "instruction": "Use explicit encounter-id, phase, cast, and active/aborted transitions so reveal, enrage, danger, victory, and cleanup each fire exactly once per authoritative transition. Heartbeats and duplicate revisions must not replay presentation effects.",
+          "tags": ["ordering", "lifecycle", "animation"]
+        },
+        {
+          "id": "cast_urgency",
+          "category": "gameplay",
+          "instruction": "During a real cast, display a central high-contrast warning banner with large SLAM - MOVE OUT action copy, countdown/progress, and restrained pulsing. Clear it immediately on the newer authoritative cast-end state.",
+          "tags": ["combat", "telegraph", "hud"]
+        },
+        {
+          "id": "phase_and_victory_payoff",
+          "category": "gameplay",
+          "instruction": "On a true phase 1 to phase 2 update, show a conspicuous transition and keep a persistent ENRAGED badge plus hotter frame/HP styling for the remainder of authoritative phase 2. On normal death show victory before hiding; abort/disconnect/instance change must reset immediately.",
+          "tags": ["phase", "victory", "feedback"]
+        },
+        {
+          "id": "focused_hud_patch",
+          "category": "workflow",
+          "instruction": "Prefer a focused edit to source/client/ui/hud/boss_encounter_hud.gd. Reuse its existing Controls and Tweens, do not build a generic UI framework, do not change combat tuning, and do not rewrite BossController networking.",
+          "tags": ["scope", "maintainability"]
+        },
+        {
+          "id": "runtime_evidence_first",
+          "category": "observability",
+          "instruction": "Run full Godot validation and exercise BossEncounterHUD construction after the production HUD change. Reject nonexistent theme APIs. Preserve revision rejection, cross-process cast timing, heartbeat recovery, and all real Boss combat paths.",
+          "tags": ["godot", "testing", "regression"]
+        },
+        {
+          "id": "rejection_escape",
+          "category": "strategy",
+          "instruction": "If rejected, address the exact missing visible transition or lifecycle contract with a different implementation rather than adding unrelated polish.",
+          "tags": ["feedback", "exploration"]
+        }
+      ],
+      "tool_interfaces": [
+        {
+          "id": "godot_headless",
+          "kind": "engine_probe",
+          "description": "Run bounded Godot 4.6.3 validation inside the candidate workspace.",
+          "command": [
+            "/Applications/Godot.app/Contents/MacOS/Godot",
+            "--headless",
+            "--editor",
+            "--path",
+            "{candidate_workspace}",
+            "--quit"
+          ],
+          "cwd": "/Users/wangxucong/Desktop/workspace/harness-game/game-loop",
+          "safety_scope": "candidate_workspace_only",
+          "tags": ["godot", "runtime"]
+        }
+      ],
+      "seed_modules": [
+        "real_state_driven_spectacle",
+        "encounter_visual_hierarchy",
+        "transition_state_machine",
+        "cast_urgency",
+        "phase_and_victory_payoff"
+      ],
+      "seed_tool_interfaces": ["godot_headless"],
+      "max_active_modules": 5,
+      "max_active_tool_interfaces": 1,
+      "mutation_width": 1,
+      "replay_min_cases": 1,
+      "promotion_delta_min": 0.03,
+      "max_case_regression": 0.02,
+      "require_rubric_validation": false,
+      "dynamic_rubric_generation": false,
+      "hard_rubrics": [
+        {
+          "rubric_id": "architecture_intact",
+          "kind": "hard",
+          "description": "Client, gateway, master, world server, byte-packed protocol, FinalRoom, BossController, and production HUD remain intact."
+        },
+        {
+          "rubric_id": "godot_compiles",
+          "kind": "hard",
+          "description": "Godot 4.6.3 validation completes without GDScript parse or compile errors."
+        },
+        {
+          "rubric_id": "authoritative_real_scene",
+          "kind": "hard",
+          "description": "All presentation is driven by real boss.state transitions in the production FinalRoom; no fake payload or alternate demo scene."
+        }
+      ],
+      "soft_rubrics": [
+        {
+          "rubric_id": "screenshot_impact",
+          "kind": "soft",
+          "description": "The persistent Boss frame is visually dominant and immediately communicates Boss identity, HP, and phase.",
+          "weight": 0.30
+        },
+        {
+          "rubric_id": "combat_readability",
+          "kind": "soft",
+          "description": "Real casts and Phase 2 transitions create unmistakable, timely danger and escalation feedback.",
+          "weight": 0.30
+        },
+        {
+          "rubric_id": "encounter_payoff",
+          "kind": "soft",
+          "description": "Boss reveal and victory feedback make the encounter feel authored while remaining non-blocking.",
+          "weight": 0.25
+        },
+        {
+          "rubric_id": "state_correctness",
+          "kind": "soft",
+          "description": "Effects fire once per newer authoritative transition; heartbeat, revisions, abort, disconnect, and instance cleanup remain correct.",
+          "weight": 0.15
+        }
+      ]
+    }
+  },
+  "evolution": {
+    "max_generations": 1,
+    "candidates_per_generation": 1,
+    "delta_min": 0.03,
+    "objective_regression_epsilon": 0.001,
+    "stop_after_rejections": 1,
+    "feedback_disclosure": "DIAGNOSTICS",
+    "stop_on_terminal_success": false,
+    "max_model_calls": 3,
+    "max_evaluator_queries": 3
+  },
+  "reliability": {
+    "pause_on_infrastructure_failure": true,
+    "count_infrastructure_attempts_in_evaluator_budget": false
+  },
+  "gates": {
+    "max_files": 5000,
+    "max_total_bytes": 1073741824,
+    "fail_suspicious_references": true
+  },
+  "experiment": {
+    "arm": "L4_agent",
+    "freezes_harness_outer_loop": true
+  }
+}

@@ -1,0 +1,97 @@
+{
+  "constraints": {
+    "architecture_intact": true,
+    "authoritative_state_preserved": true,
+    "gdscript_compiles": true,
+    "godot_validation_complete": true,
+    "hud_runtime_api_safe": true,
+    "real_boss_path_preserved": true
+  },
+  "details": {
+    "boss_demo_presentation": {
+      "checks": {
+        "abort_cleanup_preserved": true,
+        "bounded_node_creation": true,
+        "cast_urgency_copy": true,
+        "cast_urgency_visual": true,
+        "center_screen_cast_banner": true,
+        "centered_cast_banner": true,
+        "centered_encounter_frame": true,
+        "clock_safe_countdown_preserved": true,
+        "demo_scale_health_bar": true,
+        "dominant_persistent_frame": true,
+        "instance_disconnect_cleanup_preserved": true,
+        "new_encounter_reveal_gate": true,
+        "no_alternate_boss_scene": true,
+        "no_fake_payload": true,
+        "persistent_phase_escalation": true,
+        "phase_transition_gate": true,
+        "production_hud_present": true,
+        "revision_gate_preserved": true,
+        "runtime_safe_control_api": true,
+        "victory_feedback": true,
+        "viewport_width_anchor_explicit": false
+      },
+      "diagnostics": [
+        "boss demo presentation missing: viewport_width_anchor_explicit"
+      ],
+      "score": 0.9523809523809523
+    },
+    "boss_hud_integration": {
+      "boss_hud_files": [
+        "source/client/ui/hud/boss_encounter_hud.gd"
+      ],
+      "checks": {
+        "add_spawn_contract_preserved": true,
+        "authoritative_health": true,
+        "boss_name_visible": true,
+        "bounded_updates": true,
+        "cast_payload": true,
+        "cast_visible": true,
+        "cleanup_on_disconnect": true,
+        "cleanup_on_end": true,
+        "cleanup_on_instance_change": true,
+        "client_subscribes": true,
+        "clock_safe_cast_timing": true,
+        "encounter_end_push": true,
+        "enrage_combat_preserved": true,
+        "health_bar_visible": true,
+        "hud_production_integration": true,
+        "late_subscriber_recovery": true,
+        "monotonic_revision": true,
+        "numeric_health_visible": true,
+        "phase_payload": true,
+        "phase_visible": true,
+        "real_final_room": true,
+        "room_controller_path": true,
+        "server_instance_resolution_preserved": true,
+        "server_pushes_boss_state": true,
+        "slam_combat_preserved": true,
+        "stable_encounter_id": true,
+        "stale_update_guard": true
+      },
+      "diagnostics": [],
+      "score": 1.0,
+      "state_heartbeat_ms": 1500
+    },
+    "godot": {
+      "compile_errors": false,
+      "compiler_error_count": 0,
+      "complete": true,
+      "diagnostics": [],
+      "return_code": 0
+    }
+  },
+  "diagnostics": [
+    "boss demo presentation missing: viewport_width_anchor_explicit"
+  ],
+  "objectives": {
+    "architecture_integrity": 1.0,
+    "boss_demo_visual_impact": 0.952381,
+    "production_path_preservation": 1.0,
+    "runtime_health": 1.0
+  },
+  "primary_score": 0.97381,
+  "schema_version": "tinymmo-boss-demo-evaluation-v1",
+  "status": "completed"
+}

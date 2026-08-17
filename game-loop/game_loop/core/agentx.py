@@ -26,6 +26,11 @@ from game_loop.core.outer_harness_library import (
 from game_loop.utils import atomic_write_json, read_json, utc_now
 
 
+_NOOP_MUTATION_MESSAGE = (
+    "harness mutation is a no-op: candidate does not change executable behavior"
+)
+
+
 class InnerGradientProposer(Protocol):
     """Outer agent: proposes a semantic gradient for the game-agent harness."""
 
@@ -196,8 +201,9 @@ class AgentXNestedEvolution:
             proposer_harness=frozen_outer,
             target_harness=inner_parent,
         )
-        inner_candidate = self.inner_engine.propose(
-            parent_id=inner_parent.harness_id,
+        inner_candidate = _propose_with_noop_retries(
+            engine=self.inner_engine,
+            parent=inner_parent,
             gradient=inner_gradient,
             epoch=epoch,
         )
@@ -427,3 +433,111 @@ class AgentXNestedEvolution:
         })
         atomic_write_json(self.state_path, state)
         return result
+
+
+def _propose_with_noop_retries(
+    *,
+    engine: HarnessEvolutionEngine,
+    parent: HarnessProfile,
+    gradient: HarnessSemanticGradient,
+    epoch: int,
+) -> HarnessProfile:
+    errors: list[str] = []
+    retry_gradients = _behavior_changing_retry_gradients(
+        parent=parent,
+        engine=engine,
+        epoch=epoch,
+        original=gradient,
+    )
+    for attempt, candidate_gradient in enumerate((gradient, *retry_gradients), start=1):
+        try:
+            candidate = engine.propose(
+                parent_id=parent.harness_id,
+                gradient=candidate_gradient,
+                epoch=epoch,
+            )
+        except ValueError as exc:
+            if str(exc) != _NOOP_MUTATION_MESSAGE:
+                raise
+            errors.append(
+                f"attempt {attempt}: tags={list(candidate_gradient.target_tags)}"
+            )
+            continue
+        if attempt > 1:
+            print(
+                f"[agentx] recovered no-op inner mutation at epoch {epoch} "
+                f"on attempt {attempt}: tags={list(candidate_gradient.target_tags)}"
+            )
+        return candidate
+    raise ValueError(
+        _NOOP_MUTATION_MESSAGE
+        + "; retries exhausted: "
+        + " | ".join(errors[-6:])
+    )
+
+
+def _behavior_changing_retry_gradients(
+    *,
+    parent: HarnessProfile,
+    engine: HarnessEvolutionEngine,
+    epoch: int,
+    original: HarnessSemanticGradient,
+) -> tuple[HarnessSemanticGradient, ...]:
+    counts: dict[str, int] = {}
+    for element in parent.active_elements:
+        counts[element.category] = counts.get(element.category, 0) + 1
+    categories = tuple(
+        category
+        for category in ("workflow", "mcp", "protocol", "context", "skill", "tool")
+        if engine.category_is_mutable(category)
+        and any(spec.category == category for spec in engine.elements.values())
+    )
+    open_categories = tuple(
+        category
+        for category in categories
+        if counts.get(category, 0)
+        < engine.config.max_active_elements.get(category, 1)
+    )
+    ordered_categories = tuple(dict.fromkeys((*open_categories, *categories)))
+    module_tags = (
+        "mechanic_depth",
+        "gameplay_observability",
+        "regression_first",
+        "engine_tooling_first",
+        "evidence_first",
+        "minimal_coherent_patch",
+    )
+    gradients: list[HarnessSemanticGradient] = []
+    for index, category in enumerate(ordered_categories):
+        inactive_ids = sorted(
+            spec.element_id
+            for spec in engine.elements.values()
+            if spec.category == category
+            and spec.element_id
+            not in {
+                element.element_id
+                for element in parent.active_elements
+                if element.category == category
+            }
+        )
+        mode = (
+            "element_add"
+            if counts.get(category, 0)
+            < engine.config.max_active_elements.get(category, 1)
+            else "element_replace"
+        )
+        module_tag = module_tags[(epoch + index) % len(module_tags)]
+        target_tags = [category, "usage_driven", mode, module_tag]
+        if mode == "element_replace" and inactive_ids:
+            target_tags.append(f"element_id:{inactive_ids[(epoch + index) % len(inactive_ids)]}")
+        gradients.append(
+            HarnessSemanticGradient(
+                diagnosis=(
+                    f"epoch {epoch}: retry no-op inner mutation via {category} "
+                    f"{mode}; original={original.diagnosis}"
+                ),
+                target_tags=tuple(target_tags),
+                evidence_refs=original.evidence_refs,
+            )
+        )
+    return tuple(gradients)

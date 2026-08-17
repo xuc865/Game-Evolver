@@ -1,143 +1,72 @@
 {
   "benchmark": {
-    "adapter": "gcbench",
+    "adapter": "verigame",
     "options": {
-      "root": "/Users/wangxucong/Desktop/workspace/harness-game/gcbench"
+      "root": "/Users/wangxucong/Desktop/workspace/harness-game/game-loop"
     }
   },
   "backend": {
     "command": [
-      "bash",
-      "scripts/run_gcbench_l4_backend.sh",
-      "{candidate_workspace}",
+      "python3",
+      "-m",
+      "game_loop.benchmarks.verigame_bridge",
+      "--agent-workspace",
+      "{agent_workspace}",
+      "--instruction-file",
       "{instruction_file}",
-      "{artifact_path}",
+      "--task-root",
+      "{task_root}",
+      "--output-manifest",
       "{output_manifest}",
-      "{task_id}",
-      "{gcbench_root}",
-      "{breakdown_path}"
+      "--worker-command-json",
+      "[\"python3\", \"/Users/wangxucong/Desktop/workspace/harness-game/game-loop/scripts/ggv_contract_worker.py\"]",
+      "--timeout",
+      "120",
+      "--worker-timeout",
+      "45"
     ],
     "cwd": ".",
-    "timeout_seconds": 3600,
+    "timeout_seconds": 180,
     "env": {
-      "CODEX_API_BASE": "https://api.deepseek.com",
-      "CODEX_MODEL": "deepseek-v4-flash",
-      "GAME_LOOP_BACKBONE_PROVIDER": "deepseek",
-      "GAME_LOOP_CHAT_MAX_TURNS": "45",
-      "GAME_LOOP_CHAT_RECOVERY_MAX_TURNS": "10",
-      "GAME_LOOP_CHAT_MAX_OUTPUT_TOKENS": "8192",
-      "GAME_LOOP_CHAT_API_MAX_RETRIES": "10",
-      "GAME_LOOP_CHAT_API_TIMEOUT_SECONDS": "180",
-      "GAME_LOOP_CHAT_API_TOTAL_TIMEOUT_SECONDS": "600",
-      "GAME_LOOP_CHAT_RECOVERY_API_MAX_RETRIES": "4",
-      "GAME_LOOP_CHAT_RECOVERY_API_TOTAL_TIMEOUT_SECONDS": "360",
-      "GAME_LOOP_CHAT_TEMPERATURE": "0",
-      "GAME_LOOP_TOOL_READ_MAX_CHARS": "8000",
-      "GAME_LOOP_TOOL_STDOUT_MAX_CHARS": "8000",
-      "GAME_LOOP_TOOL_STDERR_MAX_CHARS": "4000",
-      "GAME_LOOP_REQUIRE_GCB_DEMOS": "1",
-      "GAME_LOOP_LLM_HARNESS_PROPOSER": "1",
-      "GAME_LOOP_HARNESS_PROPOSER_TIMEOUT_SECONDS": "120",
-      "GAME_LOOP_HARNESS_PROPOSER_ATTEMPTS": "4",
-      "GAME_LOOP_TEXT_ONLY": "1"
-    }
+      "CODEX_API_BASE": "http://29.163.228.59:8080/v1",
+      "CODEX_MODEL": "Qwen3.6-27B",
+      "GAME_LOOP_BACKBONE_PROVIDER": "qwen"
+    },
+    "inactivity_timeout_seconds": 90
   },
   "method": {
     "level": "L4",
     "fixed_probes": [
       {
-        "id": "godot_public_import",
+        "id": "verigame_build",
         "command": [
           "python3",
           "-m",
           "game_loop.probe_tools",
-          "godot-import",
+          "verigame-build",
           "--artifact",
           "{artifact_dir}"
         ],
         "cwd": ".",
         "parser": "json_stdout",
         "selection_mode": "required",
-        "timeout_seconds": 180,
+        "timeout_seconds": 45,
         "tags": [
           "RepairConstraint",
-          "godot"
-        ]
-      },
-      {
-        "id": "gcbench_demo_evidence",
-        "command": [
-          "python3",
-          "-m",
-          "game_loop.probe_tools",
-          "gcbench-demo-evidence",
-          "--artifact",
-          "{artifact_dir}",
-          "--max-demos",
-          "10",
-          "--max-frames",
-          "600"
-        ],
-        "cwd": ".",
-        "parser": "json_stdout",
-        "selection_mode": "required",
-        "timeout_seconds": 30,
-        "tags": [
-          "ImproveObjective",
-          "behavior_evidence"
-        ]
-      },
-      {
-        "id": "godot_public_runtime",
-        "command": [
-          "python3",
-          "-m",
-          "game_loop.probe_tools",
-          "godot-playtest",
-          "--artifact",
-          "{artifact_dir}",
-          "--frames",
-          "600"
-        ],
-        "cwd": ".",
-        "parser": "json_stdout",
-        "selection_mode": "required",
-        "timeout_seconds": 600,
-        "tags": [
-          "ImproveObjective",
-          "runtime"
-        ]
-      },
-      {
-        "id": "godot_quality_inventory",
-        "command": [
-          "python3",
-          "-m",
-          "game_loop.probe_tools",
-          "godot-quality-inventory",
-          "--artifact",
-          "{artifact_dir}"
-        ],
-        "cwd": ".",
-        "parser": "json_stdout",
-        "selection_mode": "required",
-        "timeout_seconds": 30,
-        "tags": [
-          "coverage",
-          "godot"
+          "build"
         ]
       }
     ],
     "probe_families": [
       {
-        "id": "godot_runtime_horizon",
+        "id": "verigame_screenshot_horizon",
         "gene": {
-          "name": "frames",
-          "initial": 600,
-          "minimum": 100,
-          "maximum": 1800,
-          "step": 100,
-          "difficulty_direction": "increasing"
+          "name": "wait_ms",
+          "initial": 1000,
+          "minimum": 500,
+          "maximum": 5000,
+          "step": 500,
+          "difficulty_direction": "decreasing"
         },
         "probe": {
           "cwd": ".",
@@ -145,30 +74,46 @@
             "python3",
             "-m",
             "game_loop.probe_tools",
-            "godot-playtest",
+            "verigame-screenshot",
             "--artifact",
             "{artifact_dir}",
-            "--frames",
-            "[[frames]]"
+            "--wait-ms",
+            "[[wait_ms]]"
           ],
-          "timeout_seconds": 1800,
+          "timeout_seconds": 45,
           "selection_mode": "regression_anchor",
           "parser": "json_stdout",
           "tags": [
             "ImproveObjective",
-            "runtime"
+            "visual"
           ]
         },
         "archive_capacity": 8
       }
     ],
-    "max_probe_calls": 30,
+    "max_probe_calls": 12,
     "active_selection": {
-      "max_selected_probes": 5,
+      "max_selected_probes": 2,
       "min_observations_per_probe": 1
     },
     "harness_evolution": {
       "modules": [
+        {
+          "id": "evidence_first",
+          "instruction": "Inspect executable evidence before choosing a patch.",
+          "tags": [
+            "ImproveObjective",
+            "functional_visuals"
+          ]
+        },
+        {
+          "id": "gameplay_observability",
+          "instruction": "Collect runtime and visual observations before accepting a candidate.",
+          "tags": [
+            "ImproveObjective",
+            "gameplay"
+          ]
+        },
         {
           "id": "mechanic_depth",
           "instruction": "Prefer changes that deepen mechanics rather than cosmetic-only edits.",
@@ -212,33 +157,50 @@
       ],
       "tool_interfaces": [
         {
-          "id": "godot_cli_runtime",
-          "kind": "engine_probe",
-          "description": "Run Godot import/runtime checks against the candidate workspace.",
+          "id": "node_build_tool",
+          "kind": "command_wrapper",
+          "description": "Build the candidate web game with npm.",
           "command": [
             "python3",
             "-m",
             "game_loop.probe_tools",
-            "godot-playtest",
+            "verigame-build",
             "--artifact",
             "{artifact_dir}"
           ],
           "safety_scope": "candidate_workspace_only",
           "tags": [
-            "engine_tooling",
-            "godot"
+            "build"
+          ]
+        },
+        {
+          "id": "playwright_screenshot",
+          "kind": "engine_probe",
+          "description": "Verify build artifacts exist before screenshot-based checks.",
+          "command": [
+            "python3",
+            "-m",
+            "game_loop.probe_tools",
+            "verigame-screenshot",
+            "--artifact",
+            "{artifact_dir}"
+          ],
+          "safety_scope": "candidate_workspace_only",
+          "tags": [
+            "visual"
           ]
         }
       ],
       "seed_modules": [
+        "evidence_first",
         "regression_first",
         "engine_tooling_first"
       ],
       "max_active_modules": 5,
-      "max_active_tool_interfaces": 1,
+      "max_active_tool_interfaces": 2,
       "mutation_width": 1,
-      "replay_min_cases": 3,
-      "rubric_validation_sample_size": 3,
+      "replay_min_cases": 1,
+      "rubric_validation_sample_size": 1,
       "loop_role": "inner",
       "require_rubric_validation": true,
       "dynamic_rubric_generation": true,
@@ -304,6 +266,20 @@
           ]
         },
         {
+          "id": "skill_visual_snapshot",
+          "category": "skill",
+          "description": "Capture visual/runtime snapshots for gameplay evidence.",
+          "spec": {
+            "mode": "visual_snapshot",
+            "frames": 60
+          },
+          "tags": [
+            "visual",
+            "runtime",
+            "universal"
+          ]
+        },
+        {
           "id": "skill_demo_replay_audit",
           "category": "skill",
           "description": "Audit demo replay artifacts for gameplay evidence.",
@@ -360,6 +336,20 @@
           ]
         },
         {
+          "id": "mcp_runtime_screenshot",
+          "category": "mcp",
+          "description": "Capture bounded runtime screenshots through MCP wrapper.",
+          "spec": {
+            "interface": "runtime_screenshot",
+            "frames": 60
+          },
+          "tags": [
+            "visual",
+            "runtime",
+            "universal"
+          ]
+        },
+        {
           "id": "mcp_file_tree_inspect",
           "category": "mcp",
           "description": "Inspect candidate file tree and highlight gameplay-relevant paths.",
@@ -369,6 +359,19 @@
           "tags": [
             "inspection",
             "universal"
+          ]
+        },
+        {
+          "id": "mcp_godot_screenshot",
+          "category": "mcp",
+          "description": "Capture bounded Godot runtime screenshots through MCP wrapper.",
+          "spec": {
+            "interface": "godot_mcp_screenshot",
+            "frames": 120
+          },
+          "tags": [
+            "godot",
+            "visual"
           ]
         },
         {
@@ -630,7 +633,9 @@
           "skill_regression_suite",
           "skill_demo_replay_audit"
         ],
-        "mcp": [],
+        "mcp": [
+          "mcp_runtime_screenshot"
+        ],
         "tool": [
           "tool_artifact_inventory",
           "tool_entrypoint_discover"
@@ -649,8 +654,7 @@
           "wf_plan_patch_verify"
         ]
       },
-      "seed_tool_interfaces": [],
-      "rubric_judge_timeout_seconds": 180
+      "rubric_judge_timeout_seconds": 60
     }
   },
   "evolution": {

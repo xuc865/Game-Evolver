@@ -45,4 +45,25 @@ def runtime_config_from_environment(
         config = OpenGameRuntimeConfig.from_dict(
             {**config.to_dict(), "timeout_seconds": int(timeout_seconds)}
         )
+    max_turns = os.environ.get("GAME_LOOP_OPENGAME_MAX_SESSION_TURNS", "").strip()
+    if max_turns:
+        config = OpenGameRuntimeConfig.from_dict(
+            {**config.to_dict(), "max_session_turns": int(max_turns)}
+        )
+    env_timeout = os.environ.get("GAME_LOOP_OPENGAME_TIMEOUT_SECONDS", "").strip()
+    if env_timeout:
+        config = OpenGameRuntimeConfig.from_dict(
+            {**config.to_dict(), "timeout_seconds": int(env_timeout)}
+        )
+    permission_mode = os.environ.get("GAME_LOOP_OPENGAME_PERMISSION_MODE", "").strip()
+    if permission_mode:
+        config = OpenGameRuntimeConfig.from_dict(
+            {**config.to_dict(), "permission_mode": permission_mode}
+        )
+    exclude_tools = os.environ.get("GAME_LOOP_OPENGAME_EXCLUDE_TOOLS")
+    if exclude_tools is not None:
+        tools = [item.strip() for item in exclude_tools.split(",") if item.strip()]
+        config = OpenGameRuntimeConfig.from_dict(
+            {**config.to_dict(), "exclude_tools": tools}
+        )
     return config

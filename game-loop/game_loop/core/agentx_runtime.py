@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -260,29 +262,51 @@ class HarnessLoopNestedReplayOracle:
         *,
         side: str,
     ):
-        outcomes = []
-        for case in cases:
+        def run_case(case: HarnessReplayCase):
             case_dir = self.replay_root / f"epoch_{epoch:03d}" / side / case.case_id
             metadata = dict(case.metadata)
             task_source = Path(metadata.pop("task_source_override", case.task_ref))
             seed_artifact = Path(
                 metadata.pop("seed_artifact_override", case.parent_artifact_ref)
             )
-            outcomes.append(
-                run_frozen_harness_episode(
-                    case_id=case.case_id,
-                    case_dir=case_dir,
-                    harness=harness,
-                    config=self.config,
-                    task_source=task_source,
-                    seed_artifact=seed_artifact,
-                    seed_score=float(metadata.get("seed_score", self.seed_score)),
-                    epoch=epoch,
-                    run_id_prefix=f"{self.run_id_prefix}-{side[:1]}-",
-                    init_handler=self.init_handler,
-                    evolve_handler=self.evolve_handler,
-                )
+            return run_frozen_harness_episode(
+                case_id=case.case_id,
+                case_dir=case_dir,
+                harness=harness,
+                config=self.config,
+                task_source=task_source,
+                seed_artifact=seed_artifact,
+                seed_score=float(metadata.get("seed_score", self.seed_score)),
+                epoch=epoch,
+                run_id_prefix=f"{self.run_id_prefix}-{side[:1]}-",
+                init_handler=self.init_handler,
+                evolve_handler=self.evolve_handler,
             )
+
+        try:
+            configured_workers = int(
+                os.environ.get("GAME_LOOP_NESTED_REPLAY_CASE_WORKERS", "1")
+            )
+        except ValueError as exc:
+            raise ValueError(
+                "GAME_LOOP_NESTED_REPLAY_CASE_WORKERS must be an integer"
+            ) from exc
+        case_workers = min(len(cases), max(1, configured_workers))
+        if case_workers == 1:
+            return tuple(run_case(case) for case in cases)
+
+        outcomes_by_case: dict[str, object] = {}
+        with ThreadPoolExecutor(
+            max_workers=case_workers,
+            thread_name_prefix=f"nested-{side}-e{epoch:03d}",
+        ) as executor:
+            futures = {executor.submit(run_case, case): case for case in cases}
+            for future in as_completed(futures):
+                case = futures[future]
+                outcomes_by_case[case.case_id] = future.result()
+        outcomes = []
+        for case in cases:
+            outcomes.append(outcomes_by_case[case.case_id])
         return tuple(outcomes)
 
 

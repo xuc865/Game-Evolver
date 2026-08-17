@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import replace
 import json
 import os
@@ -282,6 +283,15 @@ def _resolve_seed_evaluation(
     adapter,
     config: AppConfig,
 ) -> EvaluationResult:
+    seed_evaluation_path = config.benchmark.options.get("seed_evaluation_path")
+    if seed_evaluation_path:
+        path = Path(str(seed_evaluation_path)).expanduser().resolve()
+        if not path.is_file():
+            raise FileNotFoundError(f"seed evaluation does not exist: {path}")
+        evaluation = adapter.parse_evaluation(path)
+        if not evaluation.feasible or evaluation.primary_score is None:
+            raise ValueError("seed evaluation must be feasible and contain a primary score")
+        return evaluation
     if getattr(args, "evaluate_seed", False):
         if adapter.adapter_id != "gcbench":
             raise ValueError("--evaluate-seed is only supported for the gcbench adapter")
@@ -526,19 +536,11 @@ def run_harness_self_evolution(
     parent_outcomes: list[HarnessEpisodeOutcome] = []
     candidate_outcomes: list[HarnessEpisodeOutcome] = []
 
-    for case in sampled_cases:
+    def run_case(case: Any) -> dict[str, Any] | None:
         case_id = case.case_id
         case_dir = outer_dir / "admission_runs" / case_id
         case_seed_score = float(case.metadata.get("seed_score", seed_score))
-        if heartbeat is not None:
-            heartbeat.update(
-                current_epoch=epoch,
-                phase=f"epoch_{epoch}",
-                case_id=case_id,
-            )
-            heartbeat.write_now()
-
-        result = _run_paired_harness_admission_case(
+        return _run_paired_harness_admission_case(
             case_id=case_id,
             case_dir=case_dir,
             parent=parent,
@@ -556,6 +558,51 @@ def run_harness_self_evolution(
             evaluate_seed=evaluate_seed,
         )
 
+    try:
+        configured_case_workers = int(
+            os.environ.get("GAME_LOOP_ADMISSION_CASE_WORKERS", "1")
+        )
+    except ValueError as exc:
+        raise ValueError("GAME_LOOP_ADMISSION_CASE_WORKERS must be an integer") from exc
+    case_workers = min(len(sampled_cases), max(1, configured_case_workers))
+    case_results: dict[str, dict[str, Any] | None] = {}
+
+    if heartbeat is not None:
+        active_case_ids = [case.case_id for case in sampled_cases]
+        heartbeat.update(
+            current_epoch=epoch,
+            phase=f"epoch_{epoch}",
+            case_id=(
+                active_case_ids[0]
+                if case_workers == 1
+                else "parallel:" + ",".join(active_case_ids)
+            ),
+        )
+        heartbeat.write_now()
+
+    if case_workers == 1:
+        for case in sampled_cases:
+            if heartbeat is not None:
+                heartbeat.update(case_id=case.case_id)
+                heartbeat.write_now()
+            case_results[case.case_id] = run_case(case)
+    else:
+        print(
+            f"[epoch {epoch:03d}] running {len(sampled_cases)} admission cases "
+            f"with {case_workers} parallel workers"
+        )
+        with ThreadPoolExecutor(
+            max_workers=case_workers,
+            thread_name_prefix=f"admission-e{epoch:03d}",
+        ) as executor:
+            futures = {executor.submit(run_case, case): case for case in sampled_cases}
+            for future in as_completed(futures):
+                case = futures[future]
+                case_results[case.case_id] = future.result()
+
+    # Preserve fixed admission order regardless of parallel completion order.
+    for case in sampled_cases:
+        result = case_results.get(case.case_id)
         if result is not None:
             parent_outcomes.append(result["parent"])
             candidate_outcomes.append(result["candidate"])

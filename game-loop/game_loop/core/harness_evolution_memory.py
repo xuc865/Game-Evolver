@@ -9,6 +9,13 @@ from game_loop.core.harness import HarnessEpochResult, HarnessProfile
 from game_loop.utils import utc_now
 
 
+def _clip_text(value: object, *, limit: int = 240) -> str:
+    text = " ".join(str(value).split())
+    if len(text) <= limit:
+        return text
+    return f"{text[: limit - 3]}..."
+
+
 @dataclass(frozen=True)
 class HarnessRejectionExperience:
     """Structured, reusable lesson from a rejected harness mutation."""
@@ -96,12 +103,13 @@ class HarnessEvolutionMemory:
             "Prior rejected harness mutations (do not repeat these failure patterns):"
         ]
         for item in recent:
+            avoid = [_clip_text(value, limit=140) for value in item.do_not_repeat[:3]]
             lines.append(
-                f"- epoch {item.epoch}: {item.harness_delta_summary}; "
-                f"hard misses={list(item.hard_rubric_misses)}; "
-                f"soft={item.soft_regression_summary}; "
-                f"root_cause={item.root_cause}; "
-                f"avoid={list(item.do_not_repeat)}"
+                f"- epoch {item.epoch}: {_clip_text(item.harness_delta_summary)}; "
+                f"hard misses={[ _clip_text(value, limit=120) for value in item.hard_rubric_misses[:3] ]}; "
+                f"soft={_clip_text(item.soft_regression_summary, limit=160)}; "
+                f"root_cause={_clip_text(item.root_cause, limit=180)}; "
+                f"avoid={avoid}"
             )
         return "\n".join(lines)
 
@@ -158,7 +166,11 @@ def build_rejection_experience(
 
     do_not_repeat = tuple(
         dict.fromkeys(
-            [*hard_misses[:3], candidate.rationale, *list(epoch_result.reasons)[:2]]
+            [
+                *(_clip_text(item, limit=160) for item in hard_misses[:3]),
+                _clip_text(candidate.rationale, limit=220),
+                *(_clip_text(item, limit=160) for item in epoch_result.reasons[:2]),
+            ]
         )
     )
     evidence_refs = tuple(
@@ -172,12 +184,20 @@ def build_rejection_experience(
         parent_harness_id=parent.harness_id,
         candidate_harness_id=candidate.harness_id,
         harness_delta_summary=(
-            "; ".join(delta_parts) if delta_parts else candidate.rationale
+            "; ".join(delta_parts)
+            if delta_parts
+            else _clip_text(candidate.rationale, limit=220)
         ),
         failed_tasks=failed_tasks or tuple(str(item) for item in epoch_result.reasons[:3]),
         hard_rubric_misses=tuple(hard_misses),
-        soft_regression_summary=" | ".join(soft_bits) or "soft total regressed",
-        root_cause="; ".join(epoch_result.reasons[:4]) or "admission rejected",
+        soft_regression_summary=_clip_text(
+            " | ".join(soft_bits) or "soft total regressed",
+            limit=220,
+        ),
+        root_cause=_clip_text(
+            "; ".join(epoch_result.reasons[:4]) or "admission rejected",
+            limit=260,
+        ),
         do_not_repeat=do_not_repeat,
         evidence_refs=evidence_refs,
     )

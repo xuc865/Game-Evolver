@@ -1,0 +1,197 @@
+{
+  "benchmark": {
+    "adapter": "tinymmo",
+    "options": {
+      "godot_bin": "/Applications/Godot.app/Contents/MacOS/Godot",
+      "runtime_dependency_root": "/Users/wangxucong/Desktop/workspace/harness-game/game-loop/third_party/godot-sqlite-v4.8-macos",
+      "seed_evaluation_path": "/Users/wangxucong/Desktop/workspace/harness-game/game-loop/experiments/tinymmo/baseline-evaluation.json"
+    }
+  },
+  "backend": {
+    "command": [
+      "bash",
+      "scripts/run_tinymmo_backend.sh",
+      "{candidate_workspace}",
+      "{instruction_file}",
+      "{output_manifest}",
+      "{evaluation_path}"
+    ],
+    "cwd": "/Users/wangxucong/Desktop/workspace/harness-game/game-loop",
+    "timeout_seconds": 3600,
+    "inactivity_timeout_seconds": 900,
+    "env": {
+      "CODEX_API_BASE": "http://29.116.237.135:8080/v1",
+      "CODEX_MODEL": "Kimi-K2.7-Code",
+      "GAME_LOOP_BACKBONE_PROVIDER": "kimi",
+      "GODOT_BIN": "/Applications/Godot.app/Contents/MacOS/Godot"
+    }
+  },
+  "method": {
+    "level": "L4",
+    "observation_contract": "two_timescale_agent_harness_evolution_plus_benchmark_evaluator_and_validity_gates",
+    "fixed_probes": [],
+    "max_probe_calls": 6,
+    "active_selection": {
+      "max_selected_probes": 1,
+      "min_observations_per_probe": 1
+    },
+    "probe_families": [
+      {
+        "id": "tinymmo_structure_coverage",
+        "gene": {
+          "name": "min_gdscript_files",
+          "initial": 400,
+          "minimum": 400,
+          "maximum": 460,
+          "step": 10,
+          "difficulty_direction": "increasing"
+        },
+        "probe": {
+          "command": [
+            "python3",
+            "scripts/probe_tinymmo_structure.py",
+            "--artifact",
+            "{artifact_dir}",
+            "--min-gdscript-files",
+            "[[min_gdscript_files]]"
+          ],
+          "cwd": "/Users/wangxucong/Desktop/workspace/harness-game/game-loop",
+          "timeout_seconds": 30,
+          "selection_mode": "regression_anchor",
+          "parser": "json_stdout",
+          "tags": ["RepairConstraint", "architecture", "coverage"]
+        },
+        "archive_capacity": 8
+      }
+    ],
+    "harness_evolution": {
+      "loop_role": "inner",
+      "modules": [
+        {
+          "id": "architecture_map_first",
+          "category": "context",
+          "instruction": "Map the client, gateway, master, world-server, shared gameplay, and wire-codec ownership boundaries before editing. Name the smallest cross-module change that can satisfy the task.",
+          "tags": ["architecture", "context"]
+        },
+        {
+          "id": "runtime_evidence_first",
+          "category": "observability",
+          "instruction": "Run the focused deterministic contract and Godot headless validation before and after the patch. Treat compiler output and measured behavior as the source of truth.",
+          "tags": ["godot", "evidence", "testing"]
+        },
+        {
+          "id": "network_invariant_guard",
+          "category": "repair",
+          "instruction": "Preserve local-player authority, teleport snapping, scripted motion overrides, bounded history, and both player and NPC synchronization routes while changing motion smoothing.",
+          "tags": ["networking", "regression"]
+        },
+        {
+          "id": "deterministic_algorithm_seam",
+          "category": "strategy",
+          "instruction": "Separate time acquisition from interpolation math so arrival and render timestamps can be injected in deterministic tests without duplicating production behavior.",
+          "tags": ["testing", "design"]
+        },
+        {
+          "id": "bounded_mmo_performance",
+          "category": "gameplay",
+          "instruction": "Keep per-frame work and allocations bounded for many simultaneous entities. Clamp adaptive delay, extrapolation horizon, velocity, and sample history.",
+          "tags": ["performance", "mmo"]
+        },
+        {
+          "id": "rejection_escape",
+          "category": "strategy",
+          "instruction": "If prior diagnostics reject the approach, inspect the exact failed invariant and change the algorithm or test seam rather than repeating a cosmetic rewrite.",
+          "tags": ["exploration", "feedback"]
+        }
+      ],
+      "tool_interfaces": [
+        {
+          "id": "godot_headless",
+          "kind": "engine_probe",
+          "description": "Run bounded Godot 4.6.3 headless validation inside the candidate workspace.",
+          "command": ["/Applications/Godot.app/Contents/MacOS/Godot", "--headless", "--editor", "--path", "{candidate_workspace}", "--quit"],
+          "cwd": "/Users/wangxucong/Desktop/workspace/harness-game/game-loop",
+          "safety_scope": "candidate_workspace_only",
+          "tags": ["godot", "runtime"]
+        }
+      ],
+      "seed_modules": [
+        "architecture_map_first",
+        "runtime_evidence_first",
+        "network_invariant_guard",
+        "deterministic_algorithm_seam",
+        "bounded_mmo_performance"
+      ],
+      "seed_tool_interfaces": ["godot_headless"],
+      "max_active_modules": 5,
+      "max_active_tool_interfaces": 1,
+      "mutation_width": 1,
+      "replay_min_cases": 1,
+      "promotion_delta_min": 0.01,
+      "max_case_regression": 0.02,
+      "require_rubric_validation": false,
+      "dynamic_rubric_generation": false,
+      "hard_rubrics": [
+        {
+          "rubric_id": "architecture_intact",
+          "kind": "hard",
+          "description": "Client, gateway, master, world server, byte-packed protocol, and shared gameplay architecture remain intact."
+        },
+        {
+          "rubric_id": "godot_compiles",
+          "kind": "hard",
+          "description": "Godot 4.6.3 completes validation without GDScript parse or compile errors."
+        },
+        {
+          "rubric_id": "deterministic_contract_complete",
+          "kind": "hard",
+          "description": "The deterministic smoothing contract runs to completion."
+        }
+      ],
+      "soft_rubrics": [
+        {
+          "rubric_id": "network_smoothing_quality",
+          "kind": "soft",
+          "description": "Remote movement remains smooth under jitter and short stalls without hiding teleports.",
+          "weight": 0.45
+        },
+        {
+          "rubric_id": "performance_boundedness",
+          "kind": "soft",
+          "description": "Per-entity memory, per-frame work, adaptive delay, and extrapolation are explicitly bounded.",
+          "weight": 0.25
+        },
+        {
+          "rubric_id": "testability_observability",
+          "kind": "soft",
+          "description": "Production math is deterministic-testable and exposes cheap diagnostic metrics.",
+          "weight": 0.30
+        }
+      ]
+    }
+  },
+  "evolution": {
+    "max_generations": 1,
+    "candidates_per_generation": 3,
+    "delta_min": 0.01,
+    "objective_regression_epsilon": 0.001,
+    "stop_after_rejections": 2,
+    "feedback_disclosure": "DIAGNOSTICS",
+    "stop_on_terminal_success": false,
+    "max_model_calls": 3,
+    "max_evaluator_queries": 3
+  },
+  "reliability": {
+    "pause_on_infrastructure_failure": true,
+    "count_infrastructure_attempts_in_evaluator_budget": false
+  },
+  "gates": {
+    "max_files": 5000,
+    "max_total_bytes": 1073741824,
+    "fail_suspicious_references": true
+  },
+  "experiment": {
+    "arm": "L4_agent",
+    "freezes_harness_outer_loop": true
+  }
+}

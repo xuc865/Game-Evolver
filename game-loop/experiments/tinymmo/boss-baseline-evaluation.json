@@ -1,0 +1,71 @@
+{
+  "constraints": {
+    "architecture_intact": true,
+    "gdscript_compiles": true,
+    "godot_validation_complete": true,
+    "real_dungeon_path_preserved": true
+  },
+  "details": {
+    "boss_contract": {
+      "checks": {},
+      "complete": true,
+      "diagnostics": [
+        "deterministic boss attack timeline is missing"
+      ],
+      "score": 0.0
+    },
+    "godot": {
+      "compile_errors": false,
+      "compiler_error_count": 0,
+      "complete": true,
+      "diagnostics": [],
+      "return_code": 0
+    },
+    "production_integration": {
+      "checks": {
+        "authoritative_health_in_state": true,
+        "boss_state_replicated": false,
+        "cast_state_replicated": true,
+        "cleanup_paths": true,
+        "client_subscribes_boss_state": false,
+        "impact_visual": true,
+        "instant_nonboss_path_preserved": true,
+        "locked_melee_geometry": false,
+        "phase_visible": true,
+        "positive_melee_windup": true,
+        "production_boss_hud": false,
+        "real_final_room_path": true,
+        "room_attaches_controller": true,
+        "timeline_used_by_controller": false
+      },
+      "diagnostics": [
+        "production integration missing: timeline_used_by_controller",
+        "production integration missing: locked_melee_geometry",
+        "production integration missing: boss_state_replicated",
+        "production integration missing: client_subscribes_boss_state",
+        "production integration missing: production_boss_hud"
+      ],
+      "score": 0.6428571428571429
+    },
+    "timeline_path": null
+  },
+  "diagnostics": [
+    "deterministic boss attack timeline is missing",
+    "production integration missing: timeline_used_by_controller",
+    "production integration missing: locked_melee_geometry",
+    "production integration missing: boss_state_replicated",
+    "production integration missing: client_subscribes_boss_state",
+    "production integration missing: production_boss_hud"
+  ],
+  "objectives": {
+    "architecture_integrity": 1.0,
+    "boss_timing_contract": 0.0,
+    "maintainability": 0.4,
+    "production_encounter_integration": 0.642857,
+    "real_scene_coverage": 1.0,
+    "runtime_health": 1.0
+  },
+  "primary_score": 0.580714,
+  "schema_version": "tinymmo-boss-evaluation-v1",
+  "status": "completed"
+}

@@ -1,0 +1,213 @@
+{
+  "benchmark": {
+    "adapter": "tinymmo",
+    "options": {
+      "godot_bin": "/Applications/Godot.app/Contents/MacOS/Godot",
+      "runtime_dependency_root": "/Users/wangxucong/Desktop/workspace/harness-game/game-loop/third_party/godot-sqlite-v4.8-macos",
+      "seed_evaluation_path": "/Users/wangxucong/Desktop/workspace/harness-game/game-loop/experiments/tinymmo/boss-hud-v1-champion-reevaluation.json"
+    }
+  },
+  "backend": {
+    "command": [
+      "bash",
+      "scripts/run_tinymmo_backend.sh",
+      "{candidate_workspace}",
+      "{instruction_file}",
+      "{output_manifest}",
+      "{evaluation_path}"
+    ],
+    "cwd": "/Users/wangxucong/Desktop/workspace/harness-game/game-loop",
+    "timeout_seconds": 3600,
+    "inactivity_timeout_seconds": 900,
+    "env": {
+      "CODEX_API_BASE": "http://29.116.237.135:8080/v1",
+      "CODEX_MODEL": "Kimi-K2.7-Code",
+      "GAME_LOOP_BACKBONE_PROVIDER": "kimi",
+      "GODOT_BIN": "/Applications/Godot.app/Contents/MacOS/Godot",
+      "TINYMMO_EVALUATOR_SCRIPT": "evaluate_tinymmo_boss_hud.py",
+      "GAME_LOOP_CHAT_MAX_TURNS": "60",
+      "GAME_LOOP_WORKSPACE_EDIT_GATE_TURN": "8"
+    }
+  },
+  "method": {
+    "level": "L4",
+    "observation_contract": "two_timescale_agent_harness_evolution_plus_benchmark_evaluator_and_validity_gates",
+    "fixed_probes": [],
+    "max_probe_calls": 6,
+    "active_selection": {
+      "max_selected_probes": 1,
+      "min_observations_per_probe": 1
+    },
+    "probe_families": [
+      {
+        "id": "tinymmo_structure_coverage",
+        "gene": {
+          "name": "min_gdscript_files",
+          "initial": 400,
+          "minimum": 400,
+          "maximum": 480,
+          "step": 10,
+          "difficulty_direction": "increasing"
+        },
+        "probe": {
+          "command": [
+            "python3",
+            "scripts/probe_tinymmo_structure.py",
+            "--artifact",
+            "{artifact_dir}",
+            "--min-gdscript-files",
+            "[[min_gdscript_files]]"
+          ],
+          "cwd": "/Users/wangxucong/Desktop/workspace/harness-game/game-loop",
+          "timeout_seconds": 30,
+          "selection_mode": "regression_anchor",
+          "parser": "json_stdout",
+          "tags": ["RepairConstraint", "architecture", "coverage"]
+        },
+        "archive_capacity": 8
+      }
+    ],
+    "harness_evolution": {
+      "loop_role": "inner",
+      "modules": [
+        {
+          "id": "architecture_map_first",
+          "category": "context",
+          "instruction": "Trace RoomNode -> BossController -> replicated visual/data pushes -> InstanceClient/HUD before editing. Keep server authority and identify the smallest production change.",
+          "tags": ["architecture", "context"]
+        },
+        {
+          "id": "runtime_evidence_first",
+          "category": "observability",
+          "instruction": "Run Godot import/compile validation after each production slice and before finishing. Treat runtime evidence as authoritative.",
+          "tags": ["godot", "evidence", "testing"]
+        },
+        {
+          "id": "phased_end_to_end_delivery",
+          "category": "workflow",
+          "instruction": "Preserve the existing compiling production BossEncounterHUD slice. Make one focused correction: add a monotonically increasing revision to BossController boss.state, reject non-newer revisions for the active encounter on the client, and make cast progress use cast_remaining_ms, server_now_ms, or another explicit cross-process clock basis. Then run full Godot import. Do not rebuild the HUD, create a generic resolver, or alter melee.",
+          "tags": ["delivery", "end-to-end", "compile"]
+        },
+        {
+          "id": "authoritative_hud_guard",
+          "category": "repair",
+          "instruction": "Render boss name, health, phase, and cast timing only from the server-owned boss.state payload. Do not infer health or phase client-side and do not stream reliable state every frame.",
+          "tags": ["hud", "networking", "regression"]
+        },
+        {
+          "id": "real_scene_only",
+          "category": "strategy",
+          "instruction": "Integrate through the existing final dungeon RoomNode and production HUD. Do not create a standalone showcase, alternate main scene, or fake boss.",
+          "tags": ["production", "playtest"]
+        },
+        {
+          "id": "lifecycle_cleanup",
+          "category": "gameplay",
+          "instruction": "Audit boss death, despawn, instance switch, disconnect, return to gateway, and encounter abort so boss UI cannot survive its encounter.",
+          "tags": ["lifecycle", "correctness"]
+        },
+        {
+          "id": "rejection_escape",
+          "category": "strategy",
+          "instruction": "If rejected, inspect the exact failed contract or integration invariant and change the implementation rather than layering on cosmetic effects.",
+          "tags": ["exploration", "feedback"]
+        }
+      ],
+      "tool_interfaces": [
+        {
+          "id": "godot_headless",
+          "kind": "engine_probe",
+          "description": "Run bounded Godot 4.6.3 validation inside the candidate workspace.",
+          "command": [
+            "/Applications/Godot.app/Contents/MacOS/Godot",
+            "--headless",
+            "--editor",
+            "--path",
+            "{candidate_workspace}",
+            "--quit"
+          ],
+          "cwd": "/Users/wangxucong/Desktop/workspace/harness-game/game-loop",
+          "safety_scope": "candidate_workspace_only",
+          "tags": ["godot", "runtime"]
+        }
+      ],
+      "seed_modules": [
+        "runtime_evidence_first",
+        "authoritative_hud_guard",
+        "real_scene_only",
+        "lifecycle_cleanup",
+        "phased_end_to_end_delivery"
+      ],
+      "seed_tool_interfaces": ["godot_headless"],
+      "max_active_modules": 5,
+      "max_active_tool_interfaces": 1,
+      "mutation_width": 1,
+      "replay_min_cases": 1,
+      "promotion_delta_min": 0.03,
+      "max_case_regression": 0.02,
+      "require_rubric_validation": false,
+      "dynamic_rubric_generation": false,
+      "hard_rubrics": [
+        {
+          "rubric_id": "architecture_intact",
+          "kind": "hard",
+          "description": "Client, gateway, master, world server, byte-packed protocol, RoomNode, and final dungeon path remain intact."
+        },
+        {
+          "rubric_id": "godot_compiles",
+          "kind": "hard",
+          "description": "Godot 4.6.3 completes validation without GDScript parse or compile errors."
+        },
+        {
+          "rubric_id": "real_scene_integration",
+          "kind": "hard",
+          "description": "The improvement is reached through the real final-room boss and existing production HUD, not a standalone demo."
+        }
+      ],
+      "soft_rubrics": [
+        {
+          "rubric_id": "combat_readability",
+          "kind": "soft",
+          "description": "Players can read boss identity, authoritative health, phase, current cast, and remaining cast time in normal play.",
+          "weight": 0.40
+        },
+        {
+          "rubric_id": "authority_fidelity",
+          "kind": "soft",
+          "description": "HUD state faithfully represents bounded server-owned encounter state without client-side inference.",
+          "weight": 0.35
+        },
+        {
+          "rubric_id": "lifecycle_testability",
+          "kind": "soft",
+          "description": "Death, encounter end, instance switch, and disconnect cleanup are explicit and testable.",
+          "weight": 0.25
+        }
+      ]
+    }
+  },
+  "evolution": {
+    "max_generations": 1,
+    "candidates_per_generation": 3,
+    "delta_min": 0.03,
+    "objective_regression_epsilon": 0.001,
+    "stop_after_rejections": 2,
+    "feedback_disclosure": "DIAGNOSTICS",
+    "stop_on_terminal_success": false,
+    "max_model_calls": 3,
+    "max_evaluator_queries": 3
+  },
+  "reliability": {
+    "pause_on_infrastructure_failure": true,
+    "count_infrastructure_attempts_in_evaluator_budget": false
+  },
+  "gates": {
+    "max_files": 5000,
+    "max_total_bytes": 1073741824,
+    "fail_suspicious_references": true
+  },
+  "experiment": {
+    "arm": "L4_agent",
+    "freezes_harness_outer_loop": true
+  }
+}

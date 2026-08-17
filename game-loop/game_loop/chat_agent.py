@@ -54,6 +54,9 @@ your next action.
 - If something fails, diagnose the error and fix it before proceeding.
 - Deliver a complete, self-contained artifact.
 
+"""
+
+_GCB_SYSTEM_PROMPT = """\
 ## GameCraftBench deliverables (required)
 - Keep `project.godot` and a runnable main scene (`Main.tscn` or documented entry).
 - Build the playable core before asset polish: replace the scaffold with working
@@ -230,6 +233,85 @@ class LocalChatAgent:
                     "blocked; your next tool call MUST be write_file for a valid "
                     "demo_outputs/*.json trace. Do not run commands or inspect more "
                     "files until all 3 demo traces exist."
+                ),
+            }),
+        }
+
+    @staticmethod
+    def _is_source_write_tool_call(tool_call: dict[str, Any]) -> bool:
+        """Return whether a tool call writes a plausible implementation file."""
+        function = tool_call.get("function", {})
+        try:
+            arguments = json.loads(function.get("arguments", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            return False
+        if function.get("name") == "run_command":
+            return LocalChatAgent._is_source_mutating_command(
+                str(arguments.get("command", ""))
+            )
+        if function.get("name") not in {"write_file", "replace_in_file"}:
+            return False
+        path = Path(str(arguments.get("path", "")))
+        if path.is_absolute() or ".." in path.parts:
+            return False
+        ignored_parts = {".git", ".godot", "logs", "artifacts", "demo_outputs"}
+        if any(part.casefold() in ignored_parts for part in path.parts):
+            return False
+        return path.suffix.casefold() in {
+            ".gd", ".tscn", ".tres", ".cs", ".cpp", ".c", ".h", ".hpp",
+            ".py", ".js", ".jsx", ".ts", ".tsx", ".lua", ".rs", ".go",
+        }
+
+    @staticmethod
+    def _is_source_mutating_command(command: str) -> bool:
+        """Recognize explicit source edits performed through ``run_command``.
+
+        This is intentionally narrower than general shell mutation detection: the
+        implementation gate only needs to admit common patch/write forms while
+        continuing to block inspection commands.
+        """
+        source_suffix = re.search(
+            r"\.(?:gd|tscn|tres|cs|cpp|c|h|hpp|py|js|jsx|ts|tsx|lua|rs|go)(?:\b|['\"])",
+            command,
+            re.IGNORECASE,
+        )
+        if source_suffix is None:
+            return False
+        mutator = re.search(
+            r"(?:\bapply_patch\b|\bwrite_text\s*\(|\bsed\s+-[^\n]*i|"
+            r"\bperl\s+-[^\n]*pi|\btee\s+|(?:^|[^<])>{1,2}\s*[^&])",
+            command,
+            re.IGNORECASE,
+        )
+        return mutator is not None
+
+    @staticmethod
+    def _implementation_gate_message(gate_turn: int) -> dict[str, str]:
+        return {
+            "role": "user",
+            "content": (
+                f"Implementation delivery gate: turn {gate_turn} is the inspection limit and "
+                "no source file has been written yet. You now have enough context. Your next "
+                "tool call MUST be replace_in_file for a narrow edit to an existing source file, "
+                "or write_file only when creating a new implementation/test file. Do not "
+                "browse, explain, or run another read-only command first. After writing, run "
+                "the focused verification and fix failures."
+            ),
+        }
+
+    @staticmethod
+    def _implementation_gate_tool_error(
+        tool_call: dict[str, Any], gate_turn: int
+    ) -> dict[str, str]:
+        return {
+            "tool_call_id": str(tool_call.get("id", "")),
+            "role": "tool",
+            "content": json.dumps({
+                "ok": False,
+                "error": (
+                    f"implementation delivery gate active at turn {gate_turn}: no source "
+                    "write has been delivered; call replace_in_file now with the exact existing "
+                    "text block and its replacement before any more inspection"
                 ),
             }),
         }
@@ -571,6 +653,28 @@ class LocalChatAgent:
             except OSError as exc:
                 return {"ok": False, "error": str(exc)}
 
+        elif name == "replace_in_file":
+            relative = Path(str(args.get("path", "")))
+            old_text = str(args.get("old_text", ""))
+            new_text = str(args.get("new_text", ""))
+            if relative.is_absolute() or ".." in relative.parts:
+                return {"ok": False, "error": "path must stay inside the workspace"}
+            if not old_text:
+                return {"ok": False, "error": "old_text must not be empty"}
+            path = ws / relative
+            try:
+                content = path.read_text(encoding="utf-8")
+                matches = content.count(old_text)
+                if matches != 1:
+                    return {
+                        "ok": False,
+                        "error": f"old_text must match exactly once; found {matches}",
+                    }
+                path.write_text(content.replace(old_text, new_text, 1), encoding="utf-8")
+                return {"ok": True, "path": str(path), "replacements": 1}
+            except OSError as exc:
+                return {"ok": False, "error": str(exc)}
+
         elif name == "list_dir":
             path = ws / args.get("path", ".")
             try:
@@ -787,6 +891,13 @@ class LocalChatAgent:
         if tools is None:
             tools = self._default_tools()
 
+        raw_demo_gate = os.environ.get("GAME_LOOP_REQUIRE_GCB_DEMOS")
+        require_gcbench_demos = (
+            "demo_outputs" in instruction
+            if raw_demo_gate is None
+            else raw_demo_gate.strip().lower() in {"1", "true", "yes", "on"}
+        )
+
         target_turns = max(1, min(max_turns, int(max_turns * 2 / 3)))
         efficiency_budget = (
             f"\n\n## Execution Budget\n"
@@ -796,20 +907,25 @@ class LocalChatAgent:
             "are complete, stop calling tools and return your concise final response "
             "immediately. Do not spend remaining turns on optional polish."
         )
+        task_system_prompt = self.system_prompt
+        if require_gcbench_demos:
+            task_system_prompt += "\n\n" + _GCB_SYSTEM_PROMPT
         messages: list[dict[str, Any]] = [
-            {"role": "system", "content": self.system_prompt + efficiency_budget},
+            {"role": "system", "content": task_system_prompt + efficiency_budget},
             {"role": "user", "content": instruction},
         ]
 
         total_tool_calls = 0
         final_text = ""
         turns = 0
-        raw_demo_gate = os.environ.get("GAME_LOOP_REQUIRE_GCB_DEMOS")
-        require_gcbench_demos = (
-            "demo_outputs" in instruction
-            if raw_demo_gate is None
-            else raw_demo_gate.strip().lower() in {"1", "true", "yes", "on"}
+        require_workspace_edit = (
+            os.environ.get("GAME_LOOP_REQUIRE_WORKSPACE_EDIT", "")
+            .strip().lower() in {"1", "true", "yes", "on"}
         )
+        implementation_gate_turn = max(
+            1, self._env_int("GAME_LOOP_WORKSPACE_EDIT_GATE_TURN", target_turns)
+        )
+        source_write_delivered = False
         # Early reminders allow normal implementation work; from turn 40 on,
         # repeat the gate every turn so the session cannot silently spend its
         # entire remaining budget while omitting benchmark deliverables.
@@ -868,6 +984,28 @@ class LocalChatAgent:
                 print(f"[chat_agent] tool_call: {fn_name}")
                 demo_count = self._demo_trace_count(workspace) if require_gcbench_demos else 3
                 if (
+                    require_workspace_edit
+                    and turns >= implementation_gate_turn
+                    and not source_write_delivered
+                    and not self._is_source_write_tool_call(tc)
+                ):
+                    print(
+                        f"[chat_agent] implementation gate blocked tool={fn_name} "
+                        f"turn={turns}"
+                    )
+                    if fn_name == "run_command":
+                        try:
+                            blocked_args = json.loads(
+                                tc.get("function", {}).get("arguments", "{}")
+                            )
+                            command_preview = str(blocked_args.get("command", ""))[:240]
+                            print(f"[chat_agent] blocked command: {command_preview}")
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+                    result = self._implementation_gate_tool_error(
+                        tc, implementation_gate_turn
+                    )
+                elif (
                     require_gcbench_demos
                     and turns >= 40
                     and demo_count < 3
@@ -880,7 +1018,23 @@ class LocalChatAgent:
                 else:
                     result = self._execute_tool(tc, workspace, tools)
                 messages.append(result)
+                if self._is_source_write_tool_call(tc):
+                    try:
+                        source_write_delivered = bool(
+                            json.loads(result.get("content", "{}")).get("ok")
+                        ) or source_write_delivered
+                    except (json.JSONDecodeError, TypeError):
+                        pass
 
+            if (
+                require_workspace_edit
+                and not source_write_delivered
+                and turns == implementation_gate_turn - 1
+            ):
+                print("[chat_agent] implementation delivery milestone")
+                messages.append(
+                    self._implementation_gate_message(implementation_gate_turn)
+                )
             if require_gcbench_demos and turns in demo_gate_turns:
                 demo_count = self._demo_trace_count(workspace)
                 if demo_count < 3:
@@ -930,7 +1084,7 @@ class LocalChatAgent:
                 "type": "function",
                 "function": {
                     "name": "write_file",
-                    "description": "Write content to a file in the workspace.",
+                    "description": "Create or fully rewrite a file in the workspace. For a small change to an existing file, use replace_in_file instead.",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -938,6 +1092,22 @@ class LocalChatAgent:
                             "content": {"type": "string", "description": "Content to write."},
                         },
                         "required": ["path", "content"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "replace_in_file",
+                    "description": "Replace one exact, uniquely matching text block in an existing workspace file. Use this for narrow edits that must preserve the rest of a large source file.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string", "description": "Relative path to the existing file."},
+                            "old_text": {"type": "string", "description": "Exact text that must occur once."},
+                            "new_text": {"type": "string", "description": "Replacement text."},
+                        },
+                        "required": ["path", "old_text", "new_text"],
                     },
                 },
             },

@@ -117,10 +117,34 @@ if [ "$use_local" = "1" ]; then
       "${verifier_cmd[@]}"
     )
   fi
-  set +e
-  "${verifier_cmd[@]}"
-  verifier_rc=$?
-  set -e
+  verifier_retries="${GAMECRAFT_BENCH_VERIFIER_INFRA_RETRIES:-0}"
+  if ! [[ "$verifier_retries" =~ ^[0-9]+$ ]]; then
+    echo "[run_local_verifier] GAMECRAFT_BENCH_VERIFIER_INFRA_RETRIES must be a non-negative integer" >&2
+    exit 2
+  fi
+  verifier_attempt=0
+  while true; do
+    set +e
+    "${verifier_cmd[@]}"
+    verifier_rc=$?
+    set -e
+    if [[ "$verifier_rc" != "2" && "$verifier_rc" != "75" && "$verifier_rc" != "124" ]]; then
+      break
+    fi
+    if (( verifier_attempt >= verifier_retries )); then
+      break
+    fi
+    verifier_attempt=$((verifier_attempt + 1))
+    attempt_dir="$OUTPUT/infrastructure_attempts/attempt_$(printf '%02d' "$verifier_attempt")"
+    mkdir -p "$attempt_dir"
+    for artifact in breakdown.json reward.txt judge_log.json ctrf.json; do
+      if [[ -f "$OUTPUT/$artifact" ]]; then
+        mv "$OUTPUT/$artifact" "$attempt_dir/$artifact"
+      fi
+    done
+    echo "[run_local_verifier] infrastructure rc=$verifier_rc; retrying verifier attempt $verifier_attempt/$verifier_retries" >&2
+    sleep $((5 * verifier_attempt))
+  done
 else
   set +e
   bash "$SCRIPT_DIR/run_official_verifier.sh" \

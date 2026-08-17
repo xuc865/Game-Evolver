@@ -36,6 +36,15 @@ class FakeOpenGameRunner:
         return RunnerResult(return_code=0, result_text="fake OpenGame maker completed")
 
 
+class FakeTimedOutOpenGameRunner(FakeOpenGameRunner):
+    def run(self, request, *, isolation, environment, timeout_seconds):
+        self.calls += 1
+        (isolation.workspace / self.artifact_name).write_text(
+            self.contents, encoding="utf-8"
+        )
+        return RunnerResult(return_code=-9, error="OpenGame SDK timed out after 240s")
+
+
 class FakeGGVWorker:
     def invoke(self, operation, payload):
         if operation == "extract_keypoints":
@@ -350,6 +359,34 @@ class GameBenchmarkContractTests(unittest.TestCase):
             self.assertTrue(evaluation.feasible)
             self.assertEqual(evaluation.primary_score, 0.5)
             self.assertFalse(evaluation.evaluator["official_implementation"])
+
+    def test_verigame_bridge_salvages_workspace_artifact_after_timeout(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            task = root / "task"
+            task.mkdir()
+            (task / "specification.md").write_text("Player moves.", encoding="utf-8")
+            instruction = root / "instruction.md"
+            instruction.write_text("Build the public game specification.", encoding="utf-8")
+            seed = root / "agent_workspace"
+            seed.mkdir()
+            manifest = root / "execution.json"
+            maker = FakeTimedOutOpenGameRunner("index.html", "<canvas></canvas>")
+            runtime = OpenGameRuntime(OpenGameRuntimeConfig(), runner=maker)
+            rc = run_verigame_bridge(
+                runtime=runtime,
+                agent_workspace=seed,
+                instruction_file=instruction,
+                public_task_root=task,
+                output_manifest=manifest,
+                worker=FakeGGVWorker(),
+            )
+            self.assertEqual(rc, 0)
+            payload = json.loads(manifest.read_text())
+            self.assertEqual(payload["status"], "completed")
+            self.assertEqual(payload["submission"]["status"], "failed")
+            self.assertIn("artifact_salvaged_after_runtime_failure", payload["diagnostics"])
+            self.assertTrue((Path(payload["artifact_dir"]) / "index.html").is_file())
 
     def test_vgamegym_unified_inner_loop_pipeline_golden(self):
         with tempfile.TemporaryDirectory() as td:

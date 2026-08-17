@@ -1,0 +1,67 @@
+{
+  "constraints": {
+    "architecture_intact": true,
+    "gdscript_compiles": true,
+    "godot_validation_complete": true,
+    "real_dungeon_path_preserved": true
+  },
+  "details": {
+    "boss_hud_integration": {
+      "boss_hud_files": [
+        "source/client/ui/hud/boss_encounter_hud.gd"
+      ],
+      "checks": {
+        "authoritative_health": true,
+        "boss_name_visible": true,
+        "bounded_updates": true,
+        "cast_payload": true,
+        "cast_visible": true,
+        "cleanup_on_disconnect": true,
+        "cleanup_on_end": true,
+        "cleanup_on_instance_change": true,
+        "client_subscribes": true,
+        "clock_safe_cast_timing": false,
+        "encounter_end_push": true,
+        "health_bar_visible": true,
+        "hud_production_integration": true,
+        "monotonic_revision": false,
+        "numeric_health_visible": true,
+        "phase_payload": true,
+        "phase_visible": true,
+        "real_final_room": true,
+        "room_controller_path": true,
+        "server_pushes_boss_state": true,
+        "stable_encounter_id": true,
+        "stale_update_guard": false
+      },
+      "diagnostics": [
+        "boss HUD integration missing: monotonic_revision",
+        "boss HUD integration missing: clock_safe_cast_timing",
+        "boss HUD integration missing: stale_update_guard"
+      ],
+      "score": 0.8636363636363636
+    },
+    "godot": {
+      "compile_errors": false,
+      "compiler_error_count": 0,
+      "complete": true,
+      "diagnostics": [],
+      "return_code": 0
+    }
+  },
+  "diagnostics": [
+    "boss HUD integration missing: monotonic_revision",
+    "boss HUD integration missing: clock_safe_cast_timing",
+    "boss HUD integration missing: stale_update_guard"
+  ],
+  "objectives": {
+    "architecture_integrity": 1.0,
+    "boss_hud_production_integration": 0.863636,
+    "maintainability": 0.666667,
+    "real_scene_coverage": 1.0,
+    "runtime_health": 1.0
+  },
+  "primary_score": 0.901515,
+  "schema_version": "tinymmo-boss-hud-evaluation-v1",
+  "status": "completed"
+}

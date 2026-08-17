@@ -1990,6 +1990,38 @@ class GameLoopTests(unittest.TestCase):
         self.assertIn("finish within 30 turns", budget)
         self.assertIn("stop calling tools", budget)
 
+    def test_chat_agent_only_injects_gcbench_deliverables_when_enabled(self):
+        from game_loop.chat_agent import LocalChatAgent
+
+        agent = LocalChatAgent.__new__(LocalChatAgent)
+        agent.system_prompt = "base prompt"
+        captured = []
+
+        def fake_call(messages, _tools):
+            captured.append(messages[0]["content"])
+            return {"choices": [{
+                "message": {"role": "assistant", "content": "done"},
+                "finish_reason": "stop",
+            }]}
+
+        agent._call_api = fake_call
+        with tempfile.TemporaryDirectory() as raw, patch.dict(
+            os.environ, {"GAME_LOOP_REQUIRE_GCB_DEMOS": "0"}, clear=False
+        ):
+            agent.run("repair Tiny MMO", Path(raw), tools=[], max_turns=1)
+        self.assertNotIn("GameCraftBench deliverables", captured[-1])
+
+        with tempfile.TemporaryDirectory() as raw, patch.dict(
+            os.environ, {"GAME_LOOP_REQUIRE_GCB_DEMOS": "1"}, clear=False
+        ):
+            workspace = Path(raw)
+            demos = workspace / "game" / "demo_outputs"
+            demos.mkdir(parents=True)
+            for index in range(3):
+                (demos / f"demo_{index}.json").write_text("{}", encoding="utf-8")
+            agent.run("build GameCraftBench game", workspace, tools=[], max_turns=1)
+        self.assertIn("GameCraftBench deliverables", captured[-1])
+
     def test_chat_agent_retries_socket_timeout(self):
         import socket
         from game_loop.chat_agent import LocalChatAgent
@@ -2514,6 +2546,143 @@ class GameLoopTests(unittest.TestCase):
         self.assertTrue(LocalChatAgent._is_demo_write_tool_call(demo_write))
         error = LocalChatAgent._demo_gate_tool_error(blocked, 1)
         self.assertIn("temporarily blocked", json.loads(error["content"])["error"])
+
+    def test_source_write_gate_recognizes_only_implementation_files(self):
+        from game_loop.chat_agent import LocalChatAgent
+
+        def call(path):
+            return {
+                "id": "call",
+                "function": {
+                    "name": "write_file",
+                    "arguments": json.dumps({"path": path, "content": "x"}),
+                },
+            }
+
+        self.assertTrue(LocalChatAgent._is_source_write_tool_call(call("source/net.gd")))
+        self.assertTrue(LocalChatAgent._is_source_write_tool_call(call("tests/test_net.py")))
+        self.assertFalse(LocalChatAgent._is_source_write_tool_call(call("README.md")))
+        self.assertFalse(LocalChatAgent._is_source_write_tool_call(call(".godot/cache.gd")))
+        self.assertFalse(LocalChatAgent._is_source_write_tool_call(call("../outside.gd")))
+
+        replace_call = {
+            "function": {
+                "name": "replace_in_file",
+                "arguments": json.dumps({
+                    "path": "source/boss.gd",
+                    "old_text": "old",
+                    "new_text": "new",
+                }),
+            }
+        }
+        self.assertTrue(LocalChatAgent._is_source_write_tool_call(replace_call))
+
+    def test_chat_agent_replace_in_file_requires_one_workspace_local_match(self):
+        from game_loop.chat_agent import LocalChatAgent
+
+        agent = LocalChatAgent.__new__(LocalChatAgent)
+        with tempfile.TemporaryDirectory() as raw:
+            workspace = Path(raw)
+            source = workspace / "source" / "boss.gd"
+            source.parent.mkdir(parents=True)
+            source.write_text("before\nold block\nafter\n", encoding="utf-8")
+            result = agent._dispatch_tool(
+                "replace_in_file",
+                {
+                    "path": "source/boss.gd",
+                    "old_text": "old block",
+                    "new_text": "new block",
+                },
+                workspace,
+            )
+            self.assertTrue(result["ok"])
+            self.assertEqual(source.read_text(encoding="utf-8"), "before\nnew block\nafter\n")
+            self.assertFalse(agent._dispatch_tool(
+                "replace_in_file",
+                {"path": "../outside.gd", "old_text": "x", "new_text": "y"},
+                workspace,
+            )["ok"])
+
+    def test_chat_agent_blocks_inspection_until_source_is_written(self):
+        from game_loop.chat_agent import LocalChatAgent
+
+        agent = LocalChatAgent.__new__(LocalChatAgent)
+        agent.system_prompt = "test"
+        calls = 0
+
+        def fake_call(_messages, _tools):
+            nonlocal calls
+            calls += 1
+            if calls < 3:
+                tool = "run_command"
+                arguments = '{"command":"true"}'
+            elif calls == 3:
+                tool = "write_file"
+                arguments = '{"path":"source/net.gd","content":"extends Node"}'
+            else:
+                return {"choices": [{
+                    "message": {"role": "assistant", "content": "done"},
+                    "finish_reason": "stop",
+                }]}
+            return {"choices": [{"message": {
+                "role": "assistant",
+                "tool_calls": [{
+                    "id": f"call-{calls}",
+                    "type": "function",
+                    "function": {"name": tool, "arguments": arguments},
+                }],
+            }}]}
+
+        agent._call_api = fake_call
+        with tempfile.TemporaryDirectory() as raw, patch.dict(
+            os.environ,
+            {
+                "GAME_LOOP_REQUIRE_WORKSPACE_EDIT": "1",
+                "GAME_LOOP_WORKSPACE_EDIT_GATE_TURN": "2",
+                "GAME_LOOP_REQUIRE_GCB_DEMOS": "0",
+            },
+            clear=False,
+        ):
+            workspace = Path(raw)
+            result = agent.run("repair it", workspace, tools=[], max_turns=5)
+            blocked = [
+                item for item in result["messages"]
+                if item.get("role") == "tool"
+                and "implementation delivery gate active" in item.get("content", "")
+            ]
+            self.assertEqual(len(blocked), 1)
+            self.assertEqual(
+                (workspace / "source" / "net.gd").read_text(encoding="utf-8"),
+                "extends Node",
+            )
+            self.assertEqual(result["turns"], 4)
+
+    def test_chat_agent_source_write_gate_accepts_explicit_mutating_commands(self):
+        from game_loop.chat_agent import LocalChatAgent
+
+        def call(command):
+            return {
+                "function": {
+                    "name": "run_command",
+                    "arguments": json.dumps({"command": command}),
+                }
+            }
+
+        self.assertTrue(LocalChatAgent._is_source_write_tool_call(call(
+            "apply_patch <<'PATCH'\n*** Update File: source/boss.gd\nPATCH"
+        )))
+        self.assertTrue(LocalChatAgent._is_source_write_tool_call(call(
+            "python3 -c \"from pathlib import Path; Path('source/hud.gd').write_text('x')\""
+        )))
+        self.assertTrue(LocalChatAgent._is_source_write_tool_call(call(
+            "sed -i '' 's/old/new/' source/boss.gd"
+        )))
+        self.assertFalse(LocalChatAgent._is_source_write_tool_call(call(
+            "sed -n '1,200p' source/boss.gd"
+        )))
+        self.assertFalse(LocalChatAgent._is_source_write_tool_call(call(
+            "rg -n boss source/client/ui/hud/hud.gd"
+        )))
 
     def test_demo_gate_starts_at_turn_40_and_rejects_non_demo_tools(self):
         from game_loop.chat_agent import LocalChatAgent

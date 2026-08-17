@@ -287,7 +287,7 @@ def _epoch_result(epoch: int = 1) -> HarnessEpochResult:
 
 
 class OuterHarnessLibraryTests(unittest.TestCase):
-    def test_progressive_disclosure_and_failed_plan_preserve_revision(self):
+    def test_progressive_disclosure_and_sparse_plan_preserve_revision(self):
         with tempfile.TemporaryDirectory() as td:
             store = OuterHarnessLibraryStore(Path(td) / "library")
             store.initialize((_outer_element("a"), _outer_element("b")))
@@ -308,9 +308,13 @@ class OuterHarnessLibraryTests(unittest.TestCase):
                 latest_inner_result=_epoch_result(),
             )
             self.assertEqual([stage for stage, _ in calls], ["shortlist", "plan"])
-            self.assertEqual(update.status, "failed_infrastructure_or_validation")
+            self.assertEqual(update.status, "unchanged")
             self.assertEqual(update.revision_before, update.revision_after)
             self.assertEqual(store.revision(), 0)
+            self.assertEqual(
+                {item["operation"] for item in update.operations},
+                {"unchanged"},
+            )
 
     def test_undisclosed_element_cannot_be_changed(self):
         with tempfile.TemporaryDirectory() as td:
@@ -397,14 +401,51 @@ class OuterHarnessLibraryTests(unittest.TestCase):
                     }
                 ],
             }
-            with self.assertRaisesRegex(ValueError, "failed epoch ids"):
+            with self.assertRaisesRegex(ValueError, "supporting failed"):
                 store.apply_plan(
                     epoch=3,
                     shortlist=(),
                     plan=plan,
                     failed_history_epochs=(1,),
-                )
+            )
             self.assertEqual(store.revision(), 0)
+
+    def test_add_can_use_outer_library_failure_as_boundary_evidence(self):
+        with tempfile.TemporaryDirectory() as td:
+            store = OuterHarnessLibraryStore(Path(td) / "library")
+            store.initialize((_outer_element("current"),))
+            added = _outer_element("outer_json_guard", "protocol")
+            plan = {
+                "operations": [
+                    {"element_id": "current", "operation": "unchanged"}
+                ],
+                "additions": [
+                    {
+                        "operation": "add",
+                        "capability_boundary_evidence": (
+                            "outer epoch 2 failed while validating library JSON"
+                        ),
+                        "supporting_epoch_ids": [2],
+                        "element": {
+                            "id": added.element_id,
+                            "category": added.category,
+                            "description": added.description,
+                            "spec": added.spec,
+                            "tags": list(added.tags),
+                        },
+                    }
+                ],
+            }
+            update = store.apply_plan(
+                epoch=3,
+                shortlist=(),
+                plan=plan,
+                failed_outer_library_epochs=(2,),
+                current_inner_element_ids=("current",),
+            )
+            self.assertEqual(update.status, "applied")
+            self.assertEqual(store.revision(), 1)
+            self.assertIn("outer_json_guard", store.catalog())
 
     def test_applies_all_five_operations_atomically(self):
         with tempfile.TemporaryDirectory() as td:
@@ -604,6 +645,74 @@ class OuterHarnessLibraryTests(unittest.TestCase):
             )
             self.assertEqual(update.next_inner_element_ids, ("active",))
 
+    def test_plan_normalizes_common_llm_schema_aliases(self):
+        with tempfile.TemporaryDirectory() as td:
+            store = OuterHarnessLibraryStore(Path(td) / "library")
+            store.initialize((_outer_element("current"),))
+            plan = {
+                "operations": [{"id": "current", "operation": "unchanged"}],
+                "additions": [{
+                    "operation": "add",
+                    "capability_boundary_evidence": "epoch 1 exposed a boundary",
+                    "supporting_epoch_ids": ["1"],
+                    "element": {
+                        "element_id": "new_boundary",
+                        "category": "protocol",
+                        "description": "new protocol boundary",
+                        "spec": {"rule": "record boundary"},
+                        "tags": ["protocol"],
+                    },
+                }],
+            }
+            update = store.apply_plan(
+                epoch=2,
+                shortlist=(),
+                plan=plan,
+                failed_history_epochs=(1,),
+                current_inner_element_ids=("current",),
+            )
+            self.assertEqual(update.status, "applied")
+            self.assertIn("new_boundary", store.catalog())
+            self.assertEqual(
+                [item["element"]["id"] for item in update.additions],
+                ["new_boundary"],
+            )
+
+    def test_failed_plan_is_written_before_validation(self):
+        with tempfile.TemporaryDirectory() as td:
+            store = OuterHarnessLibraryStore(Path(td) / "library")
+            store.initialize((_outer_element("a"),))
+
+            def request(stage, payload):
+                if stage == "shortlist":
+                    return {"shortlist": ["a"]}
+                return {
+                    "operations": [{
+                        "element_id": "a",
+                        "operation": "modify",
+                        "correction_hypothesis": "change without evidence",
+                        "replacement": {
+                            "id": "a",
+                            "category": "workflow",
+                            "description": "changed",
+                            "spec": {"rule": "changed"},
+                            "tags": ["workflow"],
+                        },
+                    }],
+                    "additions": [],
+                }
+
+            update = OuterHarnessLibraryAgent(store, request).evolve(
+                epoch=1,
+                inner_history=[],
+                latest_inner_result=_epoch_result(),
+                current_inner_element_ids=("a",),
+            )
+            self.assertEqual(update.status, "failed_infrastructure_or_validation")
+            record = read_json(store.epochs_dir / "epoch_001.json")
+            self.assertEqual(record["plan"]["operations"][0]["operation"], "modify")
+            self.assertIn("modify requires at least 3 uses", record["error"])
+
     def test_duplicate_and_excessive_additions_are_rejected(self):
         with tempfile.TemporaryDirectory() as td:
             store = OuterHarnessLibraryStore(Path(td) / "library")
@@ -703,7 +812,7 @@ class OuterHarnessLibraryTests(unittest.TestCase):
             def fail_final_write(epoch, payload):
                 nonlocal write_count
                 write_count += 1
-                if write_count == 3:
+                if write_count == 4:
                     raise OSError("simulated final audit failure")
                 return real_write(epoch, payload)
 

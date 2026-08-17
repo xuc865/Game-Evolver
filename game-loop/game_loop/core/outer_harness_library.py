@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import ast
 import json
+import os
 import re
+from collections import defaultdict
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -23,6 +26,22 @@ from game_loop.utils import atomic_write_json, read_json, utc_now
 OUTER_LIBRARY_OPERATIONS = frozenset({"add", "delete", "modify", "merge", "unchanged"})
 
 
+def _outer_dynamics_mode() -> bool:
+    return os.environ.get("GAME_LOOP_OUTER_LIBRARY_DYNAMICS_MODE", "").casefold() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _outer_dynamics_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, str(default)))
+    except ValueError:
+        return default
+
+
 def _element_payload(spec: HarnessElementConfig) -> dict[str, Any]:
     return {
         "id": spec.element_id,
@@ -39,14 +58,291 @@ def _extract_json_object(text: str) -> dict[str, Any]:
     if fenced:
         value = fenced.group(1)
     else:
-        start = value.find("{")
-        end = value.rfind("}")
-        if start >= 0 and end > start:
-            value = value[start : end + 1]
-    parsed = json.loads(value)
+        balanced = _extract_balanced_object(value)
+        if balanced:
+            value = balanced
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        repaired = _repair_llm_json_object(value)
+        try:
+            parsed = json.loads(repaired)
+        except json.JSONDecodeError:
+            literal_value = re.sub(r"\btrue\b", "True", repaired, flags=re.IGNORECASE)
+            literal_value = re.sub(
+                r"\bfalse\b", "False", literal_value, flags=re.IGNORECASE
+            )
+            literal_value = re.sub(
+                r"\bnull\b", "None", literal_value, flags=re.IGNORECASE
+            )
+            parsed = ast.literal_eval(literal_value)
     if not isinstance(parsed, dict):
         raise TypeError("outer library agent must return one JSON object")
     return parsed
+
+
+def _extract_balanced_object(value: str) -> str | None:
+    start = value.find("{")
+    if start < 0:
+        return None
+    depth = 0
+    in_string = False
+    escape = False
+    for index in range(start, len(value)):
+        char = value[index]
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return value[start : index + 1]
+    return None
+
+
+def _repair_llm_json_object(value: str) -> str:
+    """Repair narrow JSON formatting slips without changing field content."""
+    repaired = re.sub(r",\s*([}\]])", r"\1", value)
+    repaired = re.sub(
+        r'([}\]"\d])\s*\n(\s*"[A-Za-z0-9_ -]+"\s*:)',
+        r"\1,\n\2",
+        repaired,
+    )
+    return re.sub(
+        r'([{,]\s*)([A-Za-z_][A-Za-z0-9_ -]*)(\s*:)',
+        r'\1"\2"\3',
+        repaired,
+    )
+
+
+def _compact_inner_epoch_result(result: HarnessEpochResult) -> dict[str, Any]:
+    """Keep outer-loop evidence bounded without dropping admission signals."""
+    value = result.to_dict()
+    compact: dict[str, Any] = {
+        "epoch": value.get("epoch"),
+        "parent_harness_id": value.get("parent_harness_id"),
+        "candidate_harness_id": value.get("candidate_harness_id"),
+        "accepted": value.get("accepted"),
+        "paired_deltas": list(value.get("paired_deltas") or [])[:8],
+        "median_delta": value.get("median_delta"),
+        "reasons": list(value.get("reasons") or [])[:6],
+        "excluded_pairs": list(value.get("excluded_pairs") or [])[:6],
+        "parent_outcomes": [],
+        "candidate_outcomes": [],
+    }
+    for side in ("parent_outcomes", "candidate_outcomes"):
+        compact[side] = [
+            {
+                key: outcome.get(key)
+                for key in (
+                    "case_id",
+                    "harness_id",
+                    "final_score",
+                    "feasible",
+                    "infrastructure_ok",
+                    "model_calls",
+                    "evaluator_queries",
+                    "run_ref",
+                )
+                if key in outcome
+            }
+            for outcome in (value.get(side) or [])[:8]
+            if isinstance(outcome, dict)
+        ]
+    rubric = value.get("rubric_validation")
+    if isinstance(rubric, dict):
+        compact["rubric_validation"] = {
+            key: rubric.get(key)
+            for key in (
+                "accepted",
+                "infrastructure_ok",
+                "hard_regression",
+                "hard_score",
+                "soft_score",
+                "overall_score",
+                "median_delta",
+                "reasons",
+            )
+            if key in rubric
+        }
+    return compact
+
+
+def _normalize_element_payload(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    result = dict(value)
+    if "id" not in result and "element_id" in result:
+        result["id"] = result["element_id"]
+    return result
+
+
+def _normalize_outer_plan(plan: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(plan, dict):
+        raise ValueError("outer plan must be an object")
+    result = dict(plan)
+
+    operations = result.get("operations", [])
+    promoted_additions = []
+    if isinstance(operations, list):
+        normalized_operations = []
+        for raw in operations:
+            if not isinstance(raw, dict):
+                normalized_operations.append(raw)
+                continue
+            item = dict(raw)
+            if "element_id" not in item and "id" in item:
+                item["element_id"] = item["id"]
+            if str(item.get("operation", "")).casefold() == "add":
+                if {"category", "description"} <= set(item):
+                    addition = dict(item)
+                    addition.pop("operation", None)
+                    addition["operation"] = "add"
+                    addition["element"] = _normalize_element_payload(addition)
+                    if (
+                        "capability_boundary_evidence" not in addition
+                        and str(addition.get("reason", "")).strip()
+                    ):
+                        addition["capability_boundary_evidence"] = addition["reason"]
+                    promoted_additions.append(addition)
+                    continue
+                item["operation"] = "unchanged"
+                item["reason"] = (
+                    str(item.get("reason", "")).strip()
+                    or "operation=add for an existing element was treated as unchanged"
+                )
+            if "replacement" in item:
+                item["replacement"] = _normalize_element_payload(item.get("replacement"))
+            if "merged_element" in item:
+                item["merged_element"] = _normalize_element_payload(
+                    item.get("merged_element")
+                )
+            normalized_operations.append(item)
+        result["operations"] = normalized_operations
+
+    additions = [*promoted_additions, *(result.get("additions", []) or [])]
+    if isinstance(additions, list):
+        normalized_additions = []
+        for raw in additions:
+            if not isinstance(raw, dict):
+                normalized_additions.append(raw)
+                continue
+            item = dict(raw)
+            if "element" in item:
+                item["element"] = _normalize_element_payload(item.get("element"))
+            elif (
+                {"id", "category", "description"} <= set(item)
+                or {"element_id", "category", "description"} <= set(item)
+            ):
+                item["element"] = _normalize_element_payload(item)
+            if (
+                "capability_boundary_evidence" not in item
+                and str(item.get("reason", "")).strip()
+            ):
+                item["capability_boundary_evidence"] = item["reason"]
+            supporting_epochs = item.get("supporting_epoch_ids")
+            if isinstance(supporting_epochs, list):
+                converted = []
+                for epoch in supporting_epochs:
+                    if isinstance(epoch, int):
+                        converted.append(epoch)
+                    elif isinstance(epoch, str) and epoch.strip().isdigit():
+                        converted.append(int(epoch.strip()))
+                    else:
+                        converted.append(epoch)
+                item["supporting_epoch_ids"] = converted
+            normalized_additions.append(item)
+        result["additions"] = normalized_additions
+
+    return result
+
+
+def _clip_history_text(value: Any, *, limit: int = 240) -> str:
+    text = " ".join(str(value).split())
+    if len(text) <= limit:
+        return text
+    return f"{text[: limit - 3]}..."
+
+
+def _compact_outer_inner_history(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    compact: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        inner = item.get("inner") if isinstance(item.get("inner"), dict) else item
+        outer = item.get("outer") if isinstance(item.get("outer"), dict) else {}
+        library_update = item.get("outer_element_library_update")
+        if isinstance(library_update, dict):
+            library_update = library_update.get("library_update")
+        if not isinstance(library_update, dict):
+            outer_validation = outer.get("rubric_validation") if isinstance(outer, dict) else {}
+            if isinstance(outer_validation, dict):
+                library_update = outer_validation.get("library_update")
+        if not isinstance(library_update, dict):
+            library_update = {}
+
+        changed_ops = []
+        for op in library_update.get("operations") or []:
+            if not isinstance(op, dict):
+                continue
+            operation = str(op.get("operation", ""))
+            if operation and operation != "unchanged":
+                changed_ops.append({
+                    "element_id": op.get("element_id"),
+                    "operation": operation,
+                    "reason": _clip_history_text(op.get("reason", ""), limit=120),
+                })
+        additions = []
+        for addition in library_update.get("additions") or []:
+            if not isinstance(addition, dict):
+                continue
+            element = addition.get("element") if isinstance(addition.get("element"), dict) else {}
+            additions.append({
+                "element_id": element.get("id") or element.get("element_id"),
+                "category": element.get("category"),
+                "evidence": _clip_history_text(
+                    addition.get("capability_boundary_evidence", ""),
+                    limit=120,
+                ),
+            })
+
+        rubric = inner.get("rubric_validation") if isinstance(inner, dict) else {}
+        compact.append({
+            "epoch": inner.get("epoch"),
+            "accepted": inner.get("accepted"),
+            "parent_harness_id": inner.get("parent_harness_id"),
+            "candidate_harness_id": inner.get("candidate_harness_id"),
+            "median_delta": inner.get("median_delta"),
+            "reasons": [
+                _clip_history_text(reason, limit=160)
+                for reason in (inner.get("reasons") or [])[:4]
+            ],
+            "excluded_pairs": [
+                _clip_history_text(reason, limit=120)
+                for reason in (inner.get("excluded_pairs") or [])[:3]
+            ],
+            "rubric_infrastructure_ok": (
+                rubric.get("infrastructure_ok") if isinstance(rubric, dict) else None
+            ),
+            "outer_library_status": library_update.get("status"),
+            "outer_library_error": _clip_history_text(
+                library_update.get("error", ""),
+                limit=180,
+            ),
+            "outer_shortlist": list(library_update.get("shortlist") or [])[:8],
+            "outer_changed_operations": changed_ops[:8],
+            "outer_additions": additions[:4],
+        })
+    return compact
 
 
 def _element_content_similarity(
@@ -183,14 +479,52 @@ class OuterHarnessLibraryStore:
             result[element_id] = stat.to_dict()
         return result
 
+    def outer_exposure_metadata(self) -> dict[str, dict[str, int]]:
+        result: dict[str, dict[str, int]] = defaultdict(lambda: {
+            "shortlisted": 0,
+            "disclosed": 0,
+            "plan_unchanged": 0,
+            "plan_delete": 0,
+            "plan_modify": 0,
+            "plan_merge": 0,
+            "applied_delete": 0,
+            "applied_modify": 0,
+            "applied_merge": 0,
+        })
+        for path in sorted(self.epochs_dir.glob("epoch_*.json")):
+            record = read_json(path)
+            update = record.get("update") or {}
+            for element_id in update.get("shortlist") or record.get("shortlist") or []:
+                result[str(element_id)]["shortlisted"] += 1
+            for element in record.get("disclosed_elements") or []:
+                if isinstance(element, dict) and element.get("id"):
+                    result[str(element["id"])]["disclosed"] += 1
+            for decision in (record.get("plan") or {}).get("operations") or []:
+                if not isinstance(decision, dict):
+                    continue
+                element_id = str(decision.get("element_id") or decision.get("id") or "")
+                operation = str(decision.get("operation") or "").casefold()
+                if element_id and operation in {"unchanged", "delete", "modify", "merge"}:
+                    result[element_id][f"plan_{operation}"] += 1
+            for decision in update.get("operations") or []:
+                if not isinstance(decision, dict):
+                    continue
+                element_id = str(decision.get("element_id") or "")
+                operation = str(decision.get("operation") or "").casefold()
+                if element_id and operation in {"delete", "modify", "merge"}:
+                    result[element_id][f"applied_{operation}"] += 1
+        return {key: dict(value) for key, value in result.items()}
+
     def progressive_index(self) -> list[dict[str, Any]]:
         metadata = self.metadata()
+        exposure = self.outer_exposure_metadata() if _outer_dynamics_mode() else {}
         return [
             {
                 "id": spec.element_id,
                 "category": spec.category,
                 "tags": list(spec.tags),
                 "usage": metadata[spec.element_id],
+                "outer_exposure": exposure.get(spec.element_id, {}),
             }
             for spec in sorted(
                 self.catalog().values(), key=lambda item: (item.category, item.element_id)
@@ -354,6 +688,33 @@ class OuterHarnessLibraryStore:
         metadata: dict[str, dict[str, Any]],
     ) -> None:
         stat = metadata[element_id]
+        if _outer_dynamics_mode():
+            min_usage = _outer_dynamics_int(
+                "GAME_LOOP_OUTER_LIBRARY_DYNAMICS_DELETE_MIN_USAGE",
+                0,
+            )
+            if int(stat.get("usage_count", 0)) < min_usage:
+                raise ValueError(f"delete requires at least {min_usage} uses: {element_id}")
+            if not str(decision.get("modification_inadequate_reason", "")).strip():
+                raise ValueError(
+                    f"delete must explain why modification is inadequate: {element_id}"
+                )
+            evidence = " ".join(
+                str(decision.get(key, ""))
+                for key in (
+                    "reason",
+                    "unused_or_dormant_evidence",
+                    "modification_inadequate_reason",
+                )
+            ).casefold()
+            if (
+                int(stat.get("usage_count", 0)) == 0
+                and not any(token in evidence for token in ("unused", "dormant", "zero", "shortlist"))
+            ):
+                raise ValueError(
+                    f"delete zero-use element requires dormant/shortlist evidence: {element_id}"
+                )
+            return
         if int(stat.get("usage_count", 0)) < 5:
             raise ValueError(f"delete requires at least 5 uses: {element_id}")
         if not self._is_low_score(element_id, metadata):
@@ -371,6 +732,18 @@ class OuterHarnessLibraryStore:
         metadata: dict[str, dict[str, Any]],
     ) -> None:
         stat = metadata[element_id]
+        if _outer_dynamics_mode():
+            min_usage = _outer_dynamics_int(
+                "GAME_LOOP_OUTER_LIBRARY_DYNAMICS_MODIFY_MIN_USAGE",
+                0,
+            )
+            if int(stat.get("usage_count", 0)) < min_usage:
+                raise ValueError(f"modify requires at least {min_usage} uses: {element_id}")
+            if replacement == current:
+                raise ValueError(f"modify replacement must change the element: {element_id}")
+            if not str(decision.get("correction_hypothesis", "")).strip():
+                raise ValueError(f"modify requires a correction hypothesis: {element_id}")
+            return
         if int(stat.get("usage_count", 0)) < 3:
             raise ValueError(f"modify requires at least 3 uses: {element_id}")
         if (
@@ -383,6 +756,46 @@ class OuterHarnessLibraryStore:
         if not str(decision.get("correction_hypothesis", "")).strip():
             raise ValueError(f"modify requires a correction hypothesis: {element_id}")
 
+    def _dynamics_next_inner_ids(
+        self,
+        *,
+        epoch: int,
+        shortlist: tuple[str, ...],
+        current_inner_ids: tuple[str, ...],
+        catalog: dict[str, HarnessElementConfig],
+        added_ids: list[str],
+    ) -> list[str]:
+        max_ids = max(1, _outer_dynamics_int(
+            "GAME_LOOP_OUTER_LIBRARY_DYNAMICS_SELECTION_SIZE",
+            4,
+        ))
+        catalog_ids = [
+            spec.element_id
+            for spec in sorted(catalog.values(), key=lambda item: (item.category, item.element_id))
+        ]
+        selected: list[str] = []
+        for element_id in (*added_ids, *shortlist):
+            if element_id in catalog and element_id not in selected:
+                selected.append(element_id)
+            if len(selected) >= max_ids:
+                return selected
+        if catalog_ids:
+            offset = epoch % len(catalog_ids)
+            rotated = catalog_ids[offset:] + catalog_ids[:offset]
+        else:
+            rotated = []
+        for element_id in rotated:
+            if element_id in catalog and element_id not in selected:
+                selected.append(element_id)
+            if len(selected) >= max_ids:
+                return selected
+        for element_id in current_inner_ids:
+            if element_id in catalog and element_id not in selected:
+                selected.append(element_id)
+            if len(selected) >= max_ids:
+                return selected
+        return selected
+
     def apply_plan(
         self,
         *,
@@ -390,9 +803,11 @@ class OuterHarnessLibraryStore:
         shortlist: Iterable[str],
         plan: dict[str, Any],
         failed_history_epochs: Iterable[int] = (),
+        failed_outer_library_epochs: Iterable[int] = (),
         current_inner_element_ids: Iterable[str] = (),
     ) -> OuterLibraryUpdate:
         catalog = self.catalog()
+        plan = _normalize_outer_plan(plan)
         revision_before = self.revision()
         current_inner_ids = tuple(dict.fromkeys(
             str(item) for item in current_inner_element_ids
@@ -418,12 +833,15 @@ class OuterHarnessLibraryStore:
             if element_id in decisions:
                 raise ValueError(f"duplicate outer operation for {element_id}")
             decisions[element_id] = dict(item)
-        if set(decisions) != set(catalog):
-            missing = sorted(set(catalog) - set(decisions))
-            unknown = sorted(set(decisions) - set(catalog))
-            raise ValueError(
-                f"outer plan must cover every current element; missing={missing}, unknown={unknown}"
-            )
+        unknown = sorted(set(decisions) - set(catalog))
+        if unknown:
+            raise ValueError(f"outer plan contains unknown elements: {unknown}")
+        for element_id in sorted(set(catalog) - set(decisions)):
+            decisions[element_id] = {
+                "element_id": element_id,
+                "operation": "unchanged",
+                "reason": "implicit unchanged: omitted from the sparse outer plan",
+            }
         for element_id, decision in decisions.items():
             operation = str(decision.get("operation", "")).casefold()
             if operation not in OUTER_LIBRARY_OPERATIONS - {"add"}:
@@ -484,9 +902,11 @@ class OuterHarnessLibraryStore:
                     continue
                 left = catalog[element_id]
                 right = catalog[other_id]
+                similarity_threshold = 0.40 if _outer_dynamics_mode() else 0.55
+                content_threshold = 0.35 if _outer_dynamics_mode() else 0.50
                 if (
-                    element_similarity(left, right) < 0.55
-                    or _element_content_similarity(left, right) < 0.50
+                    element_similarity(left, right) < similarity_threshold
+                    or _element_content_similarity(left, right) < content_threshold
                 ):
                     raise ValueError("merge requires similar same-category elements")
                 merged = HarnessElementConfig.from_dict(
@@ -508,6 +928,7 @@ class OuterHarnessLibraryStore:
         if len(additions) > 2:
             raise ValueError("outer plan may add at most 2 boundary elements per epoch")
         available_epochs = {int(item) for item in failed_history_epochs}
+        available_epochs.update(int(item) for item in failed_outer_library_epochs)
         added_ids: list[str] = []
         for addition in additions:
             if str(addition.get("operation", "add")).casefold() != "add":
@@ -515,16 +936,29 @@ class OuterHarnessLibraryStore:
             if not str(addition.get("capability_boundary_evidence", "")).strip():
                 raise ValueError("add requires capability-boundary evidence")
             supporting_epochs = addition.get("supporting_epoch_ids", [])
-            if (
-                not isinstance(supporting_epochs, list)
-                or not supporting_epochs
-                or not all(isinstance(item, int) and item in available_epochs for item in supporting_epochs)
+            if not isinstance(supporting_epochs, list):
+                raise ValueError(
+                    "add requires supporting failed inner or outer-library epoch ids"
+                )
+            if not supporting_epochs and not _outer_dynamics_mode():
+                raise ValueError(
+                    "add requires supporting failed inner or outer-library epoch ids"
+                )
+            if supporting_epochs and not all(
+                isinstance(item, int) and item in available_epochs
+                for item in supporting_epochs
             ):
-                raise ValueError("add requires supporting failed epoch ids from inner history")
+                raise ValueError(
+                    "add requires supporting failed inner or outer-library epoch ids"
+                )
             spec = HarnessElementConfig.from_dict(dict(addition.get("element", {})))
             if spec.category not in ELEMENT_CATEGORIES:
                 raise ValueError(f"invalid added element category {spec.category}")
             if spec.element_id in next_catalog:
+                if _outer_dynamics_mode():
+                    if spec.element_id not in added_ids:
+                        added_ids.append(spec.element_id)
+                    continue
                 raise ValueError(f"added element id already exists: {spec.element_id}")
             for existing in next_catalog.values():
                 if (
@@ -564,6 +998,14 @@ class OuterHarnessLibraryStore:
                 ),
             )
             next_inner_ids.append(ranked[0])
+        if _outer_dynamics_mode():
+            next_inner_ids = self._dynamics_next_inner_ids(
+                epoch=epoch,
+                shortlist=shortlisted,
+                current_inner_ids=tuple(next_inner_ids),
+                catalog=next_catalog,
+                added_ids=added_ids,
+            )
 
         changed = {
             element_id: decision
@@ -742,23 +1184,41 @@ class OuterHarnessLibraryAgent:
         self.store.write_epoch_record(epoch, record)
         try:
             catalog_ids = {str(item["id"]) for item in record["catalog_index"]}
-            shortlist_limit = min(
-                len(catalog_ids),
-                max(1, min(8, (len(catalog_ids) + 2) // 3)),
+            if _outer_dynamics_mode():
+                shortlist_limit = min(
+                    len(catalog_ids),
+                    max(1, _outer_dynamics_int(
+                        "GAME_LOOP_OUTER_LIBRARY_DYNAMICS_SHORTLIST_LIMIT",
+                        6,
+                    )),
+                )
+            else:
+                shortlist_limit = min(
+                    len(catalog_ids),
+                    max(1, min(8, (len(catalog_ids) + 2) // 3)),
+                )
+            shortlist_task = (
+                f"Select at most {shortlist_limit} elements with enough evidence to consider delete, modify, "
+                "or merge. Return {shortlist:[ids], addition_needed:boolean, rationale:string}. "
+                "You have only index metadata now; do not claim to know hidden details."
             )
+            if _outer_dynamics_mode():
+                shortlist_task += (
+                    " Dynamics-study mode is active: prefer a diverse shortlist that exposes "
+                    "contrasting outer_exposure patterns, including repeatedly disclosed unchanged "
+                    "elements, inactive/dormant elements, and active high-use elements."
+                )
             shortlist_response = self.request_json(
                 "shortlist",
                 {
                     "catalog_index": record["catalog_index"],
                     "shortlist_limit": shortlist_limit,
-                    "inner_history": inner_history[-20:],
-                    "latest_inner_result": latest_inner_result.to_dict(),
-                    "current_inner_element_ids": list(current_inner_ids),
-                    "task": (
-                        f"Select at most {shortlist_limit} elements with enough evidence to consider delete, modify, "
-                        "or merge. Return {shortlist:[ids], addition_needed:boolean, rationale:string}. "
-                        "You have only index metadata now; do not claim to know hidden details."
+                    "inner_history": _compact_outer_inner_history(inner_history[-20:]),
+                    "latest_inner_result": _compact_inner_epoch_result(
+                        latest_inner_result
                     ),
+                    "current_inner_element_ids": list(current_inner_ids),
+                    "task": shortlist_task,
                 },
             )
             shortlist_raw = shortlist_response.get("shortlist", [])
@@ -786,6 +1246,40 @@ class OuterHarnessLibraryAgent:
                 shortlist_response=shortlist_response,
             )
             self.store.write_epoch_record(epoch, record)
+            plan_task = (
+                "Return operations only for existing elements that should be delete, modify, "
+                "or merge. Omit elements that should remain unchanged; the system will treat "
+                "omitted elements as unchanged. Undisclosed elements may not be changed. "
+                "Delete only when usage is high, score is low, and modification "
+                "cannot repair it; include modification_inadequate_reason. Modify elements "
+                "near deletion when a concrete correction may improve them, preserving id and "
+                "category in replacement. Merge only two highly similar disclosed elements, "
+                "with symmetric merge decisions and the same merged_element payload. Add only "
+                "when historical failures prove a capability boundary; put additions in a "
+                "separate additions list with capability_boundary_evidence and supporting failed "
+                "inner or outer-library epoch IDs in supporting_epoch_ids. Schema: "
+                "{operations:[{element_id,operation,reason,...}], additions:[...]}. "
+                "Use operation=unchanged only when you intentionally want to document why a "
+                "disclosed element was inspected but kept."
+            )
+            if _outer_dynamics_mode():
+                plan_task = (
+                    "Dynamics-study mode is active. Produce sparse non-keep actions when the "
+                    "evidence shows useful library differentiation; do not emit operations for "
+                    "elements that should merely stay unchanged. You may delete dormant elements "
+                    "that have been repeatedly shortlisted/disclosed yet remain unused when you "
+                    "explain why modification is inadequate. You may modify an unused or active "
+                    "element when the replacement preserves id/category and gives a concrete "
+                    "correction_hypothesis. You may merge moderately similar disclosed elements "
+                    "with symmetric merge decisions. You may add a distinct exploratory boundary "
+                    "element from repeated no-op, shortlist, or outer-library failure patterns; "
+                    "supporting_epoch_ids may be empty only when the evidence is repeated "
+                    "outer_exposure rather than a failed epoch. Keep actions sparse: normally 1 "
+                    "structural action per epoch, at most 2 additions. Schema: "
+                    "{operations:[{element_id,operation,reason,...}], additions:[...]}. "
+                    "For zero-use deletion include unused_or_dormant_evidence and "
+                    "modification_inadequate_reason."
+                )
             plan = self.request_json(
                 "plan",
                 {
@@ -793,25 +1287,23 @@ class OuterHarnessLibraryAgent:
                     "shortlist": list(shortlist),
                     "disclosed_elements": record["disclosed_elements"],
                     "element_metadata": self.store.metadata(),
-                    "inner_history": inner_history[-20:],
-                    "latest_inner_result": latest_inner_result.to_dict(),
+                    "inner_history": _compact_outer_inner_history(inner_history[-20:]),
+                    "latest_inner_result": _compact_inner_epoch_result(
+                        latest_inner_result
+                    ),
                     "current_inner_element_ids": list(current_inner_ids),
                     "operations": sorted(OUTER_LIBRARY_OPERATIONS),
-                    "task": (
-                        "Return an operation for every existing element. Undisclosed elements must "
-                        "be unchanged. Delete only when usage is high, score is low, and modification "
-                        "cannot repair it; include modification_inadequate_reason. Modify elements "
-                        "near deletion when a concrete correction may improve them, preserving id and "
-                        "category in replacement. Merge only two highly similar disclosed elements, "
-                        "with symmetric merge decisions and the same merged_element payload. Add only "
-                        "when historical failures prove a capability boundary; put additions in a "
-                        "separate additions list with capability_boundary_evidence and supporting failed "
-                        "inner-epoch IDs in supporting_epoch_ids. Schema: "
-                        "{operations:[{element_id,operation,reason,...}], additions:[...]}."
-                    ),
+                    "task": plan_task,
                 },
             )
+            record.update(status="applying", plan=plan)
+            audit_record_error: str | None = None
+            try:
+                self.store.write_epoch_record(epoch, record)
+            except Exception as exc:  # noqa: BLE001 - keep the valid plan actionable.
+                audit_record_error = f"audit_record_error: {type(exc).__name__}: {exc}"
             failed_history_epochs: set[int] = set()
+            failed_outer_library_epochs: set[int] = set()
             if not latest_inner_result.accepted:
                 failed_history_epochs.add(latest_inner_result.epoch)
             for item in inner_history:
@@ -826,11 +1318,31 @@ class OuterHarnessLibraryAgent:
                     accepted = item.get("accepted")
                 if isinstance(raw_epoch, int) and accepted is False:
                     failed_history_epochs.add(raw_epoch)
+                library_update = item.get("outer_element_library_update")
+                if isinstance(library_update, dict):
+                    update_payload = library_update.get("library_update", library_update)
+                    update_status = update_payload.get("status")
+                else:
+                    update_payload = {}
+                    update_status = None
+                if update_status is None:
+                    outer = item.get("outer") if isinstance(item.get("outer"), dict) else {}
+                    validation = outer.get("rubric_validation") if isinstance(outer, dict) else {}
+                    if isinstance(validation, dict):
+                        nested_update = validation.get("library_update")
+                        if isinstance(nested_update, dict):
+                            update_status = nested_update.get("status")
+                if (
+                    isinstance(raw_epoch, int)
+                    and update_status == "failed_infrastructure_or_validation"
+                ):
+                    failed_outer_library_epochs.add(raw_epoch)
             update = self.store.apply_plan(
                 epoch=epoch,
                 shortlist=shortlist,
                 plan=plan,
                 failed_history_epochs=failed_history_epochs,
+                failed_outer_library_epochs=failed_outer_library_epochs,
                 current_inner_element_ids=current_inner_ids,
             )
             record.update(status=update.status, plan=plan, update=update.to_dict())
@@ -839,10 +1351,9 @@ class OuterHarnessLibraryAgent:
             except Exception as exc:  # noqa: BLE001 - preserve the committed update.
                 # Catalog and stats are authoritative once their transaction commits.
                 # Surface the audit failure without misreporting the applied revision.
-                update = replace(
-                    update,
-                    error=f"audit_record_error: {type(exc).__name__}: {exc}",
-                )
+                audit_record_error = f"audit_record_error: {type(exc).__name__}: {exc}"
+            if audit_record_error is not None:
+                update = replace(update, error=audit_record_error)
             return update
         except Exception as exc:  # noqa: BLE001 - return a persisted failed update.
             update = OuterLibraryUpdate(

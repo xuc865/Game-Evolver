@@ -1,0 +1,271 @@
+{
+  "modules": [
+    {
+      "id": "context_compiler",
+      "instruction": "Compile context from task requirements, parent artifact state, and feedback signals.",
+      "tags": [
+        "context",
+        "context_compiler"
+      ]
+    },
+    {
+      "id": "module_strategy",
+      "instruction": "Select and order modules based on task type and recent outcomes.",
+      "tags": [
+        "strategy",
+        "module_strategy"
+      ]
+    },
+    {
+      "id": "skill_governance",
+      "instruction": "Curate skill descriptions and manage skill loading priorities.",
+      "tags": [
+        "skills",
+        "skill_governance"
+      ]
+    },
+    {
+      "id": "tool_interface",
+      "instruction": "Manage tool interface assembly and safety scoping.",
+      "tags": [
+        "tools",
+        "tool_interface"
+      ]
+    },
+    {
+      "id": "feedback_synthesis",
+      "instruction": "Synthesize structured feedback from evaluator outputs and probe observations.",
+      "tags": [
+        "feedback",
+        "validation"
+      ]
+    },
+    {
+      "id": "session_routing",
+      "instruction": "Route sessions across heterogeneous agent frameworks and model backends.",
+      "tags": [
+        "routing",
+        "recovery"
+      ]
+    }
+  ],
+  "tool_interfaces": [
+    {
+      "id": "python_runtime",
+      "kind": "command_wrapper",
+      "description": "Run bounded Python inspection commands in the candidate workspace.",
+      "command": [
+        "python3",
+        "-c",
+        "import os; print(os.listdir('{artifact_dir}')[:5])"
+      ],
+      "safety_scope": "candidate_workspace_only",
+      "tags": [
+        "runtime",
+        "tool_interface"
+      ]
+    }
+  ],
+  "seed_modules": [
+    "context_compiler",
+    "module_strategy"
+  ],
+  "max_active_modules": 2,
+  "max_active_tool_interfaces": 1,
+  "mutation_width": 1,
+  "replay_min_cases": 1,
+  "rubric_validation_sample_size": 1,
+  "loop_role": "outer",
+  "require_rubric_validation": false,
+  "dynamic_rubric_generation": true,
+  "enable_usage_driven_mutation": true,
+  "rubric_provider": "deepseek",
+  "element_mutation_policy": {
+    "removal_min_usage": 5,
+    "removal_min_usage_share": 0.25,
+    "removal_max_accuracy": 0.35,
+    "merge_min_similarity": 0.55
+  },
+  "element_catalog": [
+    {
+      "id": "ctx_inner_rejection_memory",
+      "category": "context",
+      "description": "Summarize rejected inner harness proposals before proposing a new element-library change.",
+      "spec": {
+        "window": "inner_rejection_experience",
+        "inner_tags": [
+          "diversity_escape",
+          "workflow"
+        ]
+      },
+      "tags": [
+        "context",
+        "inner_harness",
+        "rejection_memory",
+        "universal"
+      ]
+    },
+    {
+      "id": "ctx_element_usage_accuracy_digest",
+      "category": "context",
+      "description": "Expose per-element usage and accuracy trends to the harness-generation agent.",
+      "spec": {
+        "window": "element_stats",
+        "inner_tags": [
+          "usage_driven"
+        ]
+      },
+      "tags": [
+        "context",
+        "element_stats",
+        "usage_driven",
+        "universal"
+      ]
+    },
+    {
+      "id": "skill_failure_to_element_mapping",
+      "category": "skill",
+      "description": "Map inner-loop failure families to reusable harness element categories and tags.",
+      "spec": {
+        "mode": "failure_to_element_mapping",
+        "inner_tags": [
+          "skill",
+          "tool",
+          "context"
+        ]
+      },
+      "tags": [
+        "skill",
+        "failure_analysis",
+        "element_library",
+        "universal"
+      ]
+    },
+    {
+      "id": "skill_harness_gap_analysis",
+      "category": "skill",
+      "description": "Identify missing reusable harness-generation experience from recent game-agent traces.",
+      "spec": {
+        "mode": "harness_gap_analysis",
+        "inner_tags": [
+          "element_add",
+          "usage_driven"
+        ]
+      },
+      "tags": [
+        "skill",
+        "gap_analysis",
+        "element_add",
+        "universal"
+      ]
+    },
+    {
+      "id": "tool_outer_stats_inspector",
+      "category": "tool",
+      "description": "Inspect outer element usage/accuracy stats before changing the outer library.",
+      "spec": {
+        "command": "outer_element_stats_digest",
+        "inner_tags": [
+          "usage_driven"
+        ]
+      },
+      "tags": [
+        "tool",
+        "stats",
+        "accuracy",
+        "universal"
+      ]
+    },
+    {
+      "id": "protocol_element_library_only",
+      "category": "protocol",
+      "description": "Constrain outer evolution to reusable element-library management, not hard module forcing.",
+      "spec": {
+        "scope": "element_library_management_only",
+        "inner_tags": [
+          "usage_driven"
+        ]
+      },
+      "tags": [
+        "protocol",
+        "library_only",
+        "safety",
+        "universal"
+      ]
+    },
+    {
+      "id": "workflow_prune_merge_replace",
+      "category": "workflow",
+      "description": "Prune, merge, or replace low-accuracy harness-generation elements using recorded outcomes.",
+      "spec": {
+        "steps": [
+          "inspect_stats",
+          "select_category",
+          "prune_or_merge",
+          "record_change"
+        ],
+        "inner_tags": [
+          "element_merge",
+          "usage_driven"
+        ]
+      },
+      "tags": [
+        "workflow",
+        "stats_driven",
+        "merge",
+        "repair",
+        "universal"
+      ]
+    },
+    {
+      "id": "workflow_targeted_element_addition",
+      "category": "workflow",
+      "description": "Add one targeted reusable harness-generation element for a repeated inner-loop failure mode.",
+      "spec": {
+        "steps": [
+          "classify_failure",
+          "choose_category",
+          "add_element",
+          "track_accuracy"
+        ],
+        "inner_tags": [
+          "element_add",
+          "usage_driven"
+        ]
+      },
+      "tags": [
+        "workflow",
+        "element_add",
+        "failure_analysis",
+        "universal"
+      ]
+    }
+  ],
+  "seed_elements": {
+    "context": [
+      "ctx_inner_rejection_memory",
+      "ctx_element_usage_accuracy_digest"
+    ],
+    "skill": [
+      "skill_failure_to_element_mapping"
+    ],
+    "tool": [
+      "tool_outer_stats_inspector"
+    ],
+    "protocol": [
+      "protocol_element_library_only"
+    ],
+    "workflow": [
+      "workflow_targeted_element_addition"
+    ]
+  },
+  "allowed_niches": [
+    "context_compiler",
+    "module_strategy",
+    "skill_governance",
+    "tool_interface",
+    "feedback_synthesis",
+    "session_routing"
+  ],
+  "rubric_judge_timeout_seconds": 60
+}

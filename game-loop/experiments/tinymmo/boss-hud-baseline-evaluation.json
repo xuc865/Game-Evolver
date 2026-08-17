@@ -1,0 +1,93 @@
+{
+  "constraints": {
+    "architecture_intact": true,
+    "gdscript_compiles": true,
+    "godot_validation_complete": true,
+    "real_dungeon_path_preserved": true
+  },
+  "details": {
+    "boss_hud_integration": {
+      "boss_hud_files": [],
+      "checks": {
+        "authoritative_health": false,
+        "boss_name_visible": false,
+        "bounded_updates": false,
+        "cast_payload": false,
+        "cast_visible": false,
+        "cleanup_on_disconnect": false,
+        "cleanup_on_end": false,
+        "cleanup_on_instance_change": false,
+        "client_subscribes": false,
+        "encounter_end_push": false,
+        "health_bar_visible": false,
+        "hud_production_integration": false,
+        "numeric_health_visible": false,
+        "phase_payload": false,
+        "phase_visible": false,
+        "real_final_room": true,
+        "room_controller_path": true,
+        "server_pushes_boss_state": false,
+        "stable_encounter_id": false,
+        "stale_update_guard": false
+      },
+      "diagnostics": [
+        "boss HUD integration missing: server_pushes_boss_state",
+        "boss HUD integration missing: stable_encounter_id",
+        "boss HUD integration missing: authoritative_health",
+        "boss HUD integration missing: phase_payload",
+        "boss HUD integration missing: cast_payload",
+        "boss HUD integration missing: bounded_updates",
+        "boss HUD integration missing: encounter_end_push",
+        "boss HUD integration missing: client_subscribes",
+        "boss HUD integration missing: hud_production_integration",
+        "boss HUD integration missing: boss_name_visible",
+        "boss HUD integration missing: health_bar_visible",
+        "boss HUD integration missing: numeric_health_visible",
+        "boss HUD integration missing: phase_visible",
+        "boss HUD integration missing: cast_visible",
+        "boss HUD integration missing: stale_update_guard",
+        "boss HUD integration missing: cleanup_on_end",
+        "boss HUD integration missing: cleanup_on_instance_change",
+        "boss HUD integration missing: cleanup_on_disconnect"
+      ],
+      "score": 0.1
+    },
+    "godot": {
+      "compile_errors": false,
+      "compiler_error_count": 0,
+      "complete": true,
+      "diagnostics": [],
+      "return_code": 0
+    }
+  },
+  "diagnostics": [
+    "boss HUD integration missing: server_pushes_boss_state",
+    "boss HUD integration missing: stable_encounter_id",
+    "boss HUD integration missing: authoritative_health",
+    "boss HUD integration missing: phase_payload",
+    "boss HUD integration missing: cast_payload",
+    "boss HUD integration missing: bounded_updates",
+    "boss HUD integration missing: encounter_end_push",
+    "boss HUD integration missing: client_subscribes",
+    "boss HUD integration missing: hud_production_integration",
+    "boss HUD integration missing: boss_name_visible",
+    "boss HUD integration missing: health_bar_visible",
+    "boss HUD integration missing: numeric_health_visible",
+    "boss HUD integration missing: phase_visible",
+    "boss HUD integration missing: cast_visible",
+    "boss HUD integration missing: stale_update_guard",
+    "boss HUD integration missing: cleanup_on_end",
+    "boss HUD integration missing: cleanup_on_instance_change",
+    "boss HUD integration missing: cleanup_on_disconnect"
+  ],
+  "objectives": {
+    "architecture_integrity": 1.0,
+    "boss_hud_production_integration": 0.1,
+    "maintainability": 0.333333,
+    "real_scene_coverage": 1.0,
+    "runtime_health": 1.0
+  },
+  "primary_score": 0.426667,
+  "schema_version": "tinymmo-boss-hud-evaluation-v1",
+  "status": "completed"
+}
