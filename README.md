@@ -2,59 +2,110 @@
   <img src="docs/ge.png" alt="game-evolver" width="980" />
 </p>
 
-# game-evolver
+<h1 align="center">game-evolver</h1>
 
-AgentX-style two-timescale harness evolution for game-making agents, built around an OpenGame backbone and a set of benchmark-specific bridges.
+<p align="center">
+  <strong>Two-timescale harness evolution for game-generation agents.</strong><br/>
+  Evolve how agents build games, verify what they produce, and reuse successful harness elements across benchmarks.
+</p>
 
-## Benchmarks
+<p align="center">
+  <a href="#-benchmarks">Benchmarks</a> ·
+  <a href="#-quick-start">Quick Start</a> ·
+  <a href="#-linux-quick-deploy">Linux Deploy</a> ·
+  <a href="#-nested-evolution">Nested Evolution</a> ·
+  <a href="#-tests">Tests</a>
+</p>
 
-| Benchmark | Path | Notes |
+---
+
+## ✨ What Is game-evolver?
+
+`game-evolver` is a research codebase for improving game-generation agents through harness evolution. Instead of treating an agent prompt, tool policy, evaluator, and recovery procedure as fixed scaffolding, the system represents them as a harness that can be revised, tested, and accepted only when it improves benchmark behavior.
+
+The framework runs on two timescales. The inner loop optimizes the harness used by a game-generation agent on concrete tasks, while the outer loop manages the reusable harness-element library that future inner-loop runs draw from. This makes the project useful both for studying game-making agents and for stress-testing harness design across broader coding benchmarks.
+
+### 🧱 Core Ideas
+
+| Icon | Component | Role |
 |---|---|---|
-| GameCraftBench | `gcbench/` | Pinned [GameCraftBench](https://github.com/FreedomIntelligence/gamecraft-bench) checkout |
-| GameDevBench | `third_party/gamedevbench/` | Symlinked as `gdbench/`; task zips are not tracked |
-| VGameGym | `game-loop/third_party/SKYLENAGE-GameCodeGym/` | Game-making and evaluation tooling for VGameGym runs |
-| VeriGame / GameGen-Verifier | `game-loop/third_party/GameGen-Verifier/` | Public game-generation benchmark bridge |
-| KSRE pXt Director | `game-loop/experiments/ksre/` | Ren'Py-based visual-novel benchmark and eval flow |
+| 🎮 | Game-generation backbone | Produces playable projects or code artifacts from benchmark tasks. |
+| 🧪 | Harness evolution | Mutates prompts, roles, tools, repair flows, and verification routines around the backbone. |
+| ✅ | Dual rubric verification | Uses hard constraints and aggregated soft scores to decide whether a candidate harness is accepted. |
+| 📚 | Element library | Tracks harness elements, their usage, and their empirical success so later runs can reuse better building blocks. |
+| 🔁 | Nested loops | Connects per-task inner-loop optimization with slower outer-loop maintenance of the harness library. |
 
-## Repository Map
+---
+
+## 🎮 Benchmarks
+
+The repository currently connects game-focused benchmarks and general coding benchmarks through benchmark-specific adapters. Game benchmarks emphasize playable artifacts, engine constraints, and evaluator feedback, while general benchmarks make it possible to test whether the same harness machinery transfers beyond games.
+
+| Benchmark | Type | Path | What It Covers | Notes |
+|---|---|---|---|---|
+| 🎲 GameCraftBench | Game | `gcbench/` | Open-ended game construction tasks | Pinned checkout of [GameCraftBench](https://github.com/FreedomIntelligence/gamecraft-bench). |
+| 🕹️ GameDevBench | Game | `third_party/gamedevbench/` | Project-level game development tasks | Symlinked as `gdbench/`; task archives are kept outside git. |
+| 🌌 VGameGym | Game | `game-loop/third_party/SKYLENAGE-GameCodeGym/` | GameCodeGym-style game generation and evaluation | Dataset download is handled by `scripts/download_vgamegym_dataset.py`. |
+| 🧩 VeriGame / GameGen-Verifier | Game | `game-loop/third_party/GameGen-Verifier/` | Verification-oriented game generation | Bridges public verifier tooling into the game-evolver runner. |
+| 🧱 TinyMMO | Game | `game-loop/experiments/tinymmo/` | Lightweight Godot MMO scenarios | Includes deterministic evaluators and boss/HUD task variants. |
+| 🏗️ NL2RepoBench | General | `game-loop/third_party/NL2RepoBench/` | Natural-language-to-repository generation | Used for Linux worker experiments; official tasks are not tracked. |
+| 🧰 SWE-bench-style configs | General | `game-loop/experiments/configs-v4/` | Repository repair and coding workflows | Configured through the same runner and provider stack. |
+| 💻 TerminalBench / TauBench / WeaveBench | General | `game-loop/experiments/configs-v4/` | Tool-use, terminal, and agent workflow evaluation | Included to probe transfer of harness choices beyond game-only settings. |
+
+---
+
+## 🧭 Repository Map
 
 | Path | Purpose |
 |---|---|
-| `game-loop/` | Main Python package: nested AgentX loops, benchmark adapters, backend bridges, smoke tests |
-| `gcbench/` | Pinned GameCraftBench checkout |
-| `third_party/OpenGame/` | OpenGame SDK (`npm install && npm run build`) |
-| `third_party/gamedevbench/` | GameDevBench source checkout |
-| `docs/ge.png` | Title image used by this README |
+| `game-loop/` | Main Python package: runners, benchmark adapters, provider bridges, nested evolution logic, and tests. |
+| `game-loop/game_loop/` | Importable package with benchmark abstractions, runtime providers, and evolution modules. |
+| `game-loop/experiments/configs-v4/` | Main experiment configuration set for game and general benchmarks. |
+| `game-loop/experiments/general-baseline/` | Seeds and baseline artifacts for general-benchmark runs such as NL2Repo. |
+| `game-loop/experiments/tinymmo/` | TinyMMO task definitions, baseline evaluations, and benchmark metadata. |
+| `gcbench/` | Pinned GameCraftBench checkout. |
+| `third_party/OpenGame/` | OpenGame SDK; build it with `npm ci && npm run build`. |
+| `third_party/gamedevbench/` | GameDevBench source checkout. |
+| `docs/ge.png` | README title image. |
 
-## Quick Start
+---
+
+## ⚡ Quick Start
 
 ```bash
 cd game-loop
 
-# OpenGame SDK
-cd ../third_party/OpenGame && npm ci && npm run build && cd ../../game-loop
+# Build the OpenGame SDK used by game adapters.
+cd ../third_party/OpenGame
+npm ci
+npm run build
+cd ../../game-loop
 
-# GameCraftBench Docker environment (macOS / Python < 3.12)
+# Create the Python environment.
+python3.11 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip wheel
+python -m pip install -e .
+
+# Prepare optional benchmark assets.
 bash scripts/gcbench_e2e/setup_local.sh
-
-# GameDevBench tasks (not tracked in git)
-# Clone or copy task zips into third_party/gamedevbench/tasks/
-
-# VGameGym dataset
-export HF_TOKEN=...   # optional for public dataset
 python3 scripts/download_vgamegym_dataset.py
 
-# Backbone credentials (example)
+# Configure one provider and one engine bridge.
 export DEEPSEEK_API_KEY=...
 export GODOT_EXEC_PATH="$PWD/scripts/gdbench_e2e/godot_docker.sh"
 
-# Comprehensive smoke
+# Run a quick smoke pass.
 PYTHONPATH=. python3 scripts/run_comprehensive_smoke.py --provider deepseek --quick
 ```
 
-## Linux Quick Deploy
+Generated artifacts, logs, local datasets, and credentials should stay out of git. The `.gitignore` already covers common smoke outputs and experiment run directories.
 
-For a Linux worker that only needs to connect the codebase and run `nl2repo`, the shortest path is:
+---
+
+## 🐧 Linux Quick Deploy
+
+This path is intended for Linux workers that need to pull the repository, connect the environment, and run `nl2repo` experiments quickly.
 
 ### 1. Clone and create the Python environment
 
@@ -70,11 +121,11 @@ python -m pip install --upgrade pip wheel
 python -m pip install -e .
 ```
 
-If the machine does not have Python 3.11, install it first. The package metadata requires Python `>=3.11`.
+The Python package requires Python `>=3.11`. If the worker image only has an older interpreter, install Python 3.11 first and recreate the virtual environment.
 
 ### 2. Install system dependencies
 
-`nl2repo` uses Docker to run the official project evaluators, so the Linux host must have a working Docker daemon and enough disk space for benchmark images.
+`nl2repo` uses Docker to run official project evaluators, so the worker must have a working Docker daemon and enough disk space for benchmark images.
 
 ```bash
 docker info
@@ -84,7 +135,7 @@ print(sys.version)
 PY
 ```
 
-The runner keeps mutable state under `game-loop/experiments/`. Do not run it from inside `third_party/` or another read-only benchmark checkout.
+Mutable run state is written under `game-loop/experiments/`. Run commands from `game-loop/`, not from a read-only third-party checkout.
 
 ### 3. Put NL2RepoBench in the expected location
 
@@ -94,8 +145,7 @@ The runner keeps mutable state under `game-loop/experiments/`. Do not run it fro
 game-loop/third_party/NL2RepoBench/NL2RepoBench_src/test_files/
 ```
 
-On the Linux worker, either copy an existing verified checkout to that path, or
-clone the source mirror used by the project and check out the verified revision:
+On a Linux worker, either copy a verified checkout to that path or clone the source mirror used by the project and check out the verified revision:
 
 ```bash
 mkdir -p third_party
@@ -108,13 +158,11 @@ test -d third_party/NL2RepoBench/NL2RepoBench_src/test_files
 test -f experiments/general-baseline/seed_nl2repo/start.md
 ```
 
-If you copy the directory from another machine, preserve
-`NL2RepoBench_src/test_files/*/start.md`, `test_commands.json`,
-`test_files.json`, and `test_case_count.txt`.
+If the directory is copied from another machine, preserve each task's `start.md`, `test_commands.json`, `test_files.json`, and `test_case_count.txt`.
 
 ### 4. Rewrite local absolute paths in nl2repo configs
 
-The checked-in `nl2repo-L4_*.json` files may contain the original development machine path. Rewrite `benchmark.options.root` to the Linux checkout's `game-loop` directory before launching:
+The checked-in `nl2repo-L4_*.json` files can contain the original development-machine path. Rewrite `benchmark.options.root` to the worker's local `game-loop` directory before launch:
 
 ```bash
 python - <<'PY'
@@ -132,20 +180,19 @@ PY
 
 ### 5. Configure model credentials or local endpoints
 
-The queue runner loads `game-loop/.env.local` if it exists. Keep secrets there or export them in the shell.
+The queue runner loads `game-loop/.env.local` when the file exists. Keep secrets there or export them in the shell.
 
 ```bash
-# Keyless/internal OpenAI-compatible endpoints can be set in the config JSON.
-# For hosted providers, export only the key you need:
+# Hosted providers.
 export DEEPSEEK_API_KEY=...
 export CODEX_API_KEY_CLAUDE=...
 export CODEX_API_KEY_GPT55=...
 
-# Optional progress log location:
+# Optional progress log location.
 export GENERAL_BENCH_PROGRESS_FILE="$PWD/experiments/general-baseline-runs/progress.txt"
 ```
 
-Do not commit `.env.local` or run output directories.
+Do not commit `.env.local` or experiment output directories.
 
 ### 6. Smoke-check and launch nl2repo
 
@@ -158,15 +205,20 @@ export PYTHONPATH="$PWD"
 # Show discovered tasks and available queues.
 python scripts/run_new_bench_experiments.py --dry-run
 
-# Run one model's NL2Repo queue. Replace the model prefix as needed:
+# Run one NL2Repo queue.
 python -u scripts/run_new_bench_experiments.py --queue deepseek_v4_nl2repo
-# Other valid nl2repo queues include:
-#   kimi_nl2repo
-#   qwen3.6-27b_nl2repo
-#   glm5.2_nl2repo
-#   claude_nl2repo
-#   gpt55_nl2repo
 ```
+
+Available `nl2repo` queues include:
+
+| Queue | Provider |
+|---|---|
+| `deepseek_v4_nl2repo` | DeepSeek |
+| `kimi_nl2repo` | Kimi |
+| `qwen3.6-27b_nl2repo` | Qwen |
+| `glm5.2_nl2repo` | GLM |
+| `claude_nl2repo` | Claude |
+| `gpt55_nl2repo` | GPT-5.5 |
 
 Outputs are written under:
 
@@ -174,45 +226,58 @@ Outputs are written under:
 game-loop/experiments/general-baseline-runs/new_bench_<model>_nl2repo-resume-*/
 ```
 
-Each case has a per-task log and, once the bridge reaches official evaluation,
-an `nl2repo_execution.json` manifest under the candidate directory. A quick
-health check is:
+Each case has a per-task log and, once the bridge reaches official evaluation, an `nl2repo_execution.json` manifest under the candidate directory. A quick health check is:
 
 ```bash
 find experiments/general-baseline-runs -path '*nl2repo_execution.json' | tail
 ```
 
-If Docker is missing, the official NL2Repo evaluator will fail with an infrastructure error rather than a benchmark score. If no tasks are discovered, check the `third_party/NL2RepoBench/NL2RepoBench_src/test_files` path.
+If Docker is missing, the official NL2Repo evaluator fails as infrastructure rather than as a benchmark score. If no tasks are discovered, check `third_party/NL2RepoBench/NL2RepoBench_src/test_files`.
 
-## Backbone providers
+---
 
-Configured in `game-loop/game_loop/runtime/providers.py`:
+## 🤖 Backbone Providers
 
-| Provider | Model | Endpoint |
-|----------|-------|----------|
-| deepseek | deepseek-v4-flash | `https://api.deepseek.com` |
-| kimi | Kimi-K2.7-Code | `http://29.116.237.135:8080/v1` |
-| glm | GLM-5.2-W4AFP8-node6 | `http://29.116.237.5:8080/v1` |
-| qwen | Qwen3.6-27B | `http://29.116.237.141:8080/v1` |
+Provider defaults live in `game-loop/game_loop/runtime/providers.py`. Use environment variables or config JSON to override them for a specific run.
 
-## AgentX nested evolution
+| Icon | Provider | Default model | Default endpoint | Credential |
+|---|---|---|---|---|
+| 🔷 | `deepseek` | `deepseek-v4-flash` | `https://api.deepseek.com` | `DEEPSEEK_API_KEY` |
+| 🌙 | `kimi` | `Kimi-K2.7-Code` | `http://29.116.237.135:8080/v1` | keyless internal endpoint |
+| 🟢 | `glm` | `GLM-5.2-W4AFP8` | `http://11.213.4.72:80/v1` | keyless internal endpoint |
+| 🟡 | `qwen` | `Qwen3.6-27B` | `http://29.163.228.59:8080/v1` | keyless internal endpoint |
+| 🟣 | `claude` | `claude-sonnet-4-6` | `https://xmcode.shop/v1` | `CODEX_API_KEY_CLAUDE` |
+| ⚫ | `gpt55` | `gpt-5.5` | `https://xmcode.shop/v1` | `CODEX_API_KEY_GPT55` |
+
+---
+
+## 🔁 Nested Evolution
+
+game-evolver exposes a nested evolution workflow for experiments that need both per-task harness improvement and slower harness-library maintenance. In a typical run, the inner loop proposes a candidate harness, executes benchmark tasks, verifies hard and soft rubric changes, and accepts only candidates that do not regress hard constraints while meeting the configured aggregate soft-rubric rule. The outer loop is opt-in and updates the harness-element library from accumulated evidence such as element usage, success rate, and downstream acceptance behavior.
 
 ```bash
 PYTHONPATH=. python3 -m game_loop agentx-nested-init \
-  --run-dir /tmp/agentx-run --config experiments/configs-v4/gcbench-L4_kimi.json
+  --run-dir /tmp/game-evolver-run \
+  --config experiments/configs-v4/gcbench-L4_kimi.json
 
 PYTHONPATH=. python3 -m game_loop agentx-nested-epoch \
-  --run-dir /tmp/agentx-run \
+  --run-dir /tmp/game-evolver-run \
   --config experiments/configs-v4/gcbench-L4_kimi.json \
   --epoch 1 \
   --task-source /path/to/task \
   --seed-artifact /path/to/seed
 ```
 
-## Tests
+The current CLI subcommand names keep historical compatibility, but the project-level method and documentation use the `game-evolver` name.
+
+---
+
+## ✅ Tests
 
 ```bash
 cd game-loop
 PYTHONPATH=. python3 -m unittest discover -s tests -q
 PYTHONPATH=. python3 experiments/generate_all_configs.py
 ```
+
+For a faster pre-flight check before pushing experiment-only changes, run the relevant benchmark smoke command and `git diff --check`.
