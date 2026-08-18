@@ -1,6 +1,0 @@
-{
-  "backbone_provider": "glm",
-  "runtime_id": "opengame-glm",
-  "permission_mode": "auto-edit",
-  "environment": {}
-}

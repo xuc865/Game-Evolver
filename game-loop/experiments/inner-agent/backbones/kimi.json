@@ -1,6 +1,0 @@
-{
-  "backbone_provider": "kimi",
-  "runtime_id": "opengame-kimi",
-  "permission_mode": "auto-edit",
-  "environment": {}
-}

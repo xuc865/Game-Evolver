@@ -1,6 +1,0 @@
-{
-  "backbone_provider": "claude",
-  "runtime_id": "opengame-claude",
-  "permission_mode": "auto-edit",
-  "environment": {}
-}

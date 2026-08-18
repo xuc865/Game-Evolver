@@ -13,8 +13,7 @@
   <a href="#-benchmarks">Benchmarks</a> ·
   <a href="#-quick-start">Quick Start</a> ·
   <a href="#-linux-quick-deploy">Linux Deploy</a> ·
-  <a href="#-nested-evolution">Nested Evolution</a> ·
-  <a href="#-tests">Tests</a>
+  <a href="#-nested-evolution">Nested Evolution</a>
 </p>
 
 ---
@@ -94,11 +93,11 @@ python3 scripts/download_vgamegym_dataset.py
 # Configure local runtime secrets outside git, then set the game engine bridge.
 export GODOT_EXEC_PATH="$PWD/scripts/gdbench_e2e/godot_docker.sh"
 
-# Run a quick smoke pass.
-PYTHONPATH=. python3 scripts/run_comprehensive_smoke.py --provider <runtime-profile> --quick
+# Check the runner and available experiment queues.
+PYTHONPATH=. python3 scripts/run_new_bench_experiments.py --dry-run
 ```
 
-Generated artifacts, logs, local datasets, and credentials should stay out of git. The `.gitignore` already covers common smoke outputs and experiment run directories.
+Generated artifacts, logs, local datasets, diagnostics, and credentials should stay out of git. The `.gitignore` covers local checks and experiment run directories.
 
 ---
 
@@ -188,7 +187,7 @@ export GENERAL_BENCH_PROGRESS_FILE="$PWD/experiments/general-baseline-runs/progr
 
 Do not commit `.env.local` or experiment output directories.
 
-### 6. Smoke-check and launch nl2repo
+### 6. Check and launch nl2repo
 
 From `game-loop/`:
 
@@ -237,15 +236,3 @@ PYTHONPATH=. python3 -m game_loop agentx-nested-epoch \
 ```
 
 The current CLI subcommand names keep historical compatibility, but the project-level method and documentation use the `game-evolver` name.
-
----
-
-## ✅ Tests
-
-```bash
-cd game-loop
-PYTHONPATH=. python3 -m unittest discover -s tests -q
-PYTHONPATH=. python3 experiments/generate_all_configs.py
-```
-
-For a faster pre-flight check before pushing experiment-only changes, run the relevant benchmark smoke command and `git diff --check`.

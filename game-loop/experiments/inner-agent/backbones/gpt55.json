@@ -1,6 +1,0 @@
-{
-  "backbone_provider": "gpt55",
-  "runtime_id": "opengame-gpt55",
-  "permission_mode": "auto-edit",
-  "environment": {}
-}

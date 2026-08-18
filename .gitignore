@@ -56,6 +56,49 @@ game-loop/experiments/tinymmo/runs/
 game-loop/experiments/tinymmo/seeds/
 game-loop/experiments/tinymmo/kimi-adaptive-motion-*.log
 
+# Local diagnostics, smoke checks, and one-off experiment utilities.
+game-loop/tests/
+game-loop/scripts/*smoke*
+game-loop/scripts/*probe*
+game-loop/scripts/*launch*
+game-loop/scripts/*supervise*
+game-loop/scripts/*watch*
+game-loop/scripts/*monitor*
+game-loop/scripts/*rejudge*
+game-loop/scripts/*report*
+game-loop/scripts/*plot*
+game-loop/scripts/*ablation*
+game-loop/scripts/*synthetic*
+game-loop/scripts/*record*
+game-loop/scripts/*recorder*
+game-loop/scripts/*progress*
+game-loop/scripts/*migration*
+game-loop/scripts/*awesome*
+game-loop/scripts/migrate_*
+game-loop/scripts/promote_*
+game-loop/scripts/run_chat_agent_*
+game-loop/scripts/run_codex_*
+game-loop/scripts/export_historical_*
+game-loop/scripts/reap_*
+game-loop/scripts/run_game_loop_harness_chat_agent.sh
+game-loop/scripts/godot_zombie_watchdog.sh
+game-loop/scripts/gcbench_e2e/doctor.sh
+game-loop/scripts/gcbench_e2e/*smoke*
+
+# Non-mainline and scratch experiment configs.
+game-loop/experiments/configs-ablation/
+game-loop/experiments/smoke/
+game-loop/experiments/agentx/task_pool_smoke.json
+game-loop/experiments/inner-agent/backbones/
+game-loop/experiments/inner-agent/*.local.json
+game-loop/experiments/baselines/awesome-gamedev-agent-skills*
+game-loop/experiments/*smoke*
+game-loop/experiments/*ablation*
+game-loop/experiments/*synthetic*
+game-loop/experiments/*rejudge*
+game-loop/experiments/*watchdog*
+game-loop/experiments/fixed-admission-*.json
+
 # Repository-local benchmark execution state (keep configs, omit live runs).
 game-loop/experiments/runs/
 game-loop/experiments/public-chain*/
