@@ -1,0 +1,241 @@
+{
+  "benchmark": {
+    "adapter": "ksre",
+    "options": {
+      "renpy_bin": "/Users/wangxucong/Desktop/workspace/harness-game/game-loop/third_party/renpy-8.5.3-sdk/renpy.sh",
+      "seed_evaluation_path": "/Users/wangxucong/Desktop/workspace/harness-game/game-loop/experiments/ksre/pxt-director-ab-demo/post-evaluation-longform-check.json"
+    }
+  },
+  "backend": {
+    "command": [
+      "bash",
+      "scripts/run_ksre_backend.sh",
+      "{candidate_workspace}",
+      "{instruction_file}",
+      "{output_manifest}",
+      "{evaluation_path}"
+    ],
+    "cwd": "/Users/wangxucong/Desktop/workspace/harness-game/game-loop",
+    "timeout_seconds": 5400,
+    "inactivity_timeout_seconds": 1200,
+    "env": {
+      "CODEX_API_BASE": "https://api.deepseek.com",
+      "CODEX_MODEL": "deepseek-v4-flash",
+      "GAME_LOOP_BACKBONE_PROVIDER": "deepseek",
+      "RENPY_BIN": "/Users/wangxucong/Desktop/workspace/harness-game/game-loop/third_party/renpy-8.5.3-sdk/renpy.sh",
+      "GAME_LOOP_REQUIRE_WORKSPACE_EDIT": "0",
+      "GAME_LOOP_CHAT_MAX_TURNS": "140",
+      "GAME_LOOP_WORKSPACE_EDIT_GATE_TURN": "999",
+      "CODEX_PROVIDER": "deepseek",
+      "KSRE_PXT_EVAL_PROFILE": "longform"
+    }
+  },
+  "method": {
+    "level": "L4",
+    "observation_contract": "two_timescale_agent_harness_evolution_plus_benchmark_evaluator_and_validity_gates",
+    "fixed_probes": [],
+    "max_probe_calls": 6,
+    "active_selection": {
+      "max_selected_probes": 1,
+      "min_observations_per_probe": 1
+    },
+    "probe_families": [
+      {
+        "id": "ksre_pxt_asset_anchor",
+        "gene": {
+          "name": "min_pxt_assets",
+          "initial": 30,
+          "minimum": 25,
+          "maximum": 38,
+          "step": 1,
+          "difficulty_direction": "increasing"
+        },
+        "probe": {
+          "command": [
+            "python3",
+            "scripts/probe_ksre_structure.py",
+            "--artifact",
+            "{artifact_dir}",
+            "--min-pxt-assets",
+            "[[min_pxt_assets]]"
+          ],
+          "cwd": "/Users/wangxucong/Desktop/workspace/harness-game/game-loop",
+          "timeout_seconds": 30,
+          "selection_mode": "regression_anchor",
+          "parser": "json_stdout",
+          "tags": [
+            "RepairConstraint",
+            "renpy",
+            "assets"
+          ]
+        },
+        "archive_capacity": 8
+      }
+    ],
+    "harness_evolution": {
+      "loop_role": "inner",
+      "modules": [
+        {
+          "id": "real_mod_menu_entry",
+          "category": "workflow",
+          "instruction": "Expose the improvement through KSRE's real Mods menu by registering mods[\"pxt_director\"] and providing a screen pxt_director plus label pxt_director_start. Do not add a fake launcher or alternate preview outside the game.",
+          "tags": [
+            "renpy",
+            "menu",
+            "playability"
+          ]
+        },
+        {
+          "id": "director_cut_content",
+          "category": "gameplay",
+          "instruction": "Create a substantially longer pXt Director's Cut episode, not a short vignette: include setup, rehearsal/complication, at least two meaningful player-facing choices or branch points, callbacks, multiple labels, and a clear curtain-call epilogue.",
+          "tags": [
+            "vn",
+            "content",
+            "branching"
+          ]
+        },
+        {
+          "id": "theatrical_presentation",
+          "category": "gameplay",
+          "instruction": "Use existing pXt background, audience, curtain, sprite, music, and sound assets across several scene beats with visible stagecraft: program/title beat, spotlight-like focus, transitions, audio cues, pacing changes, and a finale that feels earned after several minutes of play.",
+          "tags": [
+            "visual",
+            "audio",
+            "staging"
+          ]
+        },
+        {
+          "id": "accessible_stage_copy",
+          "category": "context",
+          "instruction": "Keep VN accessibility in mind by including readable director notes or stage-direction copy that explains important audio/visual cues without relying only on sound or motion.",
+          "tags": [
+            "accessibility",
+            "readability"
+          ]
+        },
+        {
+          "id": "bounded_mod_scope",
+          "category": "strategy",
+          "instruction": "Prefer adding files under game/mods/pxt_director and reusing game/mods/pxt assets. Preserve original pXt files and global KSRE screens unless a tiny registration-compatible edit is unavoidable.",
+          "tags": [
+            "scope",
+            "regression"
+          ]
+        },
+        {
+          "id": "renpy_compile_first",
+          "category": "observability",
+          "instruction": "Run tools/renpy . compile or the bundled Ren'Py compile command before finishing. Fix syntax, labels, image names, and missing asset references.",
+          "tags": [
+            "renpy",
+            "testing"
+          ]
+        }
+      ],
+      "tool_interfaces": [
+        {
+          "id": "renpy_compile",
+          "kind": "engine_probe",
+          "description": "Run Ren'Py compile inside the candidate workspace.",
+          "command": [
+            "/Users/wangxucong/Desktop/workspace/harness-game/game-loop/third_party/renpy-8.5.3-sdk/renpy.sh",
+            "{candidate_workspace}",
+            "compile"
+          ],
+          "cwd": "/Users/wangxucong/Desktop/workspace/harness-game/game-loop",
+          "safety_scope": "candidate_workspace_only",
+          "tags": [
+            "renpy",
+            "compile"
+          ]
+        }
+      ],
+      "seed_modules": [
+        "real_mod_menu_entry",
+        "director_cut_content",
+        "theatrical_presentation",
+        "accessible_stage_copy",
+        "bounded_mod_scope"
+      ],
+      "seed_tool_interfaces": [
+        "renpy_compile"
+      ],
+      "max_active_modules": 5,
+      "max_active_tool_interfaces": 1,
+      "mutation_width": 1,
+      "replay_min_cases": 1,
+      "promotion_delta_min": 0.02,
+      "max_case_regression": 0.02,
+      "require_rubric_validation": false,
+      "dynamic_rubric_generation": false,
+      "hard_rubrics": [
+        {
+          "rubric_id": "renpy_compiles",
+          "kind": "hard",
+          "description": "Ren'Py compile completes successfully."
+        },
+        {
+          "rubric_id": "real_mod_path",
+          "kind": "hard",
+          "description": "The improvement is reachable through KSRE's real Mods menu and preserves original pXt."
+        },
+        {
+          "rubric_id": "asset_safety",
+          "kind": "hard",
+          "description": "The new mod references only loadable bundled assets and does not fetch external files."
+        }
+      ],
+      "soft_rubrics": [
+        {
+          "rubric_id": "longform_episode_depth",
+          "kind": "soft",
+          "description": "The mod plays like a complete VN episode with setup, complication, multiple branchable beats, payoff, and epilogue rather than a brief vignette.",
+          "weight": 0.35
+        },
+        {
+          "rubric_id": "visible_richness",
+          "kind": "soft",
+          "description": "The scene is visibly more authored through title/program beats, transitions, stage direction, character staging, and audio cues sustained across multiple scenes.",
+          "weight": 0.25
+        },
+        {
+          "rubric_id": "meaningful_branching",
+          "kind": "soft",
+          "description": "The player gets multiple meaningful choices that alter dialogue, staging, or final payoff.",
+          "weight": 0.2
+        },
+        {
+          "rubric_id": "ui_polish_and_accessibility",
+          "kind": "soft",
+          "description": "The mod menu/about/program flow is polished, legible, and includes director notes or accessible stage copy for key audiovisual cues.",
+          "weight": 0.2
+        }
+      ]
+    }
+  },
+  "evolution": {
+    "max_generations": 1,
+    "candidates_per_generation": 1,
+    "delta_min": 0.02,
+    "objective_regression_epsilon": 0.001,
+    "stop_after_rejections": 1,
+    "feedback_disclosure": "DIAGNOSTICS",
+    "stop_on_terminal_success": false,
+    "max_model_calls": 3,
+    "max_evaluator_queries": 3
+  },
+  "reliability": {
+    "pause_on_infrastructure_failure": true,
+    "count_infrastructure_attempts_in_evaluator_budget": false
+  },
+  "gates": {
+    "max_files": 12000,
+    "max_total_bytes": 4294967296,
+    "fail_suspicious_references": true
+  },
+  "experiment": {
+    "arm": "L4_agent",
+    "freezes_harness_outer_loop": true
+  }
+}

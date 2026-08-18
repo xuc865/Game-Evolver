@@ -1,0 +1,105 @@
+{
+  "constraints": {
+    "ksre_seed_paths_present": true,
+    "no_missing_director_assets": true,
+    "pxt_original_preserved": true,
+    "renpy_compile_complete": true
+  },
+  "details": {
+    "compile": {
+      "complete": true,
+      "diagnostics": [],
+      "output_tail": "Exception in thread Thread-1:\nTraceback (most recent call last):\n  File \"lib/python3.12/threading.py\", line 1075, in _bootstrap_inner\n  File \"game/definitions.rpy\", line 317, in run\n    self.rpc.connect()\n  File \"python-packages/pypresence/presence.py\", line 91, in connect\n  File \"lib/python3.12/asyncio/base_events.py\", line 686, in run_until_complete\n  File \"python-packages/pypresence/baseclient.py\", line 147, in handshake\npypresence.exceptions.DiscordNotFound: Could not find Discord installed and running on this machine.\n",
+      "returncode": 0
+    },
+    "presentation": {
+      "checks": {
+        "audio_cue_volume": false,
+        "custom_screen_structure": false,
+        "dialogue_volume": false,
+        "director_has_menu": false,
+        "director_mod_directory": false,
+        "director_registered": false,
+        "director_start_label": false,
+        "has_accessible_stage_copy": false,
+        "has_commentary_toggle": false,
+        "has_curtain_call_payoff": false,
+        "has_player_choice_or_branch": false,
+        "has_program_or_cue_sheet": false,
+        "ksre_mod_menu_preserved": true,
+        "multi_label_structure": false,
+        "no_missing_director_assets": true,
+        "pxt_original_preserved": true,
+        "stage_direction_volume": false,
+        "transition_volume": false,
+        "uses_real_pxt_assets": false
+      },
+      "components": {
+        "asset_safety": 0.666667,
+        "content_richness": 0.0,
+        "menu_integration": 0.25,
+        "playable_polish": 0.0
+      },
+      "counts": {
+        "audio_cues": 0,
+        "choices": 0,
+        "dialogue_lines": 0,
+        "labels": 0,
+        "rpy_files": 0,
+        "screens": 0,
+        "stage_commands": 0,
+        "transitions": 0
+      },
+      "diagnostics": [
+        "presentation missing: director_mod_directory",
+        "presentation missing: director_registered",
+        "presentation missing: director_has_menu",
+        "presentation missing: director_start_label",
+        "presentation missing: uses_real_pxt_assets",
+        "presentation missing: has_program_or_cue_sheet",
+        "presentation missing: has_commentary_toggle",
+        "presentation missing: has_player_choice_or_branch",
+        "presentation missing: has_curtain_call_payoff",
+        "presentation missing: has_accessible_stage_copy",
+        "presentation missing: dialogue_volume",
+        "presentation missing: stage_direction_volume",
+        "presentation missing: transition_volume",
+        "presentation missing: audio_cue_volume",
+        "presentation missing: multi_label_structure",
+        "presentation missing: custom_screen_structure"
+      ],
+      "missing_assets": [],
+      "score": 0.175
+    }
+  },
+  "diagnostics": [
+    "presentation missing: director_mod_directory",
+    "presentation missing: director_registered",
+    "presentation missing: director_has_menu",
+    "presentation missing: director_start_label",
+    "presentation missing: uses_real_pxt_assets",
+    "presentation missing: has_program_or_cue_sheet",
+    "presentation missing: has_commentary_toggle",
+    "presentation missing: has_player_choice_or_branch",
+    "presentation missing: has_curtain_call_payoff",
+    "presentation missing: has_accessible_stage_copy",
+    "presentation missing: dialogue_volume",
+    "presentation missing: stage_direction_volume",
+    "presentation missing: transition_volume",
+    "presentation missing: audio_cue_volume",
+    "presentation missing: multi_label_structure",
+    "presentation missing: custom_screen_structure"
+  ],
+  "objectives": {
+    "director_asset_safety": 0.666667,
+    "director_content_richness": 0.0,
+    "director_menu_integration": 0.25,
+    "director_mod_visual_richness": 0.175,
+    "director_playable_polish": 0.0,
+    "ksre_required_paths": 1.0,
+    "renpy_compile": 1.0
+  },
+  "primary_score": 0.54625,
+  "schema_version": "ksre-pxt-director-evaluation-v1",
+  "status": "completed"
+}
