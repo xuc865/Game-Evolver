@@ -23,6 +23,38 @@ game-loop/.smoke/
 game-loop/.game-loop-ui-runs/
 game-loop/.venvs/
 game-loop/.tools/
+game-loop/demo_outputs/
+game-loop/experiments/node_modules
+game-loop/experiments/ksre/seed-evaluation.recheck.json
+game-loop/build_main.py
+game-loop/final_build.py
+game-loop/write_game.py
+game-loop/write_main.py
+game-loop/write_mgr.py
+game-loop/screenlog.0
+game-loop/experiments/build_evolution_workbook.mjs
+game-loop/experiments/verify_evolution_workbook.mjs
+game-loop/experiments/analysis/
+game-loop/experiments/full-matrix-launch/
+game-loop/experiments/general-baseline-runs/
+game-loop/experiments/outputs/
+game-loop/experiments/reports/
+game-loop/experiments/run-archives/
+game-loop/experiments/standalone-launch/
+game-loop/experiments/rejudge-awesome-20260814/
+game-loop/experiments/rejudge-history-v2/
+game-loop/experiments/synthetic-mature-gcbench-v1/
+game-loop/experiments/public-harness-harness-3935a40-v1/
+game-loop/experiments/vgamegym-claude-gpt-awesome-v1/
+game-loop/experiments/vgamegym-claude-gpt-baseline-v1/
+game-loop/experiments/ksre/pxt-director-ab-demo/
+game-loop/experiments/ksre/runs/
+game-loop/experiments/tinymmo/boss-ab-demo/
+game-loop/experiments/tinymmo/checkpoints/
+game-loop/experiments/tinymmo/playtest-ab/
+game-loop/experiments/tinymmo/runs/
+game-loop/experiments/tinymmo/seeds/
+game-loop/experiments/tinymmo/kimi-adaptive-motion-*.log
 
 # Repository-local benchmark execution state (keep configs, omit live runs).
 game-loop/experiments/runs/
@@ -35,6 +67,13 @@ game-loop/experiments/vgamegym-full-*/
 game-loop/experiments/docker-cli-config/
 game-loop/experiments/scripts/
 game-loop/.tmp_*/
+game-loop/game/
+game-loop/tools/
+game-loop/third_party/godot-sqlite-v4.8-macos/
+game-loop/third_party/godot-tiny-mmo/
+game-loop/third_party/ksre-pxt-seed/
+game-loop/third_party/renpy-8.5.3-sdk/
+game-loop/third_party/renpy-8.5.3-sdk.tar.bz2
 
 # Accidental sibling workspace/output directories are not project sources.
 /experiments/
