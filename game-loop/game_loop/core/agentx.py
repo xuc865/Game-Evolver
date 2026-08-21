@@ -488,7 +488,9 @@ def _behavior_changing_retry_gradients(
         counts[element.category] = counts.get(element.category, 0) + 1
     categories = tuple(
         category
-        for category in ("workflow", "mcp", "protocol", "context", "skill", "tool")
+        for category in (
+            "dsh_plugin", "workflow", "mcp", "protocol", "context", "skill", "tool"
+        )
         if engine.category_is_mutable(category)
         and any(spec.category == category for spec in engine.elements.values())
     )

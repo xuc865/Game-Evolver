@@ -9,8 +9,8 @@ from pathlib import Path
 
 from game_loop.config import BackendConfig
 from game_loop.core.models import BackendExecution, PreparedTask
+from game_loop.runtime_profile_snapshot import materialize_runtime_profile
 from game_loop.utils import atomic_write_json
-
 
 SECRET_ASSIGNMENT = re.compile(r"(?i)([A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)[A-Z0-9_]*)=(.+)")
 
@@ -27,17 +27,45 @@ class CommandBackend:
         except KeyError as exc:
             raise ValueError(f"unknown command placeholder: {exc}") from exc
         log_path = candidate_dir / "backend.log"
+        effective_profile: Path | None = None
+        effective_profile_hash: str | None = None
+        if self.config.runtime_profile_value is not None:
+            effective_profile, effective_profile_hash = materialize_runtime_profile(
+                profile=self.config.runtime_profile_value,
+                assets=self.config.runtime_profile_assets,
+                destination=(
+                    candidate_dir
+                    / "runtime_profile_snapshots"
+                    / str(self.config.runtime_profile_hash)
+                ),
+            )
         atomic_write_json(candidate_dir / "backend_manifest.json", {
             "command": [_redact(part) for part in command],
             "cwd": str(self.config.cwd),
             "timeout_seconds": self.config.timeout_seconds,
             "inactivity_timeout_seconds": self.config.inactivity_timeout_seconds,
             "adapter": prepared.adapter_id,
+            "runtime_profile": (
+                None
+                if self.config.runtime_profile is None
+                else str(self.config.runtime_profile)
+            ),
+            "runtime_profile_hash": self.config.runtime_profile_hash,
+            "runtime_profile_snapshot": (
+                None if effective_profile is None else str(effective_profile)
+            ),
+            "runtime_profile_snapshot_hash": effective_profile_hash,
+            "runtime_profile_assets": self.config.runtime_profile_assets,
         })
         error = None
         return_code = -1
         with log_path.open("wb") as log:
             env = {**os.environ, **self.config.env}
+            if effective_profile is not None:
+                env["GAME_LOOP_MAKER_RUNTIME_PROFILE"] = str(effective_profile)
+                env["GAME_LOOP_MAKER_RUNTIME_PROFILE_HASH"] = str(
+                    effective_profile_hash
+                )
             for key in self.config.env:
                 if SECRET_ASSIGNMENT.fullmatch(f"{key}=x") and key in os.environ:
                     env[key] = os.environ[key]

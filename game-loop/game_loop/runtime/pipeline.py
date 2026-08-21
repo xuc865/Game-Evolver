@@ -8,7 +8,7 @@ from typing import Any, Mapping, Protocol, Sequence
 
 from game_loop.benchmarks.base import BenchmarkAdapter
 from game_loop.core.models import AttemptContext, EvaluationResult, PreparedTask
-from game_loop.runtime.opengame import OpenGameRunner, OpenGameRuntime, OpenGameRuntimeConfig
+from game_loop.runtime.factory import RuntimeConfig, RuntimeRunner, build_runtime
 from game_loop.runtime.protocol import GameEvaluation, GameSubmission, GameTask
 from game_loop.utils import atomic_write_json
 
@@ -110,18 +110,18 @@ class InnerLoopResult:
 
 
 class InnerLoopPipeline:
-    """One shared adapter → OpenGame → official evaluator execution path."""
+    """One shared adapter -> maker runtime -> official evaluator execution path."""
 
     def __init__(
         self,
         *,
         adapter: BenchmarkAdapter,
-        runtime_config: OpenGameRuntimeConfig,
-        maker_runner: OpenGameRunner | None = None,
+        runtime_config: RuntimeConfig,
+        maker_runner: RuntimeRunner | None = None,
         evaluator_runner: BenchmarkEvaluatorRunner | None = None,
     ):
         self.adapter = adapter
-        self.runtime = OpenGameRuntime(runtime_config, runner=maker_runner)
+        self.runtime = build_runtime(runtime_config, runner=maker_runner)
         self.evaluator_runner = evaluator_runner
 
     def run(
@@ -203,7 +203,7 @@ def _prepared_workspace_contract(prepared: PreparedTask) -> tuple[Path, str]:
     ]
     if missing:
         raise ValueError(
-            f"adapter {prepared.adapter_id} is missing OpenGame workspace fields: {missing}"
+            f"adapter {prepared.adapter_id} is missing maker workspace fields: {missing}"
         )
     agent_cwd = Path(prepared.command_context["agent_cwd"]).resolve()
     artifact = Path(prepared.command_context["artifact_path"]).resolve()

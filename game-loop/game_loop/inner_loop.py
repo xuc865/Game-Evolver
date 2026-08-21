@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 from game_loop.benchmarks import load_adapter
 from game_loop.runtime import (
@@ -11,10 +11,10 @@ from game_loop.runtime import (
     CommandEvaluatorRunner,
     GameTask,
     InnerLoopPipeline,
-    OpenGameRuntime,
-    OpenGameRuntimeConfig,
+    build_runtime,
     doctor_all_providers,
     load_provider,
+    load_runtime_config,
     smoke_provider,
 )
 from game_loop.utils import read_json, sha256_json
@@ -23,7 +23,7 @@ from game_loop.utils import read_json, sha256_json
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m game_loop.inner_loop",
-        description="Run one isolated game-making episode with OpenGame.",
+        description="Run one isolated game-making episode with a configured maker runtime.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
     run = subparsers.add_parser("run")
@@ -87,10 +87,10 @@ def run_command(args: argparse.Namespace) -> Path:
         workspace_seed_ref=None if seed is None else str(seed),
         artifact_relpath=str(args.artifact_relpath),
     )
-    profile = OpenGameRuntimeConfig.from_dict(read_json(args.profile.resolve()))
+    profile = load_runtime_config(read_json(args.profile.resolve()))
     episode_dir = args.run_dir.resolve()
     if args.evaluator_profile is None:
-        OpenGameRuntime(profile).run(task, episode_dir=episode_dir)
+        build_runtime(profile).run(task, episode_dir=episode_dir)
         return episode_dir / "submission.json"
     adapter_options = (
         {} if args.benchmark_options is None else read_json(args.benchmark_options.resolve())
@@ -118,10 +118,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         recorded = read_json(submission)
         return 0 if recorded.get("status") == "completed" else 1
     if args.command == "doctor":
-        profile = OpenGameRuntimeConfig.from_dict(read_json(args.profile.resolve()))
-        report = OpenGameRuntime(profile).doctor()
+        profile = load_runtime_config(read_json(args.profile.resolve()))
+        report = build_runtime(profile).doctor()
         print(json.dumps(report, ensure_ascii=False, indent=2))
-        return 0 if report.get("sdk_importable") else 1
+        return 0 if report.get("ok") else 1
     if args.command == "doctor-providers":
         reports = (
             [load_provider(args.provider).resolve().doctor()]

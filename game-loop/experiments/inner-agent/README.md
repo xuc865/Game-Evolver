@@ -1,11 +1,20 @@
-# OpenGame inner-agent benchmark entry points
+# Maker-runtime inner-agent benchmark entry points
 
-These examples run the inner loop only. OpenGame is the sole game-making
-agent. Benchmark-native code is invoked only after submission, as an evaluator.
+These examples run the inner loop only. OpenGame is the backward-compatible
+default maker runtime, and DeepSeek Harness is selectable with the same bridge
+contracts. Benchmark-native code is invoked only after submission, as an evaluator.
 They do not enable harness evolution or modify the existing evolution configs.
 
-Copy `opengame-profile.example.json`, replace the absolute SDK module path and
+The same pipeline can instead use the official DeepSeek Harness JSON-RPC SDK.
+See `deepseek-harness-profile.example.json` and
+`docs/deepseek-harness-runtime.md`. Runtime selection affects only the maker;
+benchmark-owned evaluation and harness admission remain outside both runtimes.
+
+Copy either `opengame-profile.example.json` or
+`deepseek-harness-profile.example.json`, replace its local runtime paths and
 model settings, and keep the resulting profile outside benchmark task trees.
+The commands below use the OpenGame example only as the default; substituting a
+DeepSeek Harness profile selects that runtime without changing evaluation.
 
 ## GameCraftBench
 
@@ -33,14 +42,14 @@ python3 -m game_loop.benchmarks.gcbench_bridge \
 ```
 
 Run once without `--doctor` after every check reports `true`. `--dry-run` is an
-alias for validation with a distinct mode label; neither flag calls OpenGame or
+alias for validation with a distinct mode label; neither flag calls a maker runtime or
 the evaluator. The retained game artifact includes `demo_outputs/` traces.
 
 ## GameDevBench
 
 `AGENT_WORKSPACE` must be the prepared public project: it must not contain
 `task_config.json`, `scripts/test.gd`, or `scenes/test.tscn`.
-`PRIVATE_TASK_SOURCE` remains evaluator-side. After the single OpenGame run, the
+`PRIVATE_TASK_SOURCE` remains evaluator-side. After the single maker run, the
 bridge creates a temporary evaluation copy, injects those hidden files there,
 and calls the official `GodotBenchmarkRunner` with `agent=None`. Validation
 output is normalized and hidden material is not retained or fed back.
@@ -69,7 +78,7 @@ outputs, and any benchmark-private metadata must remain outside both
 public requirement and must ask for a runnable Pygame game whose core mechanics
 are demonstrated autonomously during the fixed recording horizon.
 
-The bridge calls OpenGame exactly once and then invokes an operator-supplied,
+The bridge calls the selected maker runtime exactly once and then invokes an operator-supplied,
 pinned VGameGym evaluator. `--evaluator-command-json` is a JSON argv list with
 the substitutions `{task_root}`, `{artifact_dir}`, and `{raw_output}`. The
 evaluator must write this raw JSON object to `{raw_output}`:
@@ -108,8 +117,8 @@ and video evaluation entry point and record that checkout in run provenance.
 ## VeriGame / GameGen-Verifier
 
 `PUBLIC_TASK` contains only `specification.md`; hidden keypoints, judge prompts,
-runtime traces, and evaluator output remain evaluator-side. OpenGame is again
-the sole maker. Its web artifact must expose sufficient runtime state control
+runtime traces, and evaluator output remain evaluator-side. The selected runtime
+is the sole maker. Its web artifact must expose sufficient runtime state control
 for evaluator-side entity creation/removal, gameplay value and flag updates,
 and bounded interactions.
 

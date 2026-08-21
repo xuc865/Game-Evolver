@@ -4,16 +4,15 @@ import argparse
 import json
 import os
 import re
-import shutil
 import subprocess
-import tempfile
 import time
 from pathlib import Path
+
+from game_loop.runtime import GameTask, build_runtime, load_runtime_config
 from game_loop.runtime.credentials import select_provider_api_key
 
-from game_loop.runtime import GameTask, OpenGameRuntime
-from .runtime_config import runtime_config_from_environment
 from .agents.context import compose_benchmark_instruction, load_harness_context
+from .runtime_config import runtime_config_from_environment
 from .sandbox import require_project_sandbox
 
 
@@ -148,7 +147,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--container-image", default=None)
     parser.add_argument("--harness-context", type=Path, default=None)
     parser.add_argument("--runtime-config-json")
-    parser.add_argument("--solver", choices=("harbor", "opengame"), default="harbor")
+    parser.add_argument(
+        "--solver",
+        choices=("harbor", "maker", "opengame"),
+        default="harbor",
+        help="Use 'maker' for the configured runtime; 'opengame' is a compatibility alias.",
+    )
     parser.add_argument("--dataset", default=None,
                         help="Harbor dataset name, e.g. terminal-bench/terminal-bench-2-1")
     args = parser.parse_args(argv)
@@ -166,56 +170,55 @@ def main(argv: list[str] | None = None) -> int:
         runtime_env["GAME_LOOP_HARNESS_CONTEXT"] = str(args.harness_context.resolve())
     config = runtime_config_from_environment(timeout_seconds=args.timeout)
     if args.runtime_config_json:
-        from game_loop.runtime import OpenGameRuntimeConfig
-        config = OpenGameRuntimeConfig.from_dict(json.loads(args.runtime_config_json))
-    with tempfile.TemporaryDirectory(prefix="terminalbench-game-making-") as td:
-        episode = Path(td) / "opengame"
-        instruction = args.instruction_file.resolve()
-        prompt = compose_benchmark_instruction(
-            instruction.read_text(encoding="utf-8"),
-            harness_context=load_harness_context(args.harness_context),
-            benchmark_name="TerminalBench",
-        )
-        task = GameTask(
-            task_id=task_root.name,
-            benchmark_id="terminalbench",
-            prompt=prompt,
-            task_source_ref=str(instruction),
-            workspace_seed_ref=str(agent_workspace),
-            artifact_relpath=".",
-        )
-        # OpenGameRuntime remains the only solver. The container is verifier-only.
-        runtime = OpenGameRuntime(config)
-        previous = os.environ.copy()
-        os.environ.update(runtime_env)
+        config = load_runtime_config(json.loads(args.runtime_config_json))
+    episode = output_manifest.parent / f"terminalbench_maker_{time.time_ns()}"
+    instruction = args.instruction_file.resolve()
+    prompt = compose_benchmark_instruction(
+        instruction.read_text(encoding="utf-8"),
+        harness_context=load_harness_context(args.harness_context),
+        benchmark_name="TerminalBench",
+    )
+    task = GameTask(
+        task_id=task_root.name,
+        benchmark_id="terminalbench",
+        prompt=prompt,
+        task_source_ref=str(instruction),
+        workspace_seed_ref=str(agent_workspace),
+        artifact_relpath=".",
+    )
+    # The selected maker runtime is the sole solver. The container is verifier-only.
+    runtime = build_runtime(config)
+    previous = os.environ.copy()
+    os.environ.update(runtime_env)
+    try:
+        submission = runtime.run(task, episode_dir=episode)
+    finally:
+        os.environ.clear()
+        os.environ.update(previous)
+    artifact = Path(submission.artifact_ref) if submission.artifact_ref else None
+    infrastructure_error = submission.status != "completed" or artifact is None
+    return_code = -1
+    output = "maker runtime did not produce a candidate artifact"
+    reward = 0.0
+    if not infrastructure_error:
         try:
-            submission = runtime.run(task, episode_dir=episode)
-        finally:
-            os.environ.clear()
-            os.environ.update(previous)
-        artifact = Path(submission.artifact_ref) if submission.artifact_ref else None
-        infrastructure_error = submission.status != "completed" or artifact is None
-        return_code = -1
-        output = "OpenGame did not produce a candidate artifact"
-        reward = 0.0
-        if not infrastructure_error:
-            try:
-                return_code, output = _run_verifier(
-                    artifact=artifact, task_root=task_root,
-                    image=_image(task_root, args.container_image),
-                    result_dir=result_dir, timeout=args.timeout,
-                )
-                reward_file = result_dir / "verifier" / "reward.txt"
-                reward = float(reward_file.read_text().strip()) if reward_file.is_file() else 0.0
-                infrastructure_error = return_code < 0 or not reward_file.is_file()
-            except (OSError, ValueError) as exc:
-                infrastructure_error, output = True, str(exc)
-        result = {"passed": reward >= 1.0 and not infrastructure_error,
-                  "reward": reward, "task_id": task_root.name,
-                  "errors": [] if not infrastructure_error else [output[-2000:]],
-                  "infrastructure_error": infrastructure_error,
-                  "return_code": return_code,
-                  "artifact_dir": str(artifact or "")}
+            return_code, output = _run_verifier(
+                artifact=artifact, task_root=task_root,
+                image=_image(task_root, args.container_image),
+                result_dir=result_dir, timeout=args.timeout,
+            )
+            reward_file = result_dir / "verifier" / "reward.txt"
+            reward = float(reward_file.read_text().strip()) if reward_file.is_file() else 0.0
+            infrastructure_error = return_code < 0 or not reward_file.is_file()
+        except (OSError, ValueError) as exc:
+            infrastructure_error, output = True, str(exc)
+    result = {"passed": reward >= 1.0 and not infrastructure_error,
+              "reward": reward, "task_id": task_root.name,
+              "errors": [] if not infrastructure_error else [output[-2000:]],
+              "infrastructure_error": infrastructure_error,
+              "return_code": return_code,
+              "artifact_dir": str(artifact or ""),
+              "maker_episode": str(episode)}
     (result_dir / "result.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     output_manifest.parent.mkdir(parents=True, exist_ok=True)
     output_manifest.write_text(json.dumps({**result, "result_dir": str(result_dir)}, indent=2) + "\n",

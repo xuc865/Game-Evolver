@@ -19,7 +19,9 @@
       "--harness-context",
       "{harness_context}",
       "--output-manifest",
-      "{output_manifest}"
+      "{output_manifest}",
+      "--solver",
+      "maker"
     ],
     "cwd": ".",
     "timeout_seconds": 1800,

@@ -528,6 +528,32 @@
         "repair",
         "universal"
       ]
+    },
+    {
+      "id": "dsh_plugin_repeat_tool_reminder",
+      "category": "dsh_plugin",
+      "description": "Add the DSH advisory loop breaker for repeated identical tool calls.",
+      "spec": {
+        "plugin_id": "repeat_tool_reminder"
+      },
+      "tags": [
+        "dsh_plugin",
+        "recovery",
+        "tool_use"
+      ]
+    },
+    {
+      "id": "dsh_plugin_llm_retry",
+      "category": "dsh_plugin",
+      "description": "Add the provider-routed DSH model request retry policy.",
+      "spec": {
+        "plugin_id": "llm_retry"
+      },
+      "tags": [
+        "dsh_plugin",
+        "recovery",
+        "provider"
+      ]
     }
   ],
   "seed_elements": {

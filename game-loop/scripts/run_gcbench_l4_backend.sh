@@ -113,6 +113,27 @@ path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encodi
 PY
 }
 
+if [[ -n "${GAME_LOOP_MAKER_RUNTIME_PROFILE:-}" ]]; then
+  _setup_godot_env
+  _setup_judge_env
+  verifier_out="$(dirname "$BREAKDOWN_PATH")"
+  mkdir -p "$verifier_out"
+  evaluator_json="$($PYTHON -c 'import json,sys; print(json.dumps(sys.argv[1:]))' \
+    bash "$ROOT_DIR/scripts/gcbench_e2e/run_local_verifier.sh" \
+    --task "$TASK_ID" --artifact '{artifact}' --output "$verifier_out")"
+  GAMECRAFT_ROOT="$GCBENCH_ROOT" \
+  GAMECRAFT_BENCH_GODOT_BIN="${GAMECRAFT_BENCH_GODOT_BIN:-${GODOT_EXEC_PATH:-${GODOT_BIN:-godot}}}" \
+  GAMECRAFT_USE_LOCAL_VERIFIER="${GAMECRAFT_USE_LOCAL_VERIFIER:-1}" \
+    "$PYTHON" -m game_loop.benchmarks.gcbench_bridge \
+      --workspace "$CANDIDATE_WORKSPACE" \
+      --instruction-file "$INSTRUCTION_FILE" \
+      --output-manifest "$OUTPUT_MANIFEST" \
+      --breakdown-path "$BREAKDOWN_PATH" \
+      --runtime-profile "$GAME_LOOP_MAKER_RUNTIME_PROFILE" \
+      --evaluator-command-json "$evaluator_json"
+  exit $?
+fi
+
 agent_rc=0
 set +e
 _run_agent

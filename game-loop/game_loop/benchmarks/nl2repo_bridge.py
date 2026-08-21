@@ -7,10 +7,10 @@ import shlex
 import subprocess
 from pathlib import Path
 
-from game_loop.runtime import GameTask, OpenGameRuntime
+from game_loop.runtime import GameTask, build_runtime, load_runtime_config
+
 from .runtime_config import runtime_config_from_environment
 from .sandbox import require_project_sandbox
-
 
 PACKAGE_CONFIG_FILES = (
     "setup.py", "setup.cfg", "pyproject.toml", "requirements.txt",
@@ -46,8 +46,7 @@ def main(argv: list[str] | None = None) -> int:
     result_dir.mkdir(parents=True, exist_ok=True)
     runtime_config = runtime_config_from_environment(timeout_seconds=args.timeout)
     if args.runtime_config_json:
-        from game_loop.runtime import OpenGameRuntimeConfig
-        runtime_config = OpenGameRuntimeConfig.from_dict(json.loads(args.runtime_config_json))
+        runtime_config = load_runtime_config(json.loads(args.runtime_config_json))
     maker_task = GameTask(
         task_id=args.project_name,
         benchmark_id="nl2repo",
@@ -56,8 +55,8 @@ def main(argv: list[str] | None = None) -> int:
         workspace_seed_ref=str(repo_root),
         artifact_relpath=".",
     )
-    maker = OpenGameRuntime(runtime_config)
-    maker_submission = maker.run(maker_task, episode_dir=result_dir / "opengame_episode")
+    maker = build_runtime(runtime_config)
+    maker_submission = maker.run(maker_task, episode_dir=result_dir / "maker_episode")
     artifact = Path(maker_submission.artifact_ref) if maker_submission.artifact_ref else None
     if maker_submission.status != "completed" or artifact is None:
         result = {"passed": False, "passed_count": 0, "total": total,
@@ -91,7 +90,7 @@ def main(argv: list[str] | None = None) -> int:
         "#!/usr/bin/env bash\nset -e\nset -o pipefail\n"
         # Official NL2Repo images keep the private reference project and tests
         # in /workspace. Build a separate evaluation tree before overlaying the
-        # candidate so the image's private tests are never exposed to OpenGame.
+        # candidate so the image's private tests are never exposed to the maker runtime.
         "cp -a /workspace /workspace_eval\n"
         "cp -a /workspace_agent /agent_copy\n"
         f"rm -f {remove_configs}\n{remove_tests}\n"

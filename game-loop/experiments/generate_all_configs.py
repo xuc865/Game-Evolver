@@ -113,7 +113,8 @@ BACKEND_CMDS = {
                        "--agent-workspace", "{agent_workspace}",
                        "--instruction-file", "{instruction_file}",
                        "--harness-context", "{harness_context}",
-                       "--output-manifest", "{output_manifest}"],
+                       "--output-manifest", "{output_manifest}",
+                       "--solver", "maker"],
     "weavebench": ["python3", "-m", "game_loop.benchmarks.weavebench_bridge"],
     "verigame": [
         "python3",

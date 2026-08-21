@@ -10,11 +10,27 @@
 </p>
 
 <p align="center">
+  <a href="#-whats-new">What's New</a> ·
   <a href="#-benchmarks">Benchmarks</a> ·
   <a href="#-quick-start">Quick Start</a> ·
   <a href="#-linux-quick-deploy">Linux Deploy</a> ·
   <a href="#-nested-evolution">Nested Evolution</a>
 </p>
+
+---
+
+## 🚀 What's New
+
+### v0.2.0 — DeepSeek Harness support
+
+- Added a first-class DeepSeek Harness SDK runtime backed by `https://api.deepseek.com` and Cordis composition.
+- Added content-addressed runtime-profile snapshots and audited `dsh_plugin` genomes so Harness Proposal Agents can A/B test DSH-native workflows, subagents, tools, and context policies.
+- Generalized benchmark bridges around a selectable maker-runtime interface while preserving isolated workspaces, official evaluators, rubric gates, and infrastructure-failure accounting.
+- Added startup doctor coverage, example Cordis/profile assets, and operational documentation for unattended DSH evolution.
+
+### v0.1.0 — Initial release
+
+- Introduced the two-timescale inner/outer harness-evolution framework, benchmark adapters, dual-rubric promotion gates, and reusable harness-element library.
 
 ---
 

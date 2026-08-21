@@ -11,8 +11,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-from game_loop.runtime import GameTask, OpenGameRuntime, OpenGameRuntimeConfig
-from .runtime_config import runtime_config_from_environment
+from game_loop.runtime import GameTask, MakerRuntime, build_runtime, load_runtime_config
+
+from .runtime_config import load_pinned_runtime_profile, runtime_config_from_environment
 
 
 def _ensure_gdbench_import_stubs() -> None:
@@ -79,7 +80,7 @@ def doctor(
         "ok": all(checks.values()),
         "checks": checks,
         "godot": godot_resolved,
-        "mode_boundary": "OpenGame maker followed by GodotBenchmarkRunner(agent=None) validation-only",
+        "mode_boundary": "maker runtime followed by GodotBenchmarkRunner(agent=None) validation-only",
     }
 
 
@@ -123,7 +124,7 @@ def _godot_backend_error(godot_path: str) -> str | None:
 
 def run_bridge(
     *,
-    runtime: OpenGameRuntime,
+    runtime: MakerRuntime,
     gdbench_root: Path,
     agent_workspace: Path,
     private_task_source: Path,
@@ -146,13 +147,13 @@ def run_bridge(
         artifact_relpath=".",
         constraints={"hidden_evaluator": True, "edit_existing_project": True},
     )
-    submission = runtime.run(task, episode_dir=output_root / "opengame_episode")
+    submission = runtime.run(task, episode_dir=output_root / "maker_episode")
     artifact = Path(submission.artifact_ref) if submission.artifact_ref else None
 
     result: dict = {
         "task_name": task_name,
         "success": False,
-        "message": "OpenGame failed",
+        "message": "maker runtime failed",
         "solver_success": submission.status == "completed",
     }
     retained = output_manifest.parent / "gdbench_result"
@@ -177,9 +178,9 @@ def run_bridge(
             runner = GodotBenchmarkRunner(
                 use_gt=False,
                 agent=None,
-                model="opengame",
+                model=submission.runtime_id,
                 debug=False,
-                run_name="game-loop-opengame-evaluator",
+                run_name="game-loop-maker-evaluator",
             )
             # The upstream runner currently hard-codes ``godot`` even though
             # its README documents GODOT_EXEC_PATH.  Honour the documented
@@ -212,7 +213,7 @@ def run_bridge(
             result["solver_success"] = True
 
     # Retain only the public artifact plus the normalized result.  Hidden tests
-    # never cross back into the artifact or future OpenGame context.
+    # never cross back into the artifact or future maker-runtime context.
     if artifact is not None:
         _copy_public_artifact(artifact, retained)
     (retained / "result.json").write_text(
@@ -238,7 +239,7 @@ def run_bridge(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Run OpenGame once, then use GameDevBench validation-only"
+        description="Run one maker runtime, then use GameDevBench validation-only"
     )
     parser.add_argument("--gdbench-root", type=Path, required=True)
     parser.add_argument("--agent-workspace", type=Path, required=True)
@@ -258,11 +259,7 @@ def main(argv: list[str] | None = None) -> int:
     config_value = (
         json.loads(args.runtime_config_json)
         if args.runtime_config_json is not None
-        else (
-            json.loads(args.runtime_profile.expanduser().read_text(encoding="utf-8"))
-            if args.runtime_profile is not None
-            else None
-        )
+        else None
     )
     report = doctor(
         gdbench_root=args.gdbench_root,
@@ -274,19 +271,23 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({**report, "mode": "dry-run" if args.dry_run else "doctor"}, indent=2))
         return 0 if report["ok"] else 2
     config = (
-        OpenGameRuntimeConfig.from_dict(config_value)
+        load_runtime_config(config_value)
         if config_value is not None
-        else runtime_config_from_environment(
-            provider=args.backbone_provider,
-            timeout_seconds=args.timeout,
+        else (
+            load_pinned_runtime_profile(args.runtime_profile)
+            if args.runtime_profile is not None
+            else runtime_config_from_environment(
+                provider=args.backbone_provider,
+                timeout_seconds=args.timeout,
+            )
         )
     )
     if config_value is not None:
-        config = OpenGameRuntimeConfig.from_dict(
+        config = load_runtime_config(
             {**config.to_dict(), "timeout_seconds": args.timeout}
         )
     return run_bridge(
-        runtime=OpenGameRuntime(config),
+        runtime=build_runtime(config),
         gdbench_root=args.gdbench_root.expanduser(),
         agent_workspace=args.agent_workspace.expanduser(),
         private_task_source=args.private_task_source.expanduser(),

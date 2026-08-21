@@ -6,16 +6,16 @@ import os
 import subprocess
 from pathlib import Path
 
-from game_loop.runtime import GameTask, OpenGameRuntime, OpenGameRuntimeConfig
-from .runtime_config import runtime_config_from_environment
+from game_loop.runtime import GameTask, MakerRuntime, build_runtime, load_runtime_config
 from game_loop.utils import atomic_write_json, read_json
 
+from .runtime_config import runtime_config_from_environment
 from .vgamegym_eval import infrastructure_failure, normalize_official_result
 
 
 def run_bridge(
     *,
-    runtime: OpenGameRuntime,
+    runtime: MakerRuntime,
     agent_workspace: Path,
     instruction_file: Path,
     public_task_root: Path,
@@ -39,7 +39,7 @@ def run_bridge(
             "reference_code_visible": False,
         },
     )
-    submission = runtime.run(task, episode_dir=bridge_root / "opengame_episode")
+    submission = runtime.run(task, episode_dir=bridge_root / "maker_episode")
     artifact = Path(submission.artifact_ref) if submission.artifact_ref else None
     evaluation_dir = bridge_root / "evaluation"
     raw_path = evaluation_dir / "raw_result.json"
@@ -80,7 +80,7 @@ def run_bridge(
         else:
             evaluation = infrastructure_failure("V-GameGym evaluator command is not configured")
     else:
-        evaluation = infrastructure_failure("OpenGame did not produce a V-GameGym artifact")
+        evaluation = infrastructure_failure("maker runtime did not produce a V-GameGym artifact")
     atomic_write_json(evaluation_path, evaluation)
     status = str(evaluation["status"])
     atomic_write_json(
@@ -101,7 +101,7 @@ def run_bridge(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Run OpenGame once, then evaluate its V-GameGym artifact"
+        description="Run one maker runtime, then evaluate its V-GameGym artifact"
     )
     parser.add_argument("--agent-workspace", type=Path, required=True)
     parser.add_argument("--instruction-file", type=Path, required=True)
@@ -121,8 +121,8 @@ def main(argv: list[str] | None = None) -> int:
         timeout_seconds=args.timeout,
     )
     if args.runtime_config_json:
-        config = OpenGameRuntimeConfig.from_dict(json.loads(args.runtime_config_json))
-        config = OpenGameRuntimeConfig.from_dict(
+        config = load_runtime_config(json.loads(args.runtime_config_json))
+        config = load_runtime_config(
             {**config.to_dict(), "timeout_seconds": args.timeout}
         )
     evaluator_command = json.loads(args.evaluator_command_json)
@@ -131,7 +131,7 @@ def main(argv: list[str] | None = None) -> int:
     ):
         raise ValueError("evaluator command must be a JSON string list")
     return run_bridge(
-        runtime=OpenGameRuntime(config),
+        runtime=build_runtime(config),
         agent_workspace=args.agent_workspace,
         instruction_file=args.instruction_file,
         public_task_root=args.task_root,

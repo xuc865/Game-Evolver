@@ -9,21 +9,29 @@ import zipfile
 from pathlib import Path
 
 
-def available_task_names(gdbench_root: Path) -> tuple[str, ...]:
+def available_task_names(gdbench_root: Path, *, task_collection: str = "tasks") -> tuple[str, ...]:
     return tuple(
         path.stem
-        for path in sorted(gdbench_root.resolve().glob("tasks/task_*.zip"))
+        for path in sorted(gdbench_root.resolve().glob(f"{task_collection}/task_*.zip"))
     )
 
 
-def prepare(*, gdbench_root: Path, task_name: str | None, output_dir: Path) -> Path:
+def prepare(
+    *,
+    gdbench_root: Path,
+    task_collection: str,
+    task_name: str | None,
+    output_dir: Path,
+) -> Path:
     gdbench_root = gdbench_root.resolve()
     output_dir = output_dir.resolve()
     if task_name is None:
-        task_name = next(iter(available_task_names(gdbench_root)), None)
+        task_name = next(iter(available_task_names(gdbench_root, task_collection=task_collection)), None)
     if task_name is None:
-        raise FileNotFoundError(f"no GameDevBench task archives found: {gdbench_root / 'tasks'}")
-    archive = gdbench_root / "tasks" / f"{task_name}.zip"
+        raise FileNotFoundError(
+            f"no GameDevBench task archives found: {gdbench_root / task_collection}"
+        )
+    archive = gdbench_root / task_collection / f"{task_name}.zip"
     if not archive.is_file():
         raise FileNotFoundError(f"missing gdbench task archive: {archive}")
     if output_dir.exists():
@@ -44,11 +52,13 @@ def prepare(*, gdbench_root: Path, task_name: str | None, output_dir: Path) -> P
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--gdbench-root", type=Path, required=True)
+    parser.add_argument("--task-collection", default="tasks")
     parser.add_argument("--task-name", default=None)
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args(argv)
     task_dir = prepare(
         gdbench_root=args.gdbench_root,
+        task_collection=args.task_collection,
         task_name=args.task_name,
         output_dir=args.output_dir,
     )

@@ -177,7 +177,12 @@ class TerminalBenchAdapter(BenchmarkAdapter):
                 evaluator_queries=1,
             )
         collected = Path(prepared.metadata["candidate_dir"]) / "collected_artifact"
-        if result_dir.is_dir():
+        generated_artifact_ref = str(manifest.get("artifact_dir", "")).strip()
+        generated_artifact = Path(generated_artifact_ref) if generated_artifact_ref else None
+        if generated_artifact is not None and generated_artifact.is_dir():
+            self.stage_artifact(generated_artifact, collected)
+        elif result_dir.is_dir():
+            # Compatibility with older Harbor/result-only manifests.
             self.stage_artifact(result_dir, collected)
         else:
             collected = None

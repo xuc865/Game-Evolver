@@ -42,7 +42,13 @@ def run_frozen_harness_episode(
     profile_path = case_dir.parent / f"{case_dir.name}.harness_profile.json"
     atomic_write_json(profile_path, harness.to_dict())
     config_path = case_dir.parent / f"{case_dir.name}.config.json"
-    atomic_write_json(config_path, _episode_config_dict(config))
+    episode_config = _episode_config_dict(config, harness=harness)
+    runtime_profile = episode_config["backend"].pop("runtime_profile_value", None)
+    if runtime_profile is not None:
+        runtime_profile_path = case_dir.parent / f"{case_dir.name}.runtime_profile.json"
+        atomic_write_json(runtime_profile_path, runtime_profile)
+        episode_config["backend"]["runtime_profile"] = str(runtime_profile_path)
+    atomic_write_json(config_path, episode_config)
 
     run_id = f"{run_id_prefix}{epoch:03d}_{case_id}"
     init_handler(
@@ -71,18 +77,58 @@ def run_frozen_harness_episode(
     )
 
 
-def _episode_config_dict(config: AppConfig) -> dict:
-    harness = config.method.harness_evolution
-    if harness is None:
+def _episode_config_dict(
+    config: AppConfig,
+    *,
+    harness: HarnessProfile | None = None,
+) -> dict:
+    active_profile = harness
+    harness_config = config.method.harness_evolution
+    if harness_config is None:
         raise ValueError("episode runner requires L4 harness_evolution config")
-    return {
+    backend = {
+        "command": list(config.backend.command),
+        "cwd": str(config.backend.cwd),
+        "timeout_seconds": config.backend.timeout_seconds,
+        "env": dict(config.backend.env),
+    }
+    if config.backend.inactivity_timeout_seconds is not None:
+        backend["inactivity_timeout_seconds"] = config.backend.inactivity_timeout_seconds
+    if config.backend.runtime_profile_value is not None:
+        runtime_profile = dict(config.backend.runtime_profile_value)
+        if active_profile is not None:
+            runtime_profile["active_cordis_plugins"] = sorted({
+                str(element.spec.get("plugin_id", element.element_id))
+                for element in active_profile.active_elements
+                if element.category == "dsh_plugin"
+            })
+        backend["runtime_profile_value"] = runtime_profile
+    element_catalog = [
+        {
+            "id": element.element_id,
+            "category": element.category,
+            "description": element.description,
+            "spec": dict(element.spec),
+            "tags": list(element.tags),
+        }
+        for element in harness_config.element_catalog
+    ]
+    known_element_ids = {item["id"] for item in element_catalog}
+    if active_profile is not None:
+        for element in active_profile.active_elements:
+            if element.element_id in known_element_ids:
+                continue
+            element_catalog.append({
+                "id": element.element_id,
+                "category": element.category,
+                "description": element.description,
+                "spec": dict(element.spec),
+                "tags": [],
+            })
+            known_element_ids.add(element.element_id)
+    result = {
         "benchmark": {"adapter": config.benchmark.adapter, "options": config.benchmark.options},
-        "backend": {
-            "command": list(config.backend.command),
-            "cwd": str(config.backend.cwd),
-            "timeout_seconds": config.backend.timeout_seconds,
-            "env": dict(config.backend.env),
-        },
+        "backend": backend,
         "method": {
             "level": "L4",
             "observation_contract": config.method.observation_contract,
@@ -129,7 +175,7 @@ def _episode_config_dict(config: AppConfig) -> dict:
                         "instruction": module.instruction,
                         "category": module.category,
                     }
-                    for module in harness.modules
+                    for module in harness_config.modules
                 ],
                 "tool_interfaces": [
                     {
@@ -142,45 +188,36 @@ def _episode_config_dict(config: AppConfig) -> dict:
                         "safety_scope": tool.safety_scope,
                         "tags": list(tool.tags),
                     }
-                    for tool in harness.tool_interfaces
+                    for tool in harness_config.tool_interfaces
                 ],
-                "element_catalog": [
-                    {
-                        "id": element.element_id,
-                        "category": element.category,
-                        "description": element.description,
-                        "spec": dict(element.spec),
-                        "tags": list(element.tags),
-                    }
-                    for element in harness.element_catalog
-                ],
-                "seed_modules": list(harness.seed_modules),
-                "seed_tool_interfaces": list(harness.seed_tool_interfaces),
+                "element_catalog": element_catalog,
+                "seed_modules": list(harness_config.seed_modules),
+                "seed_tool_interfaces": list(harness_config.seed_tool_interfaces),
                 "seed_elements": {
                     category: list(element_ids)
-                    for category, element_ids in harness.seed_elements.items()
+                    for category, element_ids in harness_config.seed_elements.items()
                 },
-                "max_active_modules": harness.max_active_modules,
-                "max_active_tool_interfaces": harness.max_active_tool_interfaces,
-                "max_active_elements": dict(harness.max_active_elements),
-                "mutation_width": harness.mutation_width,
-                "replay_min_cases": harness.replay_min_cases,
-                "promotion_delta_min": harness.promotion_delta_min,
-                "max_case_regression": harness.max_case_regression,
-                "allowed_niches": list(harness.allowed_niches),
-                "loop_role": harness.loop_role,
-                "rubric_validation_sample_size": harness.rubric_validation_sample_size,
-                "rubric_judge_timeout_seconds": harness.rubric_judge_timeout_seconds,
-                "require_rubric_validation": harness.require_rubric_validation,
-                "dynamic_rubric_generation": harness.dynamic_rubric_generation,
-                "enable_usage_driven_mutation": harness.enable_usage_driven_mutation,
-                "element_mutation_policy": dict(harness.element_mutation_policy),
-                "rubric_provider": harness.rubric_provider,
+                "max_active_modules": harness_config.max_active_modules,
+                "max_active_tool_interfaces": harness_config.max_active_tool_interfaces,
+                "max_active_elements": dict(harness_config.max_active_elements),
+                "mutation_width": harness_config.mutation_width,
+                "replay_min_cases": harness_config.replay_min_cases,
+                "promotion_delta_min": harness_config.promotion_delta_min,
+                "max_case_regression": harness_config.max_case_regression,
+                "allowed_niches": list(harness_config.allowed_niches),
+                "loop_role": harness_config.loop_role,
+                "rubric_validation_sample_size": harness_config.rubric_validation_sample_size,
+                "rubric_judge_timeout_seconds": harness_config.rubric_judge_timeout_seconds,
+                "require_rubric_validation": harness_config.require_rubric_validation,
+                "dynamic_rubric_generation": harness_config.dynamic_rubric_generation,
+                "enable_usage_driven_mutation": harness_config.enable_usage_driven_mutation,
+                "element_mutation_policy": dict(harness_config.element_mutation_policy),
+                "rubric_provider": harness_config.rubric_provider,
                 "hard_rubrics": [
-                    criterion.to_dict() for criterion in harness.hard_rubrics
+                    criterion.to_dict() for criterion in harness_config.hard_rubrics
                 ],
                 "soft_rubrics": [
-                    criterion.to_dict() for criterion in harness.soft_rubrics
+                    criterion.to_dict() for criterion in harness_config.soft_rubrics
                 ],
             },
         },
@@ -213,6 +250,7 @@ def _episode_config_dict(config: AppConfig) -> dict:
             "freezes_harness_outer_loop": True,
         },
     }
+    return result
 
 
 def _fixed_probe_dict(probe, *, include_id: bool = True) -> dict:

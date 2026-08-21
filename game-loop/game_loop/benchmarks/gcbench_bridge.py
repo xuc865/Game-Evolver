@@ -6,7 +6,9 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from game_loop.runtime import GameTask, OpenGameRuntime, OpenGameRuntimeConfig
+from game_loop.runtime import GameTask, MakerRuntime, build_runtime, load_runtime_config
+
+from .runtime_config import load_pinned_runtime_profile
 
 
 def doctor(
@@ -44,7 +46,7 @@ def doctor(
 
 def run_bridge(
     *,
-    runtime: OpenGameRuntime,
+    runtime: MakerRuntime,
     workspace: Path,
     instruction: Path,
     output_manifest: Path,
@@ -65,7 +67,7 @@ def run_bridge(
         artifact_relpath="game",
         constraints={"hidden_evaluator": True, "requires_replay_traces": True},
     )
-    submission = runtime.run(task, episode_dir=output_dir / "opengame_episode")
+    submission = runtime.run(task, episode_dir=output_dir / "maker_episode")
     artifact = Path(submission.artifact_ref) if submission.artifact_ref else None
 
     evaluator_rc: int | None = None
@@ -100,7 +102,7 @@ def run_bridge(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Run OpenGame once, then evaluate a GameCraftBench submission"
+        description="Run one maker runtime, then evaluate a GameCraftBench submission"
     )
     parser.add_argument("--workspace", type=Path, required=True)
     parser.add_argument("--instruction-file", type=Path, required=True)
@@ -124,7 +126,7 @@ def main(argv: list[str] | None = None) -> int:
     config_value = (
         json.loads(args.runtime_config_json)
         if args.runtime_config_json is not None
-        else json.loads(args.runtime_profile.expanduser().read_text(encoding="utf-8"))
+        else None
     )
     evaluator_value = (
         json.loads(args.evaluator_command_json)
@@ -141,10 +143,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.doctor or args.dry_run:
         print(json.dumps({**report, "mode": "dry-run" if args.dry_run else "doctor"}, indent=2))
         return 0 if report["ok"] else 2
-    config = OpenGameRuntimeConfig.from_dict(config_value)
-    config = OpenGameRuntimeConfig.from_dict({**config.to_dict(), "timeout_seconds": args.timeout})
+    config = (
+        load_runtime_config(config_value)
+        if config_value is not None
+        else load_pinned_runtime_profile(args.runtime_profile)
+    )
     return run_bridge(
-        runtime=OpenGameRuntime(config),
+        runtime=build_runtime(config),
         workspace=workspace,
         instruction=instruction,
         output_manifest=output_manifest,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -58,6 +58,7 @@ class AttributionDrivenInnerGradientProposer:
         "minimal_coherent_patch",
     )
     _ELEMENT_CATEGORIES = (
+        "dsh_plugin",
         "skill",
         "mcp",
         "tool",
@@ -70,9 +71,16 @@ class AttributionDrivenInnerGradientProposer:
         self,
         memory: HarnessEvolutionMemory | None = None,
         outer_library_store: OuterHarnessLibraryStore | None = None,
+        *,
+        dsh_plugin_evolution: bool = False,
+        dsh_plugin_target_count: int = 2,
     ):
+        if dsh_plugin_target_count < 1:
+            raise ValueError("dsh_plugin_target_count must be positive")
         self.memory = memory
         self.outer_library_store = outer_library_store
+        self.dsh_plugin_evolution = dsh_plugin_evolution
+        self.dsh_plugin_target_count = dsh_plugin_target_count
 
     def propose_inner(
         self,
@@ -81,7 +89,6 @@ class AttributionDrivenInnerGradientProposer:
         proposer_harness: HarnessProfile,
         target_harness: HarnessProfile,
     ) -> HarnessSemanticGradient:
-        del target_harness
         memory_hint = ""
         if self.memory is not None:
             memory_hint = self.memory.render_proposer_context(loop_role="inner")
@@ -147,6 +154,19 @@ class AttributionDrivenInnerGradientProposer:
                 f"{', '.join(outer_notes[:6])}"
             )
         tags = tuple(dict.fromkeys((*tags, *outer_tags)))
+        active_dsh_plugins = sum(
+            element.category == "dsh_plugin"
+            for element in target_harness.active_elements
+        )
+        if (
+            self.dsh_plugin_evolution
+            and active_dsh_plugins < self.dsh_plugin_target_count
+        ):
+            diagnosis = (
+                f"adapt the GOA to DeepSeek Harness with a validated Cordis plugin; "
+                f"{diagnosis}"
+            )
+            tags = tuple(dict.fromkeys(("dsh_plugin", "element_add", *tags)))
         return HarnessSemanticGradient(
             diagnosis,
             tags,
@@ -335,6 +355,20 @@ def build_agentx_nested_evolution(
         OuterHarnessLibraryStore(run_dir / "outer_element_library")
     )
     outer_library_agent.store.initialize(outer_engine.elements.values())
+    raw_runtime_profile = runtime.app_config.backend.runtime_profile_value
+    runtime_profile = (
+        raw_runtime_profile if isinstance(raw_runtime_profile, Mapping) else {}
+    )
+    raw_dsh_plugin_catalog = runtime_profile.get("cordis_plugin_catalog", {})
+    dsh_plugin_catalog = (
+        raw_dsh_plugin_catalog
+        if isinstance(raw_dsh_plugin_catalog, Mapping)
+        else {}
+    )
+    dsh_plugin_target_count = min(
+        len(dsh_plugin_catalog),
+        runtime.inner_harness.max_active_elements.get("dsh_plugin", 4),
+    )
     judge = HeuristicRubricJudge() if offline_rubric_judge else None
     oracle = HarnessLoopNestedReplayOracle(
         config=runtime.app_config,
@@ -353,6 +387,10 @@ def build_agentx_nested_evolution(
         inner_gradient_proposer=AttributionDrivenInnerGradientProposer(
             inner_memory,
             outer_library_agent.store,
+            dsh_plugin_evolution=bool(
+                dsh_plugin_catalog
+            ),
+            dsh_plugin_target_count=max(1, dsh_plugin_target_count),
         ),
         outer_gradient_proposer=InnerOutcomeOuterGradientProposer(outer_memory),
         replay_oracle=oracle,

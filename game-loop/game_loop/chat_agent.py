@@ -942,6 +942,10 @@ class LocalChatAgent:
             # ── extract text ──
             if message.get("content"):
                 final_text = message["content"]
+                print(
+                    "[chat_agent] assistant_message: "
+                    + json.dumps(str(message["content"]), ensure_ascii=False)
+                )
 
             # ── handle tool calls ──
             tool_calls = message.get("tool_calls", [])
@@ -1017,6 +1021,19 @@ class LocalChatAgent:
                     result = self._demo_gate_tool_error(tc, demo_count)
                 else:
                     result = self._execute_tool(tc, workspace, tools)
+                result_preview = str(result.get("content", ""))
+                if len(result_preview) > 900:
+                    result_preview = result_preview[:900] + "...[truncated]"
+                print(
+                    "[chat_agent] tool_result: "
+                    + json.dumps(
+                        {
+                            "tool": fn_name,
+                            "content": result_preview,
+                        },
+                        ensure_ascii=False,
+                    )
+                )
                 messages.append(result)
                 if self._is_source_write_tool_call(tc):
                     try:

@@ -4,11 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "game-loop"
-version = "0.1.0"
+version = "0.2.0"
 description = "Benchmark-neutral game evolution loop"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = []
+
+[project.optional-dependencies]
+deepseek-harness = ["deepseek-harness-sdk==0.1.0rc7"]
 
 [project.scripts]
 game-loop = "game_loop.cli:main"

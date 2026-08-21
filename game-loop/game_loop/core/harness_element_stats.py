@@ -21,6 +21,7 @@ ELEMENT_CATEGORIES = frozenset({
     "context",
     "protocol",
     "workflow",
+    "dsh_plugin",
 })
 
 CATEGORY_ALIASES: dict[str, str] = {
@@ -31,6 +32,10 @@ CATEGORY_ALIASES: dict[str, str] = {
     "context_compiler": "context",
     "workflow_planner": "workflow",
     "usage_driven": "skill",
+    "plugin": "dsh_plugin",
+    "plugins": "dsh_plugin",
+    "cordis": "dsh_plugin",
+    "cordis_plugin": "dsh_plugin",
 }
 
 DEFAULT_ELEMENT_MUTATION_POLICY: dict[str, Any] = {

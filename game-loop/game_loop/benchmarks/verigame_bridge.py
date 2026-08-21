@@ -5,23 +5,23 @@ import json
 import os
 from pathlib import Path
 
-from game_loop.runtime import GameTask, OpenGameRuntime, OpenGameRuntimeConfig
-from .runtime_config import runtime_config_from_environment
+from game_loop.runtime import GameTask, MakerRuntime, build_runtime, load_runtime_config
 from game_loop.utils import atomic_write_json
 
 from .ggv_contract import CommandGGVWorker, GGVWorker, run_paper_compatible_ggv
+from .runtime_config import runtime_config_from_environment
 
 
 def run_bridge(
     *,
-    runtime: OpenGameRuntime,
+    runtime: MakerRuntime,
     agent_workspace: Path,
     instruction_file: Path,
     public_task_root: Path,
     output_manifest: Path,
     worker: GGVWorker | None,
 ) -> int:
-    """Run the sole maker through OpenGame, then evaluate outside its episode."""
+    """Run the sole maker runtime, then evaluate outside its episode."""
     output_manifest = output_manifest.resolve()
     bridge_root = output_manifest.parent / "verigame_bridge"
     task = GameTask(
@@ -38,7 +38,7 @@ def run_bridge(
             "official_gamegen_verifier_implementation": False,
         },
     )
-    submission = runtime.run(task, episode_dir=bridge_root / "opengame_episode")
+    submission = runtime.run(task, episode_dir=bridge_root / "maker_episode")
     artifact = Path(submission.artifact_ref) if submission.artifact_ref else None
     salvage_note = None
     if artifact is None and submission.status != "completed":
@@ -50,7 +50,7 @@ def run_bridge(
 
     specification_path = public_task_root.resolve() / "specification.md"
     if artifact is None:
-        evaluation = _infrastructure_failure("OpenGame did not produce a VeriGame artifact")
+        evaluation = _infrastructure_failure("maker runtime did not produce a VeriGame artifact")
     elif worker is None:
         evaluation = _infrastructure_failure(
             "GameGen-Verifier worker is not configured; no positive fallback is permitted"
@@ -127,7 +127,7 @@ def _infrastructure_failure(error: str) -> dict[str, object]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Run OpenGame once, then apply a paper-compatible VeriGame evaluator"
+        description="Run one maker runtime, then apply a paper-compatible VeriGame evaluator"
     )
     parser.add_argument("--agent-workspace", type=Path, required=True)
     parser.add_argument("--instruction-file", type=Path, required=True)
@@ -148,8 +148,8 @@ def main(argv: list[str] | None = None) -> int:
         timeout_seconds=args.timeout,
     )
     if args.runtime_config_json:
-        config = OpenGameRuntimeConfig.from_dict(json.loads(args.runtime_config_json))
-        config = OpenGameRuntimeConfig.from_dict(
+        config = load_runtime_config(json.loads(args.runtime_config_json))
+        config = load_runtime_config(
             {**config.to_dict(), "timeout_seconds": args.timeout}
         )
     worker: GGVWorker | None = None
@@ -161,7 +161,7 @@ def main(argv: list[str] | None = None) -> int:
             tuple(command), cwd=args.output_manifest.resolve().parent, timeout_seconds=args.worker_timeout
         )
     return run_bridge(
-        runtime=OpenGameRuntime(config),
+        runtime=build_runtime(config),
         agent_workspace=args.agent_workspace,
         instruction_file=args.instruction_file,
         public_task_root=args.task_root,

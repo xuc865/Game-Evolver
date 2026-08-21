@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .runtime_profile_snapshot import capture_runtime_profile
 from .utils import sha256_json
 
 
@@ -18,6 +19,10 @@ class BenchmarkConfig:
 class BackendConfig:
     command: tuple[str, ...]
     cwd: Path
+    runtime_profile: Path | None = None
+    runtime_profile_hash: str | None = None
+    runtime_profile_value: dict[str, Any] | None = None
+    runtime_profile_assets: dict[str, dict[str, str]] = field(default_factory=dict)
     timeout_seconds: int = 10800
     inactivity_timeout_seconds: int | None = None
     env: dict[str, str] = field(default_factory=dict)
@@ -31,9 +36,30 @@ class BackendConfig:
         if not cwd.is_dir():
             raise ValueError(f"backend.cwd does not exist: {cwd}")
         inactivity_timeout = value.get("inactivity_timeout_seconds")
+        runtime_profile_value = value.get("runtime_profile")
+        runtime_profile = None
+        runtime_profile_hash = None
+        captured_runtime_profile = None
+        runtime_profile_assets: dict[str, dict[str, str]] = {}
+        if runtime_profile_value is not None:
+            runtime_profile = Path(str(runtime_profile_value)).expanduser()
+            if not runtime_profile.is_absolute():
+                runtime_profile = cwd / runtime_profile
+            runtime_profile = runtime_profile.resolve()
+            if not runtime_profile.is_file():
+                raise ValueError(f"backend.runtime_profile does not exist: {runtime_profile}")
+            (
+                captured_runtime_profile,
+                runtime_profile_hash,
+                runtime_profile_assets,
+            ) = capture_runtime_profile(runtime_profile)
         result = cls(
             command=tuple(command),
             cwd=cwd,
+            runtime_profile=runtime_profile,
+            runtime_profile_hash=runtime_profile_hash,
+            runtime_profile_value=captured_runtime_profile,
+            runtime_profile_assets=runtime_profile_assets,
             timeout_seconds=int(value.get("timeout_seconds", 10800)),
             inactivity_timeout_seconds=(
                 None if inactivity_timeout is None else int(inactivity_timeout)
@@ -328,6 +354,7 @@ class HarnessModuleConfig:
             "context",
             "protocol",
             "workflow",
+            "dsh_plugin",
             "gameplay",
             "observability",
             "repair",
@@ -365,6 +392,7 @@ class HarnessElementConfig:
             "context",
             "protocol",
             "workflow",
+            "dsh_plugin",
         }:
             raise ValueError(f"harness element {element_id}: unsupported category {category!r}")
         description = str(value.get("description", "")).strip()
@@ -415,6 +443,7 @@ def _parse_max_active_elements(raw: dict | None) -> dict[str, int]:
         "context": 3,
         "protocol": 2,
         "workflow": 3,
+        "dsh_plugin": 4,
     }
     if not raw:
         return defaults
@@ -529,6 +558,7 @@ _HARNESS_ELEMENT_CATEGORIES = frozenset({
     "context",
     "protocol",
     "workflow",
+    "dsh_plugin",
 })
 
 
@@ -1210,4 +1240,9 @@ class AppConfig:
 
     @property
     def fingerprint(self) -> str:
-        return sha256_json(self.raw)
+        if self.backend.runtime_profile_hash is None:
+            return sha256_json(self.raw)
+        return sha256_json({
+            "config": self.raw,
+            "runtime_profile_hash": self.backend.runtime_profile_hash,
+        })

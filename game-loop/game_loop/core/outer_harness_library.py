@@ -622,10 +622,29 @@ class OuterHarnessLibraryStore:
             }
             actual = {key: existing.get(key) for key in expected}
             if actual != expected:
-                raise ValueError(
-                    f"conflicting outer-element attribution for inner epoch {result.epoch}"
-                )
-            return existing
+                if existing.get("recorded_in_metadata") is False:
+                    conflict_dir = self.usage_dir / "conflicts"
+                    conflict_dir.mkdir(parents=True, exist_ok=True)
+                    existing_harness = str(
+                        existing.get("candidate_harness_id", "unknown")
+                    )[:16]
+                    timestamp = (
+                        utc_now()
+                        .replace("-", "")
+                        .replace(":", "")
+                        .replace(".", "")
+                    )
+                    archive_path = (
+                        conflict_dir
+                        / f"{usage_path.stem}.{existing_harness}.{timestamp}.json"
+                    )
+                    usage_path.replace(archive_path)
+                else:
+                    raise ValueError(
+                        f"conflicting outer-element attribution for inner epoch {result.epoch}"
+                    )
+            else:
+                return existing
 
         score, hard_regression = inner_harness_score_and_hard_regression(result)
         record = {

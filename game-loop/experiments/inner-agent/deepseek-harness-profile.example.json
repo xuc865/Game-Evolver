@@ -1,0 +1,23 @@
+{
+  "runtime_type": "deepseek-harness",
+  "runtime_id": "deepseek-harness-sdk-v1",
+  "provider": "deepseek-official",
+  "model": "deepseek-v4-flash",
+  "backbone_provider": "deepseek",
+  "max_tokens": 49152,
+  "cordis": "/absolute/path/to/game-loop/experiments/inner-agent/deepseek-harness.cordis.yml",
+  "runtime_cwd": "/absolute/path/to/deepseek-harness",
+  "timeout_seconds": 7200,
+  "shutdown_timeout_seconds": 5.0,
+  "successful_finish_reasons": ["completed"],
+  "cordis_plugin_catalog": {
+    "repeat_tool_reminder": [
+      {"id": "evolved-repeat-tool-reminder", "name": "@deepseek-ai/dsh-repeat-tool-reminder", "config": {"thresholds": [3, 5, 8], "exclude": ["todo_write"]}}
+    ],
+    "llm_retry": [
+      {"id": "evolved-llm-retry", "name": "@deepseek-ai/dsh-llm-retry"}
+    ]
+  },
+  "active_cordis_plugins": [],
+  "environment": {}
+}

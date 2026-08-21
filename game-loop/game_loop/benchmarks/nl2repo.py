@@ -176,6 +176,9 @@ class NL2RepoAdapter(BenchmarkAdapter):
             )
         artifact_ref = Path(str(manifest.get("artifact_ref", "")))
         if not artifact_ref.is_dir():
+            artifact_ref = result_dir / "maker_episode" / "workspace"
+        if not artifact_ref.is_dir():
+            # Preserve resumes produced before maker runtimes were generalized.
             artifact_ref = result_dir / "opengame_episode" / "workspace"
         if not artifact_ref.is_dir():
             return CandidateResult(
