@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import os
 import json
+import os
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -209,10 +209,15 @@ def doctor_all_providers(environment: Mapping[str, str] | None = None) -> list[d
     return [spec.resolve(environment).doctor() for spec in PROVIDERS.values()]
 
 
-def smoke_provider(provider_id: str, *, timeout_seconds: int = 60) -> dict[str, object]:
+def smoke_provider(
+    provider_id: str,
+    *,
+    timeout_seconds: int = 60,
+    environment: Mapping[str, str] | None = None,
+) -> dict[str, object]:
     """Make one real, minimal Chat Completions request. Never returns the credential."""
 
-    resolved = load_provider(provider_id).resolve()
+    resolved = load_provider(provider_id).resolve(environment)
     doctor = resolved.doctor()
     if not doctor["ready"]:
         return {**doctor, "real_request": False, "ok": False, "error": "provider is not ready"}

@@ -1,12 +1,23 @@
 from __future__ import annotations
 
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from game_loop.config import AppConfig
+from game_loop.core.agent_circuit import validate_workspace_lineage
+from game_loop.core.agent_circuit_attribution import CircuitAblationQueue
+from game_loop.core.agent_circuit_compiler import (
+    HarnessTransformationCompiler,
+    TransformationNotApplicable,
+)
+from game_loop.core.agent_circuit_evolution import (
+    CircuitMutationAction,
+    CircuitMutationEngine,
+    CircuitMutationTransaction,
+)
 from game_loop.core.agentx import (
     AgentXNestedEvolution,
     PairedOutcomes,
@@ -28,10 +39,17 @@ from game_loop.core.harness_rubric_validator import (
     TaskPoolEntry,
     sample_task_pool,
 )
+from game_loop.core.harness_transformation_agent import (
+    HarnessTransformationLibraryAgent,
+)
+from game_loop.core.harness_transformation_library import (
+    HarnessTransformationLibraryStore,
+)
 from game_loop.core.outer_harness_library import (
     OuterHarnessLibraryAgent,
     OuterHarnessLibraryStore,
 )
+from game_loop.runtime.deepseek_circuit import deepseek_role_runtime_contract
 
 
 @dataclass(frozen=True)
@@ -164,6 +182,9 @@ class AttributionDrivenInnerGradientProposer:
         ):
             diagnosis = (
                 f"adapt the GOA to DeepSeek Harness with a validated Cordis plugin; "
+                "treat plugin startup, context usage, latency and retry amplification, "
+                "and compatibility risk as soft marginal costs rather than a hard "
+                "activation cap; "
                 f"{diagnosis}"
             )
             tags = tuple(dict.fromkeys(("dsh_plugin", "element_add", *tags)))
@@ -173,6 +194,160 @@ class AttributionDrivenInnerGradientProposer:
             report.run_refs,
         )
 
+
+class EvidenceDrivenCircuitProposer:
+    """Use HPA transformation memory to propose deep GOA topology changes."""
+
+    def __init__(
+        self,
+        store: HarnessTransformationLibraryStore,
+        *,
+        max_actions: int = 4,
+        bundle_width: int = 1,
+        compiler: HarnessTransformationCompiler | None = None,
+    ):
+        if not 1 <= bundle_width <= 4:
+            raise ValueError("circuit bundle_width must be within 1..4")
+        self.store = store
+        self.max_actions = max_actions
+        self.bundle_width = bundle_width
+        self.compiler = compiler or HarnessTransformationCompiler()
+
+    def propose_circuit(
+        self,
+        report: AttributionReport,
+        *,
+        proposer_harness: HarnessProfile,
+        target_harness: HarnessProfile,
+    ) -> CircuitMutationTransaction | None:
+        del proposer_harness
+        circuit = target_harness.effective_agent_circuit()
+        signals = self._signals(report, circuit)
+        shortlist = self.store.shortlist(signals, limit=max(4, self.bundle_width * 2))
+        catalog = self.store.catalog()
+        stats = self.store.stats()
+        current = circuit
+        bundled_actions: list[CircuitMutationAction] = []
+        transformation_ids: list[str] = []
+        hypotheses: list[str] = []
+        prior_action_ids: tuple[str, ...] = ()
+        for transformation_id in shortlist:
+            transformation = catalog[transformation_id]
+            if self.store.quarantine_reason(
+                transformation,
+                circuit_id=current.circuit_id,
+            ) is not None:
+                continue
+            overlap = len(
+                {item.casefold() for item in signals}
+                & {item.casefold() for item in transformation.trigger_signals}
+            )
+            stat = stats.get(transformation_id)
+            marginal_evidence_utility = (
+                4.0 * overlap
+                + (1.0 if stat is None else 1.0 / (1 + stat.uses))
+                + (0.0 if stat is None else stat.mean_net_utility)
+                - transformation.cost_prior
+                - (0.0 if stat is None else 0.5 * stat.hard_regressions)
+            )
+            if overlap == 0 or marginal_evidence_utility <= 0:
+                continue
+            try:
+                transaction = self.compiler.compile(
+                    transformation,
+                    circuit=current,
+                    evidence_refs=report.run_refs,
+                    max_actions=self.max_actions,
+                )
+                candidate = CircuitMutationEngine().apply(current, transaction)
+                validate_workspace_lineage(candidate)
+            except TransformationNotApplicable:
+                continue
+            except (KeyError, TypeError, ValueError) as exc:
+                self.store.record_quarantine(
+                    transformation,
+                    circuit_id=current.circuit_id,
+                    reason=f"{type(exc).__name__}: {exc}",
+                    stage="goa_proposal",
+                )
+                continue
+            if len(bundled_actions) + len(transaction.actions) > self.max_actions:
+                continue
+
+            prefix = f"b{len(transformation_ids) + 1}_{transformation_id}_"
+            id_map = {
+                action.action_id: self._unique_action_id(
+                    prefix + action.action_id,
+                    {item.action_id for item in bundled_actions},
+                )
+                for action in transaction.actions
+            }
+            renamed: list[CircuitMutationAction] = []
+            for action in transaction.actions:
+                dependencies = tuple(id_map[item] for item in action.depends_on)
+                if not dependencies and prior_action_ids:
+                    dependencies = prior_action_ids
+                renamed.append(
+                    CircuitMutationAction(
+                        action_id=id_map[action.action_id],
+                        operation=action.operation,
+                        rationale=action.rationale,
+                        payload=action.payload,
+                        depends_on=dependencies,
+                    )
+                )
+            bundled_actions.extend(renamed)
+            transformation_ids.append(transformation_id)
+            hypotheses.append(transformation.description)
+            current = candidate
+            prior_action_ids = tuple(item.action_id for item in renamed)
+            if (
+                len(transformation_ids) >= self.bundle_width
+                or len(bundled_actions) >= self.max_actions
+            ):
+                break
+
+        if not bundled_actions:
+            return None
+        result = CircuitMutationTransaction(
+            parent_circuit_id=circuit.circuit_id,
+            hypothesis="Evidence-linked circuit bundle: " + " Then: ".join(hypotheses),
+            evidence_refs=report.run_refs,
+            actions=tuple(bundled_actions),
+            transformation_ids=tuple(transformation_ids),
+            max_actions=self.max_actions,
+        )
+        validate_workspace_lineage(CircuitMutationEngine().apply(circuit, result))
+        return result
+
+    @staticmethod
+    def _unique_action_id(candidate: str, existing: set[str]) -> str:
+        if candidate not in existing:
+            return candidate
+        suffix = 2
+        while f"{candidate}_{suffix}" in existing:
+            suffix += 1
+        return f"{candidate}_{suffix}"
+
+    @staticmethod
+    def _signals(report: AttributionReport, circuit) -> tuple[str, ...]:
+        signals: list[str] = [
+            str(name)
+            for name, count in report.outcome_counts.items()
+            if count > 0
+        ]
+        if len(circuit.roles) == 1:
+            signals.append("single_agent")
+        counts = report.outcome_counts
+        if counts.get("probe_failed", 0):
+            signals.extend(("gameplay_gap", "presentation_gap"))
+        if counts.get("infrastructure_failure", 0):
+            signals.append("integration_failure")
+        if report.repeated_failures:
+            signals.extend(("cross_domain_failure", "regression"))
+        if not signals:
+            signals.extend(("gameplay_gap", "presentation_gap"))
+        return tuple(dict.fromkeys(signals))
 
 class InnerOutcomeOuterGradientProposer:
     """Propose outer-harness gradients after a complete inner epoch."""
@@ -339,7 +514,43 @@ def build_agentx_nested_evolution(
     offline_rubric_judge: bool = False,
     outer_enabled: bool = False,
 ) -> AgentXNestedEvolution:
-    inner_engine = HarnessEvolutionEngine(run_dir / "inner", runtime.inner_harness)
+    raw_runtime_profile = runtime.app_config.backend.runtime_profile_value
+    runtime_profile = (
+        raw_runtime_profile if isinstance(raw_runtime_profile, Mapping) else {}
+    )
+    raw_dsh_plugin_catalog = runtime_profile.get("cordis_plugin_catalog", {})
+    dsh_plugin_catalog = (
+        raw_dsh_plugin_catalog
+        if isinstance(raw_dsh_plugin_catalog, Mapping)
+        else {}
+    )
+    inner_harness = runtime.inner_harness
+    if dsh_plugin_catalog:
+        # The audited catalog is the natural boundary. Do not impose a second,
+        # smaller activation ceiling that prevents HPA from evaluating entries.
+        max_active_elements = dict(inner_harness.max_active_elements)
+        max_active_elements["dsh_plugin"] = max(
+            len(dsh_plugin_catalog),
+            sum(
+                element.category == "dsh_plugin"
+                for element in inner_harness.element_catalog
+            ),
+        )
+        inner_harness = replace(
+            inner_harness,
+            max_active_elements=max_active_elements,
+        )
+    role_runtime_contract = (
+        deepseek_role_runtime_contract()
+        if str(runtime_profile.get("runtime_type", "")).casefold()
+        == "deepseek-harness"
+        else None
+    )
+    inner_engine = HarnessEvolutionEngine(
+        run_dir / "inner",
+        inner_harness,
+        role_runtime_contract=role_runtime_contract,
+    )
     outer_engine = HarnessEvolutionEngine(run_dir / "outer", runtime.outer_harness)
     inner_memory = (
         HarnessEvolutionMemory(run_dir / "inner" / "harness_archive")
@@ -352,23 +563,46 @@ def build_agentx_nested_evolution(
         else None
     )
     outer_library_agent = OuterHarnessLibraryAgent(
-        OuterHarnessLibraryStore(run_dir / "outer_element_library")
+        OuterHarnessLibraryStore(run_dir / "outer_element_library"),
+        max_structural_actions=runtime.outer_harness.outer_library_max_actions,
+        max_additions=runtime.outer_harness.outer_library_max_additions,
     )
     outer_library_agent.store.initialize(outer_engine.elements.values())
-    raw_runtime_profile = runtime.app_config.backend.runtime_profile_value
-    runtime_profile = (
-        raw_runtime_profile if isinstance(raw_runtime_profile, Mapping) else {}
-    )
-    raw_dsh_plugin_catalog = runtime_profile.get("cordis_plugin_catalog", {})
-    dsh_plugin_catalog = (
-        raw_dsh_plugin_catalog
-        if isinstance(raw_dsh_plugin_catalog, Mapping)
-        else {}
-    )
-    dsh_plugin_target_count = min(
-        len(dsh_plugin_catalog),
-        runtime.inner_harness.max_active_elements.get("dsh_plugin", 4),
-    )
+    circuit_proposer = None
+    transformation_store = None
+    transformation_agent = None
+    circuit_ablation_queue = None
+    if inner_harness.enable_agent_circuit_evolution:
+        circuit_compiler = HarnessTransformationCompiler(
+            max_roles=inner_harness.circuit_max_roles,
+            max_total_model_calls=inner_harness.circuit_max_model_calls,
+            max_total_cost_units=inner_harness.circuit_max_cost_units,
+            max_feedback_traversals=inner_harness.circuit_max_feedback_traversals,
+        )
+        transformation_store = HarnessTransformationLibraryStore(
+            run_dir / "harness_transformation_library"
+        )
+        # New v0.3 runs begin without a source-defined team roster. HPA must
+        # construct evidence-backed declarative circuits; legacy compilers
+        # remain available only to replay existing snapshots.
+        transformation_store.initialize(())
+        transformation_agent = HarnessTransformationLibraryAgent(
+            transformation_store,
+            compiler=circuit_compiler,
+            max_structural_actions=runtime.outer_harness.outer_library_max_actions,
+            max_additions=runtime.outer_harness.outer_library_max_additions,
+            max_circuit_actions=inner_harness.circuit_max_actions,
+        )
+        circuit_proposer = EvidenceDrivenCircuitProposer(
+            transformation_store,
+            max_actions=inner_harness.circuit_max_actions,
+            bundle_width=inner_harness.circuit_bundle_width,
+            compiler=circuit_compiler,
+        )
+        circuit_ablation_queue = CircuitAblationQueue(
+            run_dir / "inner" / "harness_archive" / "circuit_ablation.json"
+        )
+    dsh_plugin_target_count = len(dsh_plugin_catalog)
     judge = HeuristicRubricJudge() if offline_rubric_judge else None
     oracle = HarnessLoopNestedReplayOracle(
         config=runtime.app_config,
@@ -392,10 +626,11 @@ def build_agentx_nested_evolution(
             ),
             dsh_plugin_target_count=max(1, dsh_plugin_target_count),
         ),
+        inner_circuit_proposer=circuit_proposer,
         outer_gradient_proposer=InnerOutcomeOuterGradientProposer(outer_memory),
         replay_oracle=oracle,
         inner_rubric_validator=HarnessRubricValidator(
-            runtime.inner_harness,
+            inner_harness,
             judge=judge,
         ),
         outer_rubric_validator=HarnessRubricValidator(
@@ -405,6 +640,11 @@ def build_agentx_nested_evolution(
         inner_memory=inner_memory,
         outer_memory=outer_memory,
         outer_library_agent=outer_library_agent,
+        circuit_transformation_store=transformation_store,
+        circuit_transformation_agent=transformation_agent,
+        circuit_ablation_queue=circuit_ablation_queue,
+        hpa_max_structural_actions=runtime.outer_harness.outer_library_max_actions,
+        hpa_max_additions=runtime.outer_harness.outer_library_max_additions,
         outer_enabled=outer_enabled,
     )
 

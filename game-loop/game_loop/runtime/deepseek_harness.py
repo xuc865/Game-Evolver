@@ -13,6 +13,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
+from game_loop.core.agent_circuit import AgentCircuit
 from game_loop.runtime.isolation import EpisodeIsolation
 from game_loop.runtime.protocol import GameSubmission, GameTask
 from game_loop.runtime.providers import load_provider
@@ -36,6 +37,13 @@ class DeepSeekHarnessRuntimeConfig:
     system_prompt_variables: dict[str, str] = field(default_factory=dict)
     skills_source: str | None = None
     cordis: str | None = None
+    cordis_seed: str | None = None
+    cordis_plugin_catalog: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    active_cordis_plugins: tuple[str, ...] = ()
+    effective_cordis_sha256: str | None = None
+    harness_module_catalog: dict[str, dict[str, Any]] = field(default_factory=dict)
+    harness_element_catalog: dict[str, dict[str, Any]] = field(default_factory=dict)
+    harness_tool_interface_catalog: dict[str, dict[str, Any]] = field(default_factory=dict)
     runtime_bin: str | None = None
     launch_args_override: tuple[str, ...] = ()
     runtime_cwd: str | None = None
@@ -45,6 +53,7 @@ class DeepSeekHarnessRuntimeConfig:
     successful_finish_reasons: tuple[str, ...] = ("completed",)
     runtime_id: str = "deepseek-harness-sdk-v1"
     runtime_type: str = "deepseek-harness"
+    agent_circuit: AgentCircuit | None = None
 
     def __post_init__(self) -> None:
         if self.system_prompt is not None and self.system_prompt_path is not None:
@@ -59,6 +68,37 @@ class DeepSeekHarnessRuntimeConfig:
             raise ValueError("successful_finish_reasons must not be empty")
         if self.backbone_provider is not None:
             load_provider(self.backbone_provider)
+        catalogs = (
+            ("module", self.harness_module_catalog, "id"),
+            ("element", self.harness_element_catalog, "element_id"),
+            (
+                "tool interface",
+                self.harness_tool_interface_catalog,
+                "interface_id",
+            ),
+        )
+        for label, catalog, identity_field in catalogs:
+            for component_id, raw in catalog.items():
+                if not isinstance(raw, Mapping):
+                    raise ValueError(f"harness {label} catalog rows must be objects")
+                supplied_id = str(raw.get(identity_field, raw.get("id", "")))
+                if supplied_id != component_id:
+                    raise ValueError(
+                        f"harness {label} catalog key/content mismatch: "
+                        f"{component_id!r} != {supplied_id!r}"
+                    )
+        for module_id, raw in self.harness_module_catalog.items():
+            if not str(raw.get("instruction", "")).strip():
+                raise ValueError(
+                    f"harness module {module_id} requires an executable instruction"
+                )
+        for element_id, raw in self.harness_element_catalog.items():
+            if not str(raw.get("category", "")).strip() or not str(
+                raw.get("description", "")
+            ).strip():
+                raise ValueError(
+                    f"harness element {element_id} requires category and description"
+                )
         forbidden = sorted(
             key
             for key in self.environment
@@ -72,8 +112,12 @@ class DeepSeekHarnessRuntimeConfig:
 
     def to_dict(self, *, redact_environment: bool = False) -> dict[str, Any]:
         value = asdict(self)
+        value["agent_circuit"] = (
+            None if self.agent_circuit is None else self.agent_circuit.to_dict()
+        )
         value["launch_args_override"] = list(self.launch_args_override)
         value["successful_finish_reasons"] = list(self.successful_finish_reasons)
+        value["active_cordis_plugins"] = list(self.active_cordis_plugins)
         if redact_environment:
             value["environment"] = {key: "<redacted>" for key in self.environment}
         return value
@@ -105,6 +149,35 @@ class DeepSeekHarnessRuntimeConfig:
                 None if value.get("skills_source") is None else str(value["skills_source"])
             ),
             cordis=None if value.get("cordis") is None else str(value["cordis"]),
+            cordis_seed=(
+                None if value.get("cordis_seed") is None else str(value["cordis_seed"])
+            ),
+            cordis_plugin_catalog={
+                str(key): [dict(row) for row in rows]
+                for key, rows in dict(value.get("cordis_plugin_catalog", {})).items()
+            },
+            active_cordis_plugins=tuple(
+                str(item) for item in value.get("active_cordis_plugins", [])
+            ),
+            effective_cordis_sha256=(
+                None
+                if value.get("effective_cordis_sha256") is None
+                else str(value["effective_cordis_sha256"])
+            ),
+            harness_module_catalog={
+                str(key): dict(item)
+                for key, item in dict(value.get("harness_module_catalog", {})).items()
+            },
+            harness_element_catalog={
+                str(key): dict(item)
+                for key, item in dict(value.get("harness_element_catalog", {})).items()
+            },
+            harness_tool_interface_catalog={
+                str(key): dict(item)
+                for key, item in dict(
+                    value.get("harness_tool_interface_catalog", {})
+                ).items()
+            },
             runtime_bin=(
                 None if value.get("runtime_bin") is None else str(value["runtime_bin"])
             ),
@@ -122,6 +195,11 @@ class DeepSeekHarnessRuntimeConfig:
             ),
             runtime_id=str(value.get("runtime_id", "deepseek-harness-sdk-v1")),
             runtime_type=str(value.get("runtime_type", "deepseek-harness")),
+            agent_circuit=(
+                None
+                if value.get("agent_circuit") is None
+                else AgentCircuit.from_dict(dict(value["agent_circuit"]))
+            ),
         )
 
 
@@ -372,6 +450,17 @@ class DeepSeekHarnessRuntime:
         prompt = task.prompt
         if system_prompt:
             prompt = f"{system_prompt.rstrip()}\n\n## Task\n\n{task.prompt}"
+        prompt = (
+            "## Runtime workspace authority\n\n"
+            f"Your only writable workspace for this episode is `{isolation.workspace}`. "
+            "It is also your process current working directory. Use relative paths under "
+            "this directory for every read, edit, and command. Ignore any different absolute "
+            "workspace, staging, repository, or `/workspace` path that appears later in the "
+            "task text; those paths identify an earlier environment and are not submission "
+            "output. The required artifact must be changed inside this workspace before you "
+            "finish.\n\n"
+            f"{prompt}"
+        )
         trajectory = TrajectoryRecorder(isolation.root / "trajectory.jsonl")
         trajectory.record("runtime_started", "deepseek-harness", {
             "task_id": task.task_id,

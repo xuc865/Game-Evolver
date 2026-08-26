@@ -28,6 +28,15 @@ def run_frozen_harness_episode(
     """Run one init+evolve episode with a frozen harness profile."""
 
     case_dir = case_dir.resolve()
+    profile_path = case_dir.parent / f"{case_dir.name}.harness_profile.json"
+    reusable = _load_reusable_completed_outcome(
+        case_id=case_id,
+        case_dir=case_dir,
+        profile_path=profile_path,
+        harness=harness,
+    )
+    if reusable is not None:
+        return reusable
     if case_dir.exists() and any(case_dir.iterdir()):
         state_path = case_dir / "state.json"
         should_wipe = True
@@ -39,7 +48,6 @@ def run_frozen_harness_episode(
             shutil.rmtree(case_dir)
     case_dir.mkdir(parents=True, exist_ok=True)
 
-    profile_path = case_dir.parent / f"{case_dir.name}.harness_profile.json"
     atomic_write_json(profile_path, harness.to_dict())
     config_path = case_dir.parent / f"{case_dir.name}.config.json"
     episode_config = _episode_config_dict(config, harness=harness)
@@ -77,6 +85,35 @@ def run_frozen_harness_episode(
     )
 
 
+def _load_reusable_completed_outcome(
+    *,
+    case_id: str,
+    case_dir: Path,
+    profile_path: Path,
+    harness: HarnessProfile,
+) -> HarnessEpisodeOutcome | None:
+    """Reuse one completed frozen side when retrying its failed pair mate."""
+
+    state_path = case_dir / "state.json"
+    if not state_path.is_file() or not profile_path.is_file():
+        return None
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        profile = json.loads(profile_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if state.get("status") != "completed":
+        return None
+    if profile.get("harness_id") != harness.harness_id:
+        return None
+    outcome = load_episode_outcome(
+        case_id=case_id,
+        harness_id=harness.harness_id,
+        run_dir=case_dir,
+    )
+    return outcome if outcome.infrastructure_ok else None
+
+
 def _episode_config_dict(
     config: AppConfig,
     *,
@@ -102,6 +139,30 @@ def _episode_config_dict(
                 for element in active_profile.active_elements
                 if element.category == "dsh_plugin"
             })
+            runtime_profile["agent_circuit"] = (
+                None
+                if active_profile.agent_circuit is None
+                else active_profile.agent_circuit.to_dict()
+            )
+            active_module_ids = set(active_profile.active_modules)
+            runtime_profile["harness_module_catalog"] = {
+                module.module_id: {
+                    "id": module.module_id,
+                    "category": module.category,
+                    "instruction": module.instruction,
+                    "tags": list(module.tags),
+                }
+                for module in harness_config.modules
+                if module.module_id in active_module_ids
+            }
+            runtime_profile["harness_element_catalog"] = {
+                element.element_id: element.to_dict()
+                for element in active_profile.active_elements
+            }
+            runtime_profile["harness_tool_interface_catalog"] = {
+                interface.interface_id: interface.to_dict()
+                for interface in active_profile.active_tool_interfaces
+            }
         backend["runtime_profile_value"] = runtime_profile
     element_catalog = [
         {
@@ -212,6 +273,11 @@ def _episode_config_dict(
                 "dynamic_rubric_generation": harness_config.dynamic_rubric_generation,
                 "enable_usage_driven_mutation": harness_config.enable_usage_driven_mutation,
                 "element_mutation_policy": dict(harness_config.element_mutation_policy),
+                "enable_agent_circuit_evolution": (
+                    harness_config.enable_agent_circuit_evolution
+                ),
+                "circuit_max_actions": harness_config.circuit_max_actions,
+                "circuit_min_net_utility": harness_config.circuit_min_net_utility,
                 "rubric_provider": harness_config.rubric_provider,
                 "hard_rubrics": [
                     criterion.to_dict() for criterion in harness_config.hard_rubrics

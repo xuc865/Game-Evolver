@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from game_loop.runtime.base import MakerRuntime
+from game_loop.runtime.circuit import DeepSeekCircuitRuntime
 from game_loop.runtime.deepseek_harness import (
     DeepSeekHarnessRunner,
     DeepSeekHarnessRuntime,
@@ -37,5 +38,7 @@ def build_runtime(
     runner: RuntimeRunner | None = None,
 ) -> MakerRuntime:
     if isinstance(config, DeepSeekHarnessRuntimeConfig):
+        if config.agent_circuit is not None:
+            return DeepSeekCircuitRuntime(config, runner=runner)  # type: ignore[arg-type]
         return DeepSeekHarnessRuntime(config, runner=runner)  # type: ignore[arg-type]
     return OpenGameRuntime(config, runner=runner)  # type: ignore[arg-type]

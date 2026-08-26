@@ -176,6 +176,7 @@ class GameCraftBenchAdapter(BenchmarkAdapter):
                 "output_manifest": str(output_manifest.resolve()),
                 "breakdown_path": str(breakdown_path.resolve()),
                 "task_id": task_id,
+                "task_source": str(task_source),
                 "gcbench_root": str(gcbench_root),
                 "candidate_dir": str(candidate_dir.resolve()),
             },

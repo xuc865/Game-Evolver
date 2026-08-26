@@ -4,21 +4,38 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "game-loop"
-version = "0.2.0"
-description = "Benchmark-neutral game evolution loop"
+version = "0.3.0"
+description = "Self-evolving multi-agent studio for building and improving games"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["deepseek-harness-sdk==0.1.0rc7"]
 
 [project.optional-dependencies]
-deepseek-harness = ["deepseek-harness-sdk==0.1.0rc7"]
+dev = []
 
 [project.scripts]
 game-loop = "game_loop.cli:main"
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["game_loop*"]
+[tool.setuptools]
+include-package-data = false
+packages = [
+  "game_loop",
+  "game_loop.backends",
+  "game_loop.baselines",
+  "game_loop.benchmarks",
+  "game_loop.benchmarks.agents",
+  "game_loop.core",
+  "game_loop.runtime",
+]
+
+[tool.setuptools.package-data]
+game_loop = [
+  "studio_assets/*",
+  "product_assets/*/*",
+  "product_assets/*/*/*",
+  "product_assets/*/*/*/*",
+  "product_assets/*/*/*/*/*",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

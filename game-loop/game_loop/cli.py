@@ -88,17 +88,18 @@ def _wait_for_active_run(run_dir: Path, *, poll_seconds: float = 5.0) -> None:
         if status not in _ADMISSION_RESUMABLE_STATUSES:
             return
         owner_path = run_dir / ".loop.lock" / "owner.json"
-        if owner_path.is_file():
-            owner = read_json(owner_path)
-            pid = owner.get("pid")
-            if isinstance(pid, int) and pid > 0:
-                try:
-                    os.kill(pid, 0)
-                    time.sleep(poll_seconds)
-                    continue
-                except OSError:
-                    _maybe_clear_stale_run_lock(run_dir)
-                    return
+        if not owner_path.is_file():
+            return
+        owner = read_json(owner_path)
+        pid = owner.get("pid")
+        if not isinstance(pid, int) or pid <= 0:
+            _maybe_clear_stale_run_lock(run_dir)
+            return
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            _maybe_clear_stale_run_lock(run_dir)
+            return
         time.sleep(poll_seconds)
 
 
@@ -233,6 +234,30 @@ def build_parser() -> argparse.ArgumentParser:
     eval_public.add_argument("--seed-score", type=float, default=0.0)
     eval_public.add_argument("--run-id-prefix", default="public")
     eval_public.add_argument("--baseline-only", action="store_true")
+
+    studio = sub.add_parser(
+        "studio",
+        help="launch the local Game Loop studio",
+    )
+    studio.add_argument("--host", default="127.0.0.1")
+    studio.add_argument("--port", type=int, default=8766)
+    studio.add_argument(
+        "--no-open",
+        action="store_true",
+        help="do not open the studio in the default browser",
+    )
+
+    doctor = sub.add_parser(
+        "doctor",
+        help="check the local Studio runtime and print actionable setup status",
+    )
+    doctor.add_argument("--json", action="store_true", dest="json_output")
+
+    run = sub.add_parser("run", help="build or improve a game from one request")
+    run.add_argument("task")
+    run.add_argument("--runtime", choices=("deepseek-harness", "opengame"), default="deepseek-harness")
+    run.add_argument("--title", default=None)
+    run.add_argument("--timeout", type=int, default=7200)
 
     return parser
 
@@ -2031,7 +2056,7 @@ def cmd_agentx_nested_epoch(args: argparse.Namespace) -> int:
         report = TrajectoryAttributor().collect([path.resolve() for path in args.attribution_runs])
     else:
         report = AttributionReport(
-            run_refs=tuple(str(args.run_dir.resolve() / "replays"),),
+            run_refs=(str(args.run_dir.resolve() / "replays"),),
             outcome_counts={"probe_failed": 1},
             repeated_failures=(),
             infrastructure_events=0,
@@ -2130,6 +2155,85 @@ def cmd_harness_eval_public(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_studio(args: argparse.Namespace) -> int:
+    import threading
+    import webbrowser
+
+    from game_loop.studio_server import run_server, studio_doctor
+
+    checks = studio_doctor()
+    missing_required = [
+        name
+        for name in ("deepseek-harness-sdk", "DEEPSEEK_API_KEY", "product-assets")
+        if not checks.get(name, False)
+    ]
+    if missing_required:
+        print(
+            "[studio] setup required before building: "
+            + ", ".join(missing_required)
+            + "; run `game-loop doctor` for details",
+            file=sys.stderr,
+        )
+    if not checks.get("godot", False):
+        print(
+            "[studio] Godot is not installed yet; the packaged backend will install "
+            "the pinned build on first use",
+            file=sys.stderr,
+        )
+    url = f"http://{args.host}:{args.port}/"
+    if not args.no_open:
+        threading.Timer(0.35, lambda: webbrowser.open(url)).start()
+    run_server(args.host, args.port)
+    return 0
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    from game_loop.studio_server import studio_doctor
+
+    checks = studio_doctor()
+    required = ("deepseek-harness-sdk", "DEEPSEEK_API_KEY", "product-assets")
+    ready = all(checks.get(name, False) for name in required)
+    if args.json_output:
+        print(json.dumps({"ready": ready, "checks": checks}, indent=2))
+    else:
+        print("Game Loop 0.3.0 doctor")
+        for name, available in checks.items():
+            suffix = "ready" if available else "missing"
+            print(f"  {'OK' if available else '--'}  {name}: {suffix}")
+        if not checks.get("DEEPSEEK_API_KEY", False):
+            print("\nSet DEEPSEEK_API_KEY in the environment or .env.local.")
+        if not checks.get("godot", False):
+            print("Godot will be installed on demand by the packaged backend.")
+    return 0 if ready else 2
+
+
+def cmd_product_run(args: argparse.Namespace) -> int:
+    from game_loop.studio_server import StudioManager
+
+    manager = StudioManager()
+    project = manager.create_project(
+        title=args.title or str(args.task)[:60],
+        runtime=args.runtime,
+    )
+    manager.send_message(project["id"], str(args.task))
+    deadline = time.monotonic() + max(1, int(args.timeout))
+    while time.monotonic() < deadline:
+        project = manager.get_project(project["id"])
+        if project.get("status") != "running":
+            print(json.dumps({
+                "project_id": project["id"],
+                "status": project.get("status"),
+                "artifact": project.get("current_artifact"),
+                "score": project.get("current_score"),
+                "error": project.get("error"),
+            }, ensure_ascii=False, indent=2))
+            return 0 if project.get("status") == "ready" else 2
+        time.sleep(2)
+    manager.stop(project["id"])
+    print(f"error: product run exceeded {args.timeout}s", file=sys.stderr)
+    return 2
+
+
 # ── main ──────────────────────────────────────────────────────────────
 
 def main(argv: list[str] | None = None) -> int:
@@ -2149,6 +2253,9 @@ def main(argv: list[str] | None = None) -> int:
         "harness-eval-public": cmd_harness_eval_public,
         "agentx-nested-init": cmd_agentx_nested_init,
         "agentx-nested-epoch": cmd_agentx_nested_epoch,
+        "studio": cmd_studio,
+        "doctor": cmd_doctor,
+        "run": cmd_product_run,
     }
     try:
         return handlers[args.command](args)

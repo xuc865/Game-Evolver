@@ -1,15 +1,21 @@
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from statistics import median
-from typing import Any, Protocol, Sequence
+from typing import Any, Mapping, Protocol, Sequence
 
 from game_loop.config import (
     HarnessElementConfig,
     HarnessEvolutionConfig,
     HarnessModuleConfig,
     HarnessToolInterfaceConfig,
+)
+from game_loop.core.agent_circuit import AgentCircuit, RoleHarnessSpec
+from game_loop.core.agent_circuit_evolution import (
+    CircuitMutationEngine,
+    CircuitMutationTransaction,
 )
 from game_loop.utils import atomic_write_json, read_json, sha256_json, utc_now
 
@@ -256,6 +262,7 @@ class HarnessProfile:
     generation: int
     rationale: str
     created_at: str
+    agent_circuit: AgentCircuit | None = None
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
@@ -267,6 +274,9 @@ class HarnessProfile:
         value["context_compiler"] = self.context_compiler.to_dict()
         value["recovery_policy"] = self.recovery_policy.to_dict()
         value["validation_policy"] = self.validation_policy.to_dict()
+        value["agent_circuit"] = (
+            None if self.agent_circuit is None else self.agent_circuit.to_dict()
+        )
         return value
 
     @classmethod
@@ -291,6 +301,37 @@ class HarnessProfile:
             generation=int(value.get("generation", 0)),
             rationale=str(value.get("rationale", "")),
             created_at=str(value.get("created_at", "")),
+            agent_circuit=(
+                None
+                if value.get("agent_circuit") is None
+                else AgentCircuit.from_dict(dict(value["agent_circuit"]))
+            ),
+        )
+
+    def effective_agent_circuit(self) -> AgentCircuit:
+        """Return the explicit v0.3 circuit or a deterministic legacy singleton."""
+
+        if self.agent_circuit is not None:
+            return self.agent_circuit
+        return AgentCircuit.singleton(
+            capabilities=(
+                f"{item.category}:{item.element_id}" for item in self.active_elements
+            ),
+            tool_interface_ids=(
+                item.interface_id for item in self.active_tool_interfaces
+            ),
+            harness_spec=RoleHarnessSpec(
+                source_harness_id=self.harness_id,
+                active_module_ids=self.active_modules,
+                active_element_ids=tuple(
+                    item.element_id for item in self.active_elements
+                ),
+                active_cordis_plugins=tuple(
+                    str(item.spec.get("plugin_id", item.element_id))
+                    for item in self.active_elements
+                    if item.category == "dsh_plugin"
+                ),
+            ),
         )
 
 
@@ -360,6 +401,39 @@ class HarnessEpochResult:
         value["candidate_outcomes"] = [item.to_dict() for item in self.candidate_outcomes]
         return value
 
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "HarnessEpochResult":
+        return cls(
+            epoch=int(value["epoch"]),
+            parent_harness_id=str(value["parent_harness_id"]),
+            candidate_harness_id=str(value["candidate_harness_id"]),
+            accepted=bool(value.get("accepted", False)),
+            paired_deltas=tuple(float(item) for item in value.get("paired_deltas", [])),
+            median_delta=(
+                None
+                if value.get("median_delta") is None
+                else float(value["median_delta"])
+            ),
+            reasons=tuple(str(item) for item in value.get("reasons", [])),
+            excluded_pairs=tuple(
+                str(item) for item in value.get("excluded_pairs", [])
+            ),
+            parent_outcomes=tuple(
+                HarnessEpisodeOutcome(**dict(item))
+                for item in value.get("parent_outcomes", [])
+            ),
+            candidate_outcomes=tuple(
+                HarnessEpisodeOutcome(**dict(item))
+                for item in value.get("candidate_outcomes", [])
+            ),
+            created_at=str(value.get("created_at", utc_now())),
+            rubric_validation=(
+                None
+                if value.get("rubric_validation") is None
+                else dict(value["rubric_validation"])
+            ),
+        )
+
 
 class HarnessReplayRunner(Protocol):
     def run_episode(
@@ -383,11 +457,15 @@ class HarnessEvolutionEngine:
         config: HarnessEvolutionConfig,
         *,
         allow_mutation: bool = True,
+        role_runtime_contract: Mapping[str, Any] | None = None,
     ):
         self.root = run_dir / "harness_archive"
         self.profiles = self.root / "profiles"
         self.config = config
         self.allow_mutation = allow_mutation
+        self.role_runtime_contract = (
+            None if role_runtime_contract is None else dict(role_runtime_contract)
+        )
         self.modules = {module.module_id: module for module in config.modules}
         self.module_categories = {
             module.module_id: module.category for module in config.modules
@@ -403,8 +481,103 @@ class HarnessEvolutionEngine:
         allowed = self.config.allowed_element_categories
         return not allowed or category.casefold() in allowed
 
+    def role_harness_catalog(self) -> dict[str, Any]:
+        """Disclose the audited component vocabulary available to HPA roles."""
+
+        plugins = []
+        for element in self.elements.values():
+            if element.category != "dsh_plugin":
+                continue
+            plugins.append({
+                "id": str(element.spec.get("plugin_id", element.element_id)),
+                "element_id": element.element_id,
+                "description": element.description,
+                "spec_hash": HarnessActiveElement.from_config(element).spec_hash,
+            })
+        catalog = {
+            "schema_version": "role-harness-catalog.v1",
+            "modules": [
+                {
+                    "id": item.module_id,
+                    "category": item.category,
+                    "instruction": item.instruction,
+                    "tags": list(item.tags),
+                    "content_hash": sha256_json({
+                        "instruction": item.instruction,
+                        "category": item.category,
+                        "tags": list(item.tags),
+                    }),
+                }
+                for item in sorted(
+                    self.modules.values(), key=lambda value: value.module_id
+                )
+            ],
+            "elements": [
+                {
+                    "element_id": item.element_id,
+                    "category": item.category,
+                    "description": item.description,
+                    "tags": list(item.tags),
+                    "spec_hash": HarnessActiveElement.from_config(item).spec_hash,
+                }
+                for item in sorted(
+                    self.elements.values(), key=lambda value: value.element_id
+                )
+            ],
+            "tool_interfaces": [
+                {
+                    "interface_id": item.interface_id,
+                    "kind": item.kind,
+                    "description": item.description,
+                    "tags": list(item.tags),
+                    "source_hash": item.source_hash,
+                }
+                for item in sorted(
+                    self.tool_interfaces.values(),
+                    key=lambda value: value.interface_id,
+                )
+            ],
+            "cordis_plugins": sorted(plugins, key=lambda item: item["id"]),
+            "per_role_limits": {
+                "modules": self.config.max_active_modules,
+                "tool_interfaces": self.config.max_active_tool_interfaces,
+                "elements": dict(self.config.max_active_elements),
+            },
+        }
+        if self.role_runtime_contract is not None:
+            catalog["runtime_contract"] = dict(self.role_runtime_contract)
+        return catalog
+
     def initialize(self, initial_profile: HarnessProfile | None = None) -> HarnessProfile:
         self.profiles.mkdir(parents=True, exist_ok=True)
+        manifest_path = self.root / "manifest.json"
+        epochs_path = self.root / "epochs.json"
+        champion_path = self.root / "champion.json"
+        existing = tuple(
+            path.is_file() for path in (manifest_path, epochs_path, champion_path)
+        )
+        if all(existing):
+            manifest = read_json(manifest_path)
+            if manifest.get("policy_version") != self.policy_version:
+                raise ValueError("existing harness archive policy version mismatch")
+            epochs = read_json(epochs_path)
+            if not isinstance(epochs.get("items"), list):
+                raise ValueError("existing harness archive epochs are invalid")
+            champion = self.champion()
+            self._validate_profile(champion)
+            return champion
+        if any(existing):
+            missing = [
+                path.name
+                for path, present in zip(
+                    (manifest_path, epochs_path, champion_path), existing
+                )
+                if not present
+            ]
+            raise RuntimeError(
+                "partial harness archive cannot be initialized safely; missing: "
+                + ", ".join(missing)
+            )
         profile = initial_profile or self._profile(
             parent_id=None,
             modules=self.config.seed_modules,
@@ -445,6 +618,8 @@ class HarnessEvolutionEngine:
             "max_active_modules": self.config.max_active_modules,
             "max_active_tool_interfaces": self.config.max_active_tool_interfaces,
             "mutation_width": self.config.mutation_width,
+            "bundle_width": self.config.bundle_width,
+            "attribution_mode": self.config.attribution_mode,
             "replay_min_cases": self.config.replay_min_cases,
             "promotion_delta_min": self.config.promotion_delta_min,
             "max_case_regression": self.config.max_case_regression,
@@ -473,6 +648,13 @@ class HarnessEvolutionEngine:
         parent = self.get(parent_id)
         if not self.allow_mutation:
             return parent
+        ablation = self._propose_pending_ablation(
+            parent=parent,
+            gradient=gradient,
+            epoch=epoch,
+        )
+        if ablation is not None:
+            return ablation
         active = list(parent.active_modules)
         active_tool_interfaces = list(parent.active_tool_interfaces)
         active_elements = list(parent.active_elements)
@@ -482,43 +664,83 @@ class HarnessEvolutionEngine:
         from game_loop.core.harness_element_stats import (
             HarnessElementStatsStore,
             mutate_category_elements,
-            resolve_target_category,
+            resolve_target_categories,
         )
 
-        target_category = resolve_target_category(gradient.target_tags)
+        target_categories = resolve_target_categories(gradient.target_tags)
+        bundle_actions: list[dict[str, Any]] = []
+        role_capacity_multiplier = (
+            1 if parent.agent_circuit is None else len(parent.agent_circuit.roles)
+        )
+        element_limits = {
+            category: limit * role_capacity_multiplier
+            for category, limit in self.config.max_active_elements.items()
+        }
         if (
-            target_category
-            and self.category_is_mutable(target_category)
+            target_categories
             and self.config.element_catalog
             and self.config.enable_usage_driven_mutation
         ):
             stats = HarnessElementStatsStore.load(self.root / "element_stats.json")
-            mutation = mutate_category_elements(
-                active=active_elements,
-                category=target_category,
-                catalog=self.elements,
-                stats=stats,
-                limits=self.config.max_active_elements,
-                gradient_tags=gradient.target_tags,
-                policy=self.config.element_mutation_policy,
-                allow_explicit_replacement=(
-                    bool(self.config.allowed_element_categories)
-                    or "element_replace" in {
-                        tag.casefold() for tag in gradient.target_tags
+            for _ in range(self.config.bundle_width):
+                mutation_applied = False
+                for target_category in target_categories:
+                    if not self.category_is_mutable(target_category):
+                        continue
+                    before_ids = {
+                        item.element_id
+                        for item in active_elements
+                        if item.category == target_category
                     }
-                ),
-            )
-            if mutation is not None:
-                active_elements = mutation.active
-                for addition in mutation.catalog_additions:
-                    self.register_element(addition)
+                    mutation = mutate_category_elements(
+                        active=active_elements,
+                        category=target_category,
+                        catalog=self.elements,
+                        stats=stats,
+                        limits=element_limits,
+                        gradient_tags=gradient.target_tags,
+                        policy=self.config.element_mutation_policy,
+                        allow_explicit_replacement=(
+                            bool(self.config.allowed_element_categories)
+                            or "element_replace"
+                            in {tag.casefold() for tag in gradient.target_tags}
+                        ),
+                    )
+                    if mutation is None:
+                        continue
+                    active_elements = mutation.active
+                    for addition in mutation.catalog_additions:
+                        self.register_element(addition)
+                    after_ids = {
+                        item.element_id
+                        for item in active_elements
+                        if item.category == target_category
+                    }
+                    bundle_actions.append(
+                        {
+                            "category": target_category,
+                            "operation": mutation.operation,
+                            "added_element_ids": sorted(after_ids - before_ids),
+                            "removed_element_ids": sorted(before_ids - after_ids),
+                        }
+                    )
+                    mutation_applied = True
+                    break
+                if not mutation_applied:
+                    break
+            if bundle_actions:
                 stats.save(self.root / "element_stats.json")
         elif (
             self.config.enable_tool_interface_mutation
             and self._targets_tool_interface(gradient)
         ):
             active_tool_interfaces = self._mutate_tool_interfaces(
-                active_tool_interfaces, gradient
+                active_tool_interfaces,
+                gradient,
+                max_active=(
+                    self.config.max_active_tool_interfaces
+                    * role_capacity_multiplier
+                ),
             )
         elif self._targets_context(gradient):
             context_compiler = self._mutate_context(context_compiler, gradient)
@@ -533,7 +755,34 @@ class HarnessEvolutionEngine:
         ):
             validation_policy = self._mutate_validation(validation_policy, gradient)
         else:
-            active = self._mutate_modules(active, gradient)
+            active = self._mutate_modules(
+                active,
+                gradient,
+                max_active=self.config.max_active_modules * role_capacity_multiplier,
+            )
+        candidate_circuit = parent.agent_circuit
+        if candidate_circuit is not None:
+            candidate_circuit, role_assignments = self._retarget_circuit_components(
+                parent=parent,
+                requested_modules=tuple(active),
+                requested_tool_interfaces=tuple(active_tool_interfaces),
+                requested_elements=tuple(active_elements),
+                gradient=gradient,
+            )
+            active, active_tool_interfaces, active_elements = self._components_for_circuit(
+                candidate_circuit,
+                inherited_from=parent,
+            )
+            if role_assignments:
+                bundle_actions.append(
+                    {
+                        "category": "agent_circuit",
+                        "operation": "assign_role_harness_components",
+                        "role_assignments": role_assignments,
+                        "added_element_ids": [],
+                        "removed_element_ids": [],
+                    }
+                )
         profile = self._profile(
             parent_id=parent_id,
             modules=tuple(active),
@@ -544,16 +793,519 @@ class HarnessEvolutionEngine:
             validation_policy=validation_policy,
             generation=epoch,
             rationale=gradient.diagnosis,
+            agent_circuit=candidate_circuit,
         )
         if self._behavior_signature(profile) == self._behavior_signature(parent):
             raise ValueError(
                 "harness mutation is a no-op: candidate does not change executable behavior"
             )
         self._write_profile(profile)
+        self._write_bundle_manifest(
+            epoch=epoch,
+            parent=parent,
+            candidate=profile,
+            gradient=gradient,
+            actions=bundle_actions,
+        )
         return profile
+
+    def _retarget_circuit_components(
+        self,
+        *,
+        parent: HarnessProfile,
+        requested_modules: tuple[str, ...],
+        requested_tool_interfaces: tuple[HarnessToolInterface, ...],
+        requested_elements: tuple[HarnessActiveElement, ...],
+        gradient: HarnessSemanticGradient,
+    ) -> tuple[AgentCircuit, list[dict[str, Any]]]:
+        """Apply component deltas to evidence-matched roles, without a fixed roster."""
+
+        circuit = parent.agent_circuit
+        if circuit is None:
+            raise ValueError("role retargeting requires an explicit agent circuit")
+        old_modules = set(parent.active_modules)
+        new_modules = set(requested_modules)
+        old_interfaces = {
+            item.interface_id for item in parent.active_tool_interfaces
+        }
+        new_interfaces = {
+            item.interface_id for item in requested_tool_interfaces
+        }
+        old_elements = {item.element_id for item in parent.active_elements}
+        new_elements = {item.element_id for item in requested_elements}
+        roles = {role.role_id: role.to_dict() for role in circuit.roles}
+        parent_plugin_ids = tuple(
+            str(item.spec.get("plugin_id", item.element_id))
+            for item in parent.active_elements
+            if item.category == "dsh_plugin"
+        )
+        for role in circuit.roles:
+            if role.harness_spec is not None:
+                continue
+            roles[role.role_id]["harness_spec"] = RoleHarnessSpec(
+                source_harness_id=parent.harness_id,
+                active_module_ids=parent.active_modules,
+                active_element_ids=tuple(
+                    item.element_id for item in parent.active_elements
+                ),
+                active_cordis_plugins=parent_plugin_ids,
+            ).to_dict()
+
+        assignments: list[dict[str, Any]] = []
+
+        def mutate_spec(role_id: str, field_name: str, item_id: str, *, add: bool) -> None:
+            role = roles[role_id]
+            spec = dict(role["harness_spec"])
+            values = set(str(item) for item in spec.get(field_name, []))
+            if add:
+                values.add(item_id)
+            else:
+                values.discard(item_id)
+            spec[field_name] = sorted(values)
+            role["harness_spec"] = spec
+
+        def remove_everywhere(field_name: str, item_id: str) -> tuple[str, ...]:
+            affected: list[str] = []
+            for role_id in sorted(roles):
+                values = set(roles[role_id]["harness_spec"].get(field_name, []))
+                if item_id not in values:
+                    continue
+                mutate_spec(role_id, field_name, item_id, add=False)
+                affected.append(role_id)
+            return tuple(affected)
+
+        for module_id in sorted(old_modules - new_modules):
+            affected = remove_everywhere("active_module_ids", module_id)
+            assignments.append({
+                "operation": "remove",
+                "component_kind": "module",
+                "component_id": module_id,
+                "role_ids": list(affected),
+            })
+        for element_id in sorted(old_elements - new_elements):
+            affected = set(remove_everywhere("active_element_ids", element_id))
+            element = self.elements[element_id]
+            if element.category == "dsh_plugin":
+                plugin_id = str(element.spec.get("plugin_id", element_id))
+                affected.update(
+                    remove_everywhere("active_cordis_plugins", plugin_id)
+                )
+            assignments.append({
+                "operation": "remove",
+                "component_kind": element.category,
+                "component_id": element_id,
+                "role_ids": sorted(affected),
+            })
+        for interface_id in sorted(old_interfaces - new_interfaces):
+            affected: list[str] = []
+            for role_id in sorted(roles):
+                values = set(roles[role_id].get("tool_interface_ids", []))
+                if interface_id not in values:
+                    continue
+                values.remove(interface_id)
+                roles[role_id]["tool_interface_ids"] = sorted(values)
+                affected.append(role_id)
+            assignments.append({
+                "operation": "remove",
+                "component_kind": "tool_interface",
+                "component_id": interface_id,
+                "role_ids": affected,
+            })
+
+        def select_role(*, description: str, tags: tuple[str, ...], category: str) -> str:
+            wanted = {
+                item.casefold()
+                for item in (*gradient.target_tags, *tags, category)
+                if item.strip()
+            }
+            wanted.update(
+                token
+                for token in re.findall(r"[a-z0-9_]+", description.casefold())
+                if len(token) >= 4
+            )
+            ranked: list[tuple[int, int, str]] = []
+            for role_id in sorted(roles):
+                role = roles[role_id]
+                text = " ".join(
+                    [
+                        str(role.get("kind", "")),
+                        str(role.get("objective", "")),
+                        str(role.get("system_prompt", "")),
+                        *[str(item) for item in role.get("capabilities", [])],
+                    ]
+                ).casefold()
+                affinity = sum(1 for token in wanted if token in text)
+                spec = roles[role_id]["harness_spec"]
+                load = (
+                    len(spec.get("active_module_ids", []))
+                    + len(spec.get("active_element_ids", []))
+                    + len(role.get("tool_interface_ids", []))
+                )
+                ranked.append((affinity, -load, role_id))
+            best_score = max((affinity, load) for affinity, load, _ in ranked)
+            return next(
+                role_id
+                for affinity, load, role_id in ranked
+                if (affinity, load) == best_score
+            )
+
+        for module_id in sorted(new_modules - old_modules):
+            module = self.modules[module_id]
+            role_id = select_role(
+                description=module.instruction,
+                tags=module.tags,
+                category=module.category,
+            )
+            mutate_spec(role_id, "active_module_ids", module_id, add=True)
+            assignments.append({
+                "operation": "add",
+                "component_kind": "module",
+                "component_id": module_id,
+                "role_ids": [role_id],
+            })
+        for element_id in sorted(new_elements - old_elements):
+            element = self.elements[element_id]
+            role_id = select_role(
+                description=element.description,
+                tags=element.tags,
+                category=element.category,
+            )
+            mutate_spec(role_id, "active_element_ids", element_id, add=True)
+            if element.category == "dsh_plugin":
+                mutate_spec(
+                    role_id,
+                    "active_cordis_plugins",
+                    str(element.spec.get("plugin_id", element_id)),
+                    add=True,
+                )
+            assignments.append({
+                "operation": "add",
+                "component_kind": element.category,
+                "component_id": element_id,
+                "role_ids": [role_id],
+            })
+        for interface_id in sorted(new_interfaces - old_interfaces):
+            interface = self.tool_interfaces[interface_id]
+            role_id = select_role(
+                description=interface.description,
+                tags=interface.tags,
+                category=interface.kind,
+            )
+            values = set(roles[role_id].get("tool_interface_ids", []))
+            values.add(interface_id)
+            roles[role_id]["tool_interface_ids"] = sorted(values)
+            assignments.append({
+                "operation": "add",
+                "component_kind": "tool_interface",
+                "component_id": interface_id,
+                "role_ids": [role_id],
+            })
+
+        payload = circuit.executable_dict()
+        payload["roles"] = [roles[role_id] for role_id in sorted(roles)]
+        return AgentCircuit.from_dict(payload), assignments
+
+    def propose_circuit(
+        self,
+        *,
+        parent_id: str,
+        transaction: CircuitMutationTransaction,
+        epoch: int,
+    ) -> HarnessProfile:
+        """Apply one evidence-backed topology transaction to a frozen harness."""
+
+        parent = self.get(parent_id)
+        if not self.allow_mutation:
+            return parent
+        candidate_circuit = CircuitMutationEngine().apply(
+            parent.effective_agent_circuit(), transaction
+        )
+        (
+            circuit_modules,
+            circuit_tool_interfaces,
+            circuit_elements,
+        ) = self._components_for_circuit(candidate_circuit, inherited_from=parent)
+        profile = self._profile(
+            parent_id=parent.harness_id,
+            modules=circuit_modules,
+            tool_interfaces=circuit_tool_interfaces,
+            active_elements=circuit_elements,
+            context_compiler=parent.context_compiler,
+            recovery_policy=parent.recovery_policy,
+            validation_policy=parent.validation_policy,
+            generation=epoch,
+            rationale=transaction.hypothesis,
+            agent_circuit=candidate_circuit,
+        )
+        self._validate_profile(profile)
+        self._write_profile(profile)
+        root = self.root / "circuit_transactions"
+        root.mkdir(parents=True, exist_ok=True)
+        atomic_write_json(
+            root / f"epoch_{epoch:03d}_{profile.harness_id}.json",
+            {
+                "schema_version": "agent-circuit-transaction-result.v1",
+                "epoch": epoch,
+                "parent_harness_id": parent.harness_id,
+                "candidate_harness_id": profile.harness_id,
+                "parent_circuit_id": parent.effective_agent_circuit().circuit_id,
+                "candidate_circuit_id": candidate_circuit.circuit_id,
+                "transaction": transaction.to_dict(),
+                "pending_ablation_action_ids": [
+                    action.action_id for action in transaction.actions
+                ],
+                "created_at": utc_now(),
+            },
+        )
+        return profile
+
+    def _components_for_circuit(
+        self,
+        circuit: AgentCircuit,
+        *,
+        inherited_from: HarnessProfile,
+    ) -> tuple[
+        tuple[str, ...],
+        tuple[HarnessToolInterface, ...],
+        tuple[HarnessActiveElement, ...],
+    ]:
+        """Resolve the audited union of independently selected role harnesses."""
+
+        module_ids: set[str] = set()
+        element_ids: set[str] = set()
+        interface_ids: set[str] = set()
+        plugin_ids: set[str] = set()
+        for role in circuit.roles:
+            interface_ids.update(role.tool_interface_ids)
+            spec = role.harness_spec
+            if spec is None:
+                module_ids.update(inherited_from.active_modules)
+                element_ids.update(
+                    item.element_id for item in inherited_from.active_elements
+                )
+                plugin_ids.update(
+                    str(item.spec.get("plugin_id", item.element_id))
+                    for item in inherited_from.active_elements
+                    if item.category == "dsh_plugin"
+                )
+                continue
+            module_ids.update(spec.active_module_ids)
+            element_ids.update(spec.active_element_ids)
+            plugin_ids.update(spec.active_cordis_plugins)
+
+        unknown_modules = sorted(module_ids - set(self.modules))
+        unknown_elements = sorted(element_ids - set(self.elements))
+        unknown_interfaces = sorted(interface_ids - set(self.tool_interfaces))
+        plugin_elements: dict[str, HarnessElementConfig] = {}
+        for element in self.elements.values():
+            if element.category != "dsh_plugin":
+                continue
+            plugin_id = str(element.spec.get("plugin_id", element.element_id))
+            if plugin_id in plugin_elements:
+                raise ValueError(f"duplicate audited Cordis plugin id: {plugin_id}")
+            plugin_elements[plugin_id] = element
+        unknown_plugins = sorted(plugin_ids - set(plugin_elements))
+        if unknown_modules or unknown_elements or unknown_interfaces or unknown_plugins:
+            raise ValueError(
+                "agent circuit references unaudited harness components: "
+                f"modules={unknown_modules}, elements={unknown_elements}, "
+                f"interfaces={unknown_interfaces}, plugins={unknown_plugins}"
+            )
+        element_ids.update(
+            plugin_elements[plugin_id].element_id for plugin_id in plugin_ids
+        )
+        return (
+            tuple(sorted(module_ids)),
+            tuple(self.tool_interfaces[item] for item in sorted(interface_ids)),
+            tuple(
+                HarnessActiveElement.from_config(self.elements[item])
+                for item in sorted(element_ids)
+            ),
+        )
+
+    def _write_bundle_manifest(
+        self,
+        *,
+        epoch: int,
+        parent: HarnessProfile,
+        candidate: HarnessProfile,
+        gradient: HarnessSemanticGradient,
+        actions: list[dict[str, Any]],
+        mode: str = "bundle",
+        bundle_id: str | None = None,
+    ) -> None:
+        root = self.root / "bundle_manifests"
+        root.mkdir(parents=True, exist_ok=True)
+        atomic_write_json(
+            root / f"epoch_{epoch:03d}_{candidate.harness_id}.json",
+            {
+                "schema_version": "harness-bundle-attribution.v1",
+                "epoch": epoch,
+                "mode": mode,
+                "bundle_id": bundle_id or candidate.harness_id,
+                "parent_harness_id": parent.harness_id,
+                "candidate_harness_id": candidate.harness_id,
+                "attribution_mode": self.config.attribution_mode,
+                "bundle_width_limit": self.config.bundle_width,
+                "actions": actions,
+                "evidence_refs": list(gradient.evidence_refs),
+                "hypothesis": gradient.diagnosis,
+                "created_at": utc_now(),
+            },
+        )
+
+    @property
+    def _bundle_attribution_path(self) -> Path:
+        return self.root / "bundle_attribution.json"
+
+    def _propose_pending_ablation(
+        self,
+        *,
+        parent: HarnessProfile,
+        gradient: HarnessSemanticGradient,
+        epoch: int,
+    ) -> HarnessProfile | None:
+        if self.config.attribution_mode != "bundle_then_ablate":
+            return None
+        state = (
+            read_json(self._bundle_attribution_path)
+            if self._bundle_attribution_path.is_file()
+            else {"schema_version": "harness-bundle-ablation.v1", "pending": []}
+        )
+        pending = list(state.get("pending", []))
+        active_ids = {item.element_id for item in parent.active_elements}
+        while pending and str(pending[0].get("element_id")) not in active_ids:
+            pending.pop(0)
+        if pending != list(state.get("pending", [])):
+            state["pending"] = pending
+            atomic_write_json(self._bundle_attribution_path, state)
+        if not pending:
+            return None
+        item = pending[0]
+        element_id = str(item["element_id"])
+        removed = next(
+            element for element in parent.active_elements if element.element_id == element_id
+        )
+        remaining_elements = tuple(
+            element
+            for element in parent.active_elements
+            if element.element_id != element_id
+        )
+        candidate_circuit = parent.agent_circuit
+        role_assignments: list[dict[str, Any]] = []
+        candidate_modules = parent.active_modules
+        candidate_interfaces = parent.active_tool_interfaces
+        if candidate_circuit is not None:
+            candidate_circuit, role_assignments = self._retarget_circuit_components(
+                parent=parent,
+                requested_modules=parent.active_modules,
+                requested_tool_interfaces=parent.active_tool_interfaces,
+                requested_elements=remaining_elements,
+                gradient=gradient,
+            )
+            (
+                candidate_modules,
+                candidate_interfaces,
+                remaining_elements,
+            ) = self._components_for_circuit(
+                candidate_circuit,
+                inherited_from=parent,
+            )
+        candidate = self._profile(
+            parent_id=parent.harness_id,
+            modules=candidate_modules,
+            tool_interfaces=candidate_interfaces,
+            active_elements=remaining_elements,
+            context_compiler=parent.context_compiler,
+            recovery_policy=parent.recovery_policy,
+            validation_policy=parent.validation_policy,
+            generation=epoch,
+            rationale=(
+                f"leave-one-out ablation for bundle {item['bundle_id']}: "
+                f"remove {element_id} and retain it only if quality regresses"
+            ),
+            agent_circuit=candidate_circuit,
+        )
+        self._write_profile(candidate)
+        self._write_bundle_manifest(
+            epoch=epoch,
+            parent=parent,
+            candidate=candidate,
+            gradient=gradient,
+            actions=[
+                {
+                    "category": removed.category,
+                    "operation": "ablate",
+                    "added_element_ids": [],
+                    "removed_element_ids": [element_id],
+                    "role_assignments": role_assignments,
+                }
+            ],
+            mode="ablation",
+            bundle_id=str(item["bundle_id"]),
+        )
+        return candidate
+
+    def _record_bundle_attribution(self, result: HarnessEpochResult) -> None:
+        if self.config.attribution_mode != "bundle_then_ablate":
+            return
+        validation = result.rubric_validation or {}
+        if validation.get("infrastructure_ok") is not True or any(
+            not outcome.infrastructure_ok
+            for outcome in (*result.parent_outcomes, *result.candidate_outcomes)
+        ):
+            return
+        manifest_path = (
+            self.root
+            / "bundle_manifests"
+            / f"epoch_{result.epoch:03d}_{result.candidate_harness_id}.json"
+        )
+        if not manifest_path.is_file():
+            return
+        manifest = read_json(manifest_path)
+        state = (
+            read_json(self._bundle_attribution_path)
+            if self._bundle_attribution_path.is_file()
+            else {"schema_version": "harness-bundle-ablation.v1", "pending": []}
+        )
+        pending = list(state.get("pending", []))
+        if manifest.get("mode") == "ablation":
+            if pending and str(pending[0].get("bundle_id")) == str(
+                manifest.get("bundle_id")
+            ):
+                pending.pop(0)
+        elif result.accepted:
+            added_ids = [
+                str(element_id)
+                for action in manifest.get("actions", [])
+                for element_id in action.get("added_element_ids", [])
+            ]
+            if len(added_ids) > 1:
+                existing = {
+                    (str(item.get("bundle_id")), str(item.get("element_id")))
+                    for item in pending
+                }
+                for element_id in added_ids:
+                    key = (result.candidate_harness_id, element_id)
+                    if key not in existing:
+                        pending.append(
+                            {
+                                "bundle_id": result.candidate_harness_id,
+                                "element_id": element_id,
+                                "scheduled_by_epoch": result.epoch,
+                            }
+                        )
+        state["pending"] = pending
+        state["updated_at"] = utc_now()
+        atomic_write_json(self._bundle_attribution_path, state)
 
     @staticmethod
     def _behavior_signature(profile: HarnessProfile) -> tuple[Any, ...]:
+        circuit_behavior = profile.effective_agent_circuit().executable_dict()
+        for role in circuit_behavior.get("roles", []):
+            harness_spec = role.get("harness_spec")
+            if isinstance(harness_spec, dict):
+                harness_spec.pop("source_harness_id", None)
         return (
             profile.active_modules,
             tuple(
@@ -567,13 +1319,17 @@ class HarnessEvolutionEngine:
             profile.context_compiler.to_dict().__repr__(),
             profile.recovery_policy.to_dict().__repr__(),
             profile.validation_policy.to_dict().__repr__(),
+            circuit_behavior.__repr__(),
         )
 
     def _mutate_modules(
         self,
         active: list[str],
         gradient: HarnessSemanticGradient,
+        *,
+        max_active: int | None = None,
     ) -> list[str]:
+        capacity = self.config.max_active_modules if max_active is None else max_active
         for _ in range(self.config.mutation_width):
             inactive = [module for module in self.config.modules if module.module_id not in active]
             if not inactive:
@@ -582,7 +1338,7 @@ class HarnessEvolutionEngine:
                 inactive,
                 key=lambda module: self._module_score(module, gradient, active=False),
             )
-            if len(active) < self.config.max_active_modules:
+            if len(active) < capacity:
                 active.append(addition.module_id)
             else:
                 removal = min(
@@ -616,6 +1372,17 @@ class HarnessEvolutionEngine:
             and not profile.active_elements
         ):
             return ""
+        if profile.agent_circuit is not None:
+            return "\n".join(
+                [
+                    "Agent Circuit harness profile (fixed for this complete evolution episode):",
+                    f"- Circuit: {profile.agent_circuit.circuit_id}",
+                    f"- Roles: {len(profile.agent_circuit.roles)}",
+                    "Each role receives only its content-addressed role-local harness manifest at runtime.",
+                    "The circuit harness may change how roles work, but it does not change the evaluator, rubric, hidden tests, or task requirements.",
+                    "Do not edit benchmark infrastructure or encode evaluator-specific shortcuts.",
+                ]
+            )
         lines = ["Agent harness profile (fixed for this complete evolution episode):"]
         for module_id in profile.active_modules:
             lines.append(f"- [module:{module_id}] {self.modules[module_id].instruction}")
@@ -652,6 +1419,7 @@ class HarnessEvolutionEngine:
         parent_outcomes: Sequence[HarnessEpisodeOutcome],
         candidate_outcomes: Sequence[HarnessEpisodeOutcome],
         rubric_validation: dict[str, Any] | None = None,
+        net_utility_admission: bool = False,
     ) -> HarnessEpochResult:
         parents = {item.case_id: item for item in parent_outcomes}
         candidates = {item.case_id: item for item in candidate_outcomes}
@@ -704,6 +1472,23 @@ class HarnessEvolutionEngine:
             reasons.append(
                 f"usable replay pairs {len(deltas)} < required {self.config.replay_min_cases}"
             )
+        if deltas and any(
+            delta < -self.config.max_case_regression for delta in deltas
+        ):
+            worst = min(deltas)
+            reasons.append(
+                f"worst case regression {worst:.4f} exceeds "
+                f"{-self.config.max_case_regression:.4f}"
+            )
+        if (
+            median_delta is not None
+            and not net_utility_admission
+            and median_delta + 1e-12 < self.config.promotion_delta_min
+        ):
+            reasons.append(
+                f"median delta {median_delta:.4f} is below promotion minimum "
+                f"{self.config.promotion_delta_min:.4f}"
+            )
         if self.config.require_rubric_validation and rubric_validation is None:
             reasons.append("required rubric validation is missing")
         elif rubric_validation is not None and rubric_validation.get("accepted") is not True:
@@ -738,6 +1523,7 @@ class HarnessEvolutionEngine:
                 "updated_at": utc_now(),
                 "promoted_by_epoch": result.epoch,
             })
+        self._record_bundle_attribution(result)
         try:
             candidate = self.get(result.candidate_harness_id)
             should_record = True
@@ -775,6 +1561,7 @@ class HarnessEvolutionEngine:
         validation_policy: ValidationPolicy,
         generation: int,
         rationale: str,
+        agent_circuit: AgentCircuit | None = None,
     ) -> HarnessProfile:
         active = tuple(sorted(dict.fromkeys(modules)))
         active_tool_interfaces = tuple(
@@ -792,6 +1579,7 @@ class HarnessEvolutionEngine:
             recovery_policy,
             validation_policy,
             generation,
+            agent_circuit,
         )
         return HarnessProfile(
             harness_id="harness-" + sha256_json(identity)[:24],
@@ -805,6 +1593,7 @@ class HarnessEvolutionEngine:
             generation=generation,
             rationale=rationale,
             created_at=utc_now(),
+            agent_circuit=agent_circuit,
         )
 
     def _validate_profile(self, profile: HarnessProfile) -> None:
@@ -818,19 +1607,100 @@ class HarnessEvolutionEngine:
             raise ValueError(
                 f"harness profile references unknown elements: {unknown_elements}"
             )
-        if len(profile.active_modules) > self.config.max_active_modules:
+        if (
+            profile.agent_circuit is None
+            and len(profile.active_modules) > self.config.max_active_modules
+        ):
             raise ValueError("harness profile exceeds max_active_modules")
-        if len(profile.active_tool_interfaces) > self.config.max_active_tool_interfaces:
+        if (
+            profile.agent_circuit is None
+            and len(profile.active_tool_interfaces) > self.config.max_active_tool_interfaces
+        ):
             raise ValueError("harness profile exceeds max_active_tool_interfaces")
         counts: dict[str, int] = {}
         for element in profile.active_elements:
             counts[element.category] = counts.get(element.category, 0) + 1
             limit = self.config.max_active_elements.get(element.category)
-            if limit and counts[element.category] > limit:
+            if profile.agent_circuit is None and limit and counts[element.category] > limit:
                 raise ValueError(
                     f"harness profile exceeds max_active_elements for {element.category}"
                 )
         self._validate_tool_interfaces(profile.active_tool_interfaces)
+        if profile.agent_circuit is not None:
+            available_interfaces = {
+                item.interface_id for item in profile.active_tool_interfaces
+            }
+            referenced_interfaces = {
+                interface_id
+                for role in profile.agent_circuit.roles
+                for interface_id in role.tool_interface_ids
+            }
+            unknown_circuit_interfaces = sorted(
+                referenced_interfaces - available_interfaces
+            )
+            if unknown_circuit_interfaces:
+                raise ValueError(
+                    "agent circuit references inactive tool interfaces: "
+                    f"{unknown_circuit_interfaces}"
+                )
+            available_modules = set(profile.active_modules)
+            available_elements = {
+                item.element_id for item in profile.active_elements
+            }
+            available_plugins = {
+                str(item.spec.get("plugin_id", item.element_id))
+                for item in profile.active_elements
+                if item.category == "dsh_plugin"
+            }
+            for role in profile.agent_circuit.roles:
+                spec = role.harness_spec
+                role_module_ids = (
+                    available_modules if spec is None else set(spec.active_module_ids)
+                )
+                role_element_ids = (
+                    available_elements if spec is None else set(spec.active_element_ids)
+                )
+                role_plugin_ids = (
+                    available_plugins if spec is None else set(spec.active_cordis_plugins)
+                )
+                if len(role_module_ids) > self.config.max_active_modules:
+                    raise ValueError(
+                        f"role {role.role_id} exceeds max_active_modules"
+                    )
+                if len(role.tool_interface_ids) > self.config.max_active_tool_interfaces:
+                    raise ValueError(
+                        f"role {role.role_id} exceeds max_active_tool_interfaces"
+                    )
+                role_category_counts: dict[str, int] = {}
+                selected_element_ids = set(role_element_ids)
+                selected_element_ids.update(
+                    item.element_id
+                    for item in profile.active_elements
+                    if item.category == "dsh_plugin"
+                    and str(item.spec.get("plugin_id", item.element_id))
+                    in role_plugin_ids
+                )
+                for element in profile.active_elements:
+                    if element.element_id not in selected_element_ids:
+                        continue
+                    count = role_category_counts.get(element.category, 0) + 1
+                    role_category_counts[element.category] = count
+                    limit = self.config.max_active_elements.get(element.category)
+                    if limit and count > limit:
+                        raise ValueError(
+                            f"role {role.role_id} exceeds max_active_elements "
+                            f"for {element.category}"
+                        )
+                unknown_modules = role_module_ids - available_modules
+                unknown_elements = role_element_ids - available_elements
+                unknown_plugins = role_plugin_ids - available_plugins
+                if unknown_modules or unknown_elements or unknown_plugins:
+                    raise ValueError(
+                        f"role {role.role_id} harness references inactive components: "
+                        f"modules={sorted(unknown_modules)}, "
+                        f"elements={sorted(unknown_elements)}, "
+                        f"plugins={sorted(unknown_plugins)}"
+                    )
         expected_id = "harness-" + sha256_json(self._profile_identity(
             profile.parent_harness_id,
             profile.active_modules,
@@ -840,6 +1710,7 @@ class HarnessEvolutionEngine:
             profile.recovery_policy,
             profile.validation_policy,
             profile.generation,
+            profile.agent_circuit,
         ))[:24]
         if profile.harness_id != expected_id:
             raise ValueError("harness profile content does not match its harness_id")
@@ -854,8 +1725,9 @@ class HarnessEvolutionEngine:
         recovery_policy: RecoveryPolicy,
         validation_policy: ValidationPolicy,
         generation: int,
+        agent_circuit: AgentCircuit | None = None,
     ) -> dict[str, Any]:
-        return {
+        identity = {
             "policy_version": self.policy_version,
             "parent_harness_id": parent_id,
             "active_modules": tuple(sorted(dict.fromkeys(modules))),
@@ -874,6 +1746,11 @@ class HarnessEvolutionEngine:
             "validation_policy": validation_policy.to_dict(),
             "generation": generation,
         }
+        # Omitting the field for legacy singleton profiles preserves every v0.2
+        # harness ID while explicit v0.3 circuits become content addressed.
+        if agent_circuit is not None:
+            identity["agent_circuit"] = agent_circuit.executable_dict()
+        return identity
 
     def _seed_tool_interfaces(self) -> tuple[HarnessToolInterface, ...]:
         return tuple(
@@ -945,6 +1822,8 @@ class HarnessEvolutionEngine:
         self,
         active: list[HarnessToolInterface],
         gradient: HarnessSemanticGradient,
+        *,
+        max_active: int | None = None,
     ) -> list[HarnessToolInterface]:
         active_ids = {item.interface_id for item in active}
         inactive = [
@@ -959,7 +1838,12 @@ class HarnessEvolutionEngine:
                 interface, gradient, active=False
             ),
         )
-        if len(active) < self.config.max_active_tool_interfaces:
+        capacity = (
+            self.config.max_active_tool_interfaces
+            if max_active is None
+            else max_active
+        )
+        if len(active) < capacity:
             return [*active, addition]
         if not active:
             return [addition]
@@ -1144,8 +2028,17 @@ def load_episode_outcome(
         isinstance(evaluator, dict)
         and bool(evaluator.get("infrastructure_failure", False))
     )
+    attempts = state.get("attempts", [])
+    latest_attempt_infrastructure_failure = bool(
+        isinstance(attempts, list)
+        and attempts
+        and isinstance(attempts[-1], dict)
+        and attempts[-1].get("status") == "infra_failed"
+    )
     infrastructure_ok = (
-        status != "paused_infrastructure" and not evaluator_infrastructure_failure
+        status != "paused_infrastructure"
+        and not evaluator_infrastructure_failure
+        and not latest_attempt_infrastructure_failure
     )
     budgets = dict(manifest.get("budgets", {}))
     return HarnessEpisodeOutcome(

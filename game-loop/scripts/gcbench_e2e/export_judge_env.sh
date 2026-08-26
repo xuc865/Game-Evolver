@@ -26,7 +26,7 @@ fi
 # Keep the public rubric judge independent from whichever backbone launched the
 # verifier. The local GLM deployment is OpenAI-compatible and keyless; callers
 # can still override it explicitly for another healthy judge service.
-judge_base="${GAMECRAFT_BENCH_JUDGE_OPENAI_BASE_URL:-http://29.116.237.75:8080/v1}"
+judge_base="${GAMECRAFT_BENCH_JUDGE_OPENAI_BASE_URL:-${GLM_BASE_URL:-http://29.116.237.75:8080/v1}}"
 export OPENAI_BASE_URL="$judge_base"
 export GAMECRAFT_BENCH_JUDGE_OPENAI_BASE_URL="${GAMECRAFT_BENCH_JUDGE_OPENAI_BASE_URL:-$judge_base}"
 

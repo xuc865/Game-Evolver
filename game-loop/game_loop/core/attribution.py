@@ -18,6 +18,10 @@ class AttributionReport:
     repeated_failures: tuple[dict[str, Any], ...]
     infrastructure_events: int
 
+    def __post_init__(self) -> None:
+        if isinstance(self.run_refs, str):
+            object.__setattr__(self, "run_refs", (self.run_refs,))
+
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
         value["run_refs"] = list(self.run_refs)

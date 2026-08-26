@@ -37,6 +37,7 @@ game-loop/experiments/verify_evolution_workbook.mjs
 game-loop/experiments/analysis/
 game-loop/experiments/full-matrix-launch/
 game-loop/experiments/general-baseline-runs/
+game-loop/experiments/dashboard-runs/
 game-loop/experiments/outputs/
 game-loop/experiments/reports/
 game-loop/experiments/run-archives/

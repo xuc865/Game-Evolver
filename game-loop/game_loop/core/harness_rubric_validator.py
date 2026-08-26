@@ -463,6 +463,22 @@ def collect_deep_playtest_evidence(
                 timeout=90,
             )
         )
+        if (artifact / "demo_outputs").is_dir():
+            probes.append(
+                _run_probe(
+                    [
+                        python,
+                        "-m",
+                        "game_loop.probe_tools",
+                        "godot-interaction-replay",
+                        "--artifact",
+                        str(artifact),
+                        "--max-frames",
+                        "600",
+                    ],
+                    timeout=150,
+                )
+            )
         probes.append(
             _run_probe(
                 [python, "-m", "game_loop.probe_tools", "godot-quality-inventory", "--artifact", str(artifact)],
@@ -565,6 +581,7 @@ class HeuristicRubricJudge:
             command_text = " ".join(str(part) for part in command)
             for marker in (
                 "godot-playtest",
+                "godot-interaction-replay",
                 "godot-quality-inventory",
                 "official_gcbench_demo_replay_evidence",
                 "verigame-build",
@@ -578,6 +595,7 @@ class HeuristicRubricJudge:
             for marker, result in results_by_command.items()
             if marker in {
                 "godot-playtest",
+                "godot-interaction-replay",
                 "official_gcbench_demo_replay_evidence",
                 "verigame-build",
                 "pygame-runtime",

@@ -345,10 +345,15 @@ class LocalChatAgent:
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
+        response_format: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Call the primary endpoint, then use an explicitly configured fallback."""
         try:
-            return self._call_api_primary(messages, tools)
+            return (
+                self._call_api_primary(messages, tools)
+                if response_format is None
+                else self._call_api_primary(messages, tools, response_format)
+            )
         except RuntimeError as exc:
             detail = str(exc).casefold()
             recoverable = (
@@ -374,7 +379,11 @@ class LocalChatAgent:
                 self.api_key = api_key
                 self.api_keys = [api_key]
                 self._api_key_index = 0
-                return self._call_api_primary(messages, tools)
+                return (
+                    self._call_api_primary(messages, tools)
+                    if response_format is None
+                    else self._call_api_primary(messages, tools, response_format)
+                )
             finally:
                 self.api_base, self.model, self.api_key, self.api_keys = original
 
@@ -407,6 +416,7 @@ class LocalChatAgent:
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
+        response_format: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Make a single /v1/chat/completions API call."""
         url = f"{self.api_base}/chat/completions"
@@ -423,6 +433,8 @@ class LocalChatAgent:
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
+        if response_format is not None:
+            payload["response_format"] = dict(response_format)
 
         model_name = self.model.casefold()
         if any(name in model_name for name in ("qwen", "glm", "kimi")):

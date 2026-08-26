@@ -6,11 +6,13 @@ optional ``score`` / ``diagnostics`` fields for ``json_stdout`` parsers.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -146,6 +148,229 @@ def cmd_godot_playtest(args: argparse.Namespace) -> int:
         }
     )
     return 0 if passed else 1
+
+
+def _load_demo_trace(artifact: Path, *, max_frames: int) -> tuple[Path, dict] | None:
+    demo_dir = artifact / "demo_outputs"
+    traces = sorted(demo_dir.glob("*.json")) if demo_dir.is_dir() else []
+    traces.sort(key=lambda path: (path.name == "_example_trace.json", path.name))
+    for path in traces:
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        events = value.get("events") if isinstance(value, dict) else None
+        if not isinstance(events, list) or not events:
+            continue
+        duration = int(value.get("duration_frames", 0))
+        if not 1 <= duration <= max_frames:
+            continue
+        if not any(
+            isinstance(event, dict)
+            and str(event.get("type", ""))
+            in {
+                "mouse_click",
+                "mouse_down",
+                "mouse_up",
+                "mouse_move",
+                "key_press",
+                "key_down",
+                "key_up",
+            }
+            for event in events
+        ):
+            continue
+        return path, value
+    return None
+
+
+def _sha256_file(path: Path) -> str | None:
+    if not path.is_file():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def cmd_godot_interaction_replay(args: argparse.Namespace) -> int:
+    artifact = _artifact_root(Path(args.artifact))
+    if not (artifact / "project.godot").is_file():
+        _emit({"passed": False, "score": 0.0, "diagnostics": ["project.godot missing"]})
+        return 1
+    selected = _load_demo_trace(artifact, max_frames=args.max_frames)
+    if selected is None:
+        _emit({
+            "passed": False,
+            "score": 0.0,
+            "diagnostics": ["no valid actionable demo trace"],
+        })
+        return 1
+    godot = _resolve_godot_bin(args.godot_bin)
+    if godot is None:
+        _emit({"passed": False, "score": 0.0, "diagnostics": ["godot binary not found"]})
+        return 1
+    trace_path, trace = selected
+    duration = int(trace["duration_frames"])
+    actionable = sum(
+        1
+        for event in trace["events"]
+        if isinstance(event, dict) and str(event.get("type", "")) != "wait"
+    )
+    with tempfile.TemporaryDirectory(prefix="game-loop-godot-replay-") as td:
+        workspace = Path(td) / "game"
+        shutil.copytree(
+            artifact,
+            workspace,
+            symlinks=True,
+            ignore=shutil.ignore_patterns(
+                ".godot", ".circuit_home", ".circuit_sessions", "handoffs"
+            ),
+        )
+        relative_trace = trace_path.relative_to(artifact).as_posix()
+        script = workspace / "__game_loop_interaction_probe.gd"
+        script.write_text(
+            """extends SceneTree
+
+const TRACE_PATH := %s
+const END_FRAME := %d
+var frame := 0
+var trace: Dictionary
+
+func _initialize() -> void:
+    trace = JSON.parse_string(FileAccess.get_file_as_string(TRACE_PATH))
+    var scene_path := str(ProjectSettings.get_setting("application/run/main_scene", ""))
+    var packed := load(scene_path) as PackedScene
+    if packed == null:
+        push_error("GAME_LOOP_REPLAY_MAIN_SCENE_MISSING")
+        quit(2)
+        return
+    root.add_child(packed.instantiate())
+    process_frame.connect(_on_frame)
+
+func _on_frame() -> void:
+    frame += 1
+    if frame == 3:
+        _save_state("before.state")
+    for raw in trace.get("events", []):
+        if raw is Dictionary and int(raw.get("frame", -1)) == frame:
+            _dispatch(raw)
+    if frame >= END_FRAME:
+        _save_state("after.state")
+        print("GAME_LOOP_REPLAY_COMPLETED frame=%%d events=%%d" %% [frame, trace.get("events", []).size()])
+        quit()
+
+func _dispatch(event: Dictionary) -> void:
+    var kind := str(event.get("type", ""))
+    if kind.begins_with("mouse_"):
+        var mouse := InputEventMouseButton.new()
+        mouse.button_index = MOUSE_BUTTON_RIGHT if str(event.get("button", "left")) == "right" else MOUSE_BUTTON_LEFT
+        mouse.position = Vector2(float(event.get("x", 0)), float(event.get("y", 0)))
+        mouse.pressed = kind != "mouse_up"
+        root.push_input(mouse)
+        if kind == "mouse_click":
+            mouse.pressed = false
+            root.push_input(mouse)
+    elif kind.begins_with("key_"):
+        var key := InputEventKey.new()
+        key.keycode = OS.find_keycode_from_string(str(event.get("key", event.get("keycode", ""))))
+        key.pressed = kind != "key_up"
+        root.push_input(key)
+        if kind == "key_press":
+            key.pressed = false
+            root.push_input(key)
+
+func _save_state(name: String) -> void:
+    var rows: Array[String] = []
+    _snapshot_node(root, rows)
+    var file := FileAccess.open("res://" + name, FileAccess.WRITE)
+    file.store_string("\n".join(rows))
+
+func _snapshot_node(node: Node, rows: Array[String]) -> void:
+    var row := str(node.get_path()) + "|" + node.get_class()
+    if node is CanvasItem:
+        row += "|visible=" + str(node.visible)
+    if node is Label:
+        row += "|text=" + node.text
+    if node is Control:
+        row += "|position=" + str(node.position) + "|size=" + str(node.size)
+    rows.append(row)
+    for child in node.get_children():
+        _snapshot_node(child, rows)
+""" % (json.dumps("res://" + relative_trace), duration),
+            encoding="utf-8",
+        )
+        try:
+            proc = subprocess.run(
+                [
+                    godot,
+                    "--headless",
+                    "--path",
+                    str(workspace),
+                    "--script",
+                    str(script),
+                ],
+                env=_godot_runtime_env(),
+                capture_output=True,
+                text=True,
+                timeout=args.timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            _emit({
+                "passed": False,
+                "score": 0.0,
+                "trace": trace_path.name,
+                "actionable_events": actionable,
+                "diagnostics": ["interaction replay timed out"],
+            })
+            return 1
+        before_hash = _sha256_file(workspace / "before.png")
+        after_hash = _sha256_file(workspace / "after.png")
+        before_state_hash = _sha256_file(workspace / "before.state")
+        after_state_hash = _sha256_file(workspace / "after.state")
+        completed = "GAME_LOOP_REPLAY_COMPLETED" in proc.stdout
+        passed = (
+            proc.returncode == 0
+            and completed
+            and bool(before_state_hash and after_state_hash)
+        )
+        visual_changed = bool(
+            before_hash and after_hash and before_hash != after_hash
+        )
+        observable_changed = bool(
+            before_state_hash
+            and after_state_hash
+            and before_state_hash != after_state_hash
+        )
+        _emit({
+            "passed": passed,
+            "score": (
+                1.0
+                if passed and (visual_changed or observable_changed)
+                else (0.5 if passed else 0.0)
+            ),
+            "trace": trace_path.name,
+            "duration_frames": duration,
+            "actionable_events": actionable,
+            "completed": completed,
+            "visual_state_changed_after_input": visual_changed,
+            "observable_scene_state_changed_after_input": observable_changed,
+            "before_frame_sha256": before_hash,
+            "after_frame_sha256": after_hash,
+            "before_scene_state_sha256": before_state_hash,
+            "after_scene_state_sha256": after_state_hash,
+            "diagnostics": [
+                f"return_code={proc.returncode}",
+                *[
+                    line.strip()
+                    for line in (proc.stdout + proc.stderr).splitlines()
+                    if line.strip()
+                ][-8:],
+            ],
+        })
+        return 0 if passed else 1
 
 
 def cmd_gcbench_demo_evidence(args: argparse.Namespace) -> int:
@@ -322,6 +547,13 @@ def build_parser() -> argparse.ArgumentParser:
     godot_playtest.add_argument("--frames", type=int, default=600)
     godot_playtest.add_argument("--timeout", type=int, default=1800)
     godot_playtest.set_defaults(func=cmd_godot_playtest)
+
+    interaction = sub.add_parser("godot-interaction-replay")
+    interaction.add_argument("--artifact", required=True)
+    interaction.add_argument("--godot-bin", default=None)
+    interaction.add_argument("--max-frames", type=int, default=600)
+    interaction.add_argument("--timeout", type=int, default=120)
+    interaction.set_defaults(func=cmd_godot_interaction_replay)
 
     demo = sub.add_parser("gcbench-demo-evidence")
     demo.add_argument("--artifact", required=True)

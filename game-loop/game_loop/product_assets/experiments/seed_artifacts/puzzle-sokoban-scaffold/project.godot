@@ -1,0 +1,17 @@
+; Runnable Godot 4 scaffold for GameCraftBench agent cold-start.
+; Not the official solution — minimal title + main scene so probes/build pass.
+config_version=5
+
+[application]
+config/name="SokobanDungeonScaffold"
+run/main_scene="res://Main.tscn"
+
+[display]
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/stretch/mode="canvas_items"
+window/stretch/aspect="keep"
+
+[rendering]
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

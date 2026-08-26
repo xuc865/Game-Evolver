@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Game Evolver</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="project-rail">
+      <div class="brand"><span class="brand-mark">GE</span><strong>Game Evolver</strong></div>
+      <button id="newProject" class="new-project" title="New game"><span>+</span> New game</button>
+      <nav id="projectList" class="project-list" aria-label="Games"></nav>
+      <div class="rail-footer"><span class="signal"></span> Local creative engine</div>
+    </aside>
+
+    <main class="workspace">
+      <header class="workspace-bar">
+        <div>
+          <button id="mobileProjects" class="icon-button mobile-only" title="Games">☰</button>
+          <button id="mobileCircuits" class="icon-button mobile-only" title="Agent circuits" aria-label="Agent circuits" aria-pressed="false">⌘</button>
+          <h1 id="projectTitle">A new game</h1>
+          <p id="projectStage">Describe a world you want to play.</p>
+        </div>
+        <div class="workspace-actions">
+          <span id="saveState" class="save-state">Saved locally</span>
+          <button id="playGame" class="play-button" disabled><span>▶</span> Play</button>
+        </div>
+      </header>
+
+      <section class="studio-grid">
+        <section class="conversation-pane">
+          <div id="emptyState" class="empty-state">
+            <div class="empty-art" aria-hidden="true">
+              <div class="pixel-star star-a"></div><div class="pixel-star star-b"></div><div class="pixel-star star-c"></div>
+              <div class="pixel-moon"></div>
+              <div class="pixel-console"><i></i><b></b><span></span></div>
+              <div class="pixel-maker"><i></i><b></b><span></span></div>
+              <div class="pixel-spark spark-a"></div><div class="pixel-spark spark-b"></div>
+              <div class="pixel-ground"></div>
+              <div class="art-caption"><b>GAME LAB // 01</b><span>IDEA IN / WORLD OUT</span></div>
+            </div>
+            <span class="eyebrow">Start with an idea</span>
+            <h2>What should we make?</h2>
+            <p>A neon rhythm racer, a cozy potion shop, a tactical moon colony. Start anywhere, then shape it through conversation.</p>
+            <div class="prompt-chips">
+              <button data-prompt="Make a compact roguelike where spells combine into surprising chain reactions.">Spellcraft roguelike</button>
+              <button data-prompt="Create a cozy night-market game about cooking for mysterious travelers.">Midnight kitchen</button>
+              <button data-prompt="Build a fast arcade racer across the rooftops of a flooded city.">Rooftop racer</button>
+            </div>
+          </div>
+          <div id="messageList" class="message-list"></div>
+          <form id="composer" class="composer">
+            <textarea id="promptInput" rows="1" placeholder="Describe the game or ask for a change..." maxlength="8000"></textarea>
+            <div class="composer-footer">
+              <div id="runtimePicker" class="runtime-picker" title="Game maker runtime">
+                <button type="button" data-runtime="opengame">OpenGame</button>
+                <button type="button" data-runtime="deepseek-harness" class="selected">DeepSeek Harness <small>Recommended</small></button>
+              </div>
+              <button id="sendButton" class="send-button" title="Build this version" disabled>↑</button>
+            </div>
+          </form>
+        </section>
+
+        <aside class="preview-pane">
+          <div class="preview-head">
+            <div><span class="eyebrow">Live cartridge</span><h2>Playable preview</h2></div>
+            <span id="buildStatus" class="build-status idle"><i></i> Ready</span>
+          </div>
+          <div id="previewStage" class="preview-stage">
+            <div class="preview-empty"><span>▶</span><strong>Your game will appear here</strong><p>Every accepted version becomes the starting point for your next request.</p></div>
+          </div>
+          <div class="version-strip">
+            <div><span>Current version</span><strong id="versionLabel">No build yet</strong></div>
+            <div><span>Creative memory</span><strong id="memoryLabel">Ready</strong></div>
+          </div>
+          <section class="engine-details" aria-label="HPA and GOA evolution circuit">
+            <div id="evolutionMap" class="evolution-map"></div>
+            <div id="nodeTooltip" class="node-tooltip" hidden></div>
+          </section>
+        </aside>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="projectDialog">
+    <form id="projectForm" method="dialog">
+      <button class="dialog-close" value="cancel" title="Close">×</button>
+      <span class="eyebrow">New project</span><h2>Give your game a working title</h2>
+      <input id="projectName" placeholder="Untitled adventure" maxlength="80" autofocus>
+      <p>You can change the direction at any time. Each message builds on your strongest playable version.</p>
+      <button id="createProject" class="dialog-submit" value="default">Create game</button>
+    </form>
+  </dialog>
+  <dialog id="snapshotDialog" class="snapshot-dialog">
+    <form id="snapshotForm">
+      <button type="button" class="dialog-close" title="Close" onclick="this.closest('dialog').close()">×</button>
+      <span class="eyebrow">Evolution memory</span><h2 id="snapshotTitle">GOA memory snapshots</h2>
+      <div class="snapshot-save-row">
+        <input id="snapshotName" placeholder="Snapshot name" maxlength="80" aria-label="Snapshot name">
+        <button class="dialog-submit" title="Save current state">▣ Save</button>
+      </div>
+      <div id="snapshotList" class="snapshot-list"></div>
+      <p class="snapshot-note">Loading restores this engine's evolving memory. Your playable game and conversation stay untouched.</p>
+    </form>
+  </dialog>
+  <div id="toast" class="toast" role="status"></div>
+  <script src="/app.js"></script>
+</body>
+</html>

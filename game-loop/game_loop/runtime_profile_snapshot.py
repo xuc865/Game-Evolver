@@ -70,6 +70,10 @@ def materialize_runtime_profile(
             shutil.copytree(source, target)
         else:
             shutil.copy2(source, target)
+            if field == "cordis":
+                seed_target = asset_root / f"cordis_seed{''.join(source.suffixes)}"
+                shutil.copy2(source, seed_target)
+                snapshot["cordis_seed"] = str(seed_target)
         snapshot[field] = str(target)
     active_rows = _validated_cordis_plugins(snapshot)
     if active_rows:
@@ -77,21 +81,56 @@ def materialize_runtime_profile(
         if cordis is None:
             raise ValueError("active_cordis_plugins requires a cordis seed asset")
         cordis_path = Path(str(cordis))
-        with cordis_path.open("a", encoding="utf-8") as handle:
-            handle.write("\n# Content-addressed DSH plugin evolution overlay.\n")
-            for row in active_rows:
-                handle.write(f"- id: {json.dumps(row['id'])}\n")
-                handle.write(f"  name: {json.dumps(row['name'])}\n")
-                if row.get("config") is not None:
-                    config_json = json.dumps(
-                        row["config"], sort_keys=True, separators=(",", ":")
-                    )
-                    handle.write(f"  config: {config_json}\n")
+        _append_cordis_rows(cordis_path, active_rows)
         snapshot["effective_cordis_sha256"] = hash_path(cordis_path)
     snapshot_hash = sha256_json(snapshot)
     snapshot_path = root / f"profile-{snapshot_hash}.json"
     atomic_write_json(snapshot_path, snapshot)
     return snapshot_path, snapshot_hash
+
+
+def materialize_role_cordis(
+    *,
+    seed: Path,
+    destination: Path,
+    plugin_catalog: Mapping[str, Any],
+    active_plugins: tuple[str, ...],
+) -> tuple[Path, str]:
+    """Build one role-local Cordis from an immutable seed and audited catalog."""
+
+    rows = _validated_cordis_plugins(
+        {
+            "cordis_plugin_catalog": plugin_catalog,
+            "active_cordis_plugins": list(active_plugins),
+        }
+    )
+    source = seed.expanduser().resolve()
+    if not source.is_file():
+        raise ValueError(f"role Cordis seed does not exist: {source}")
+    target = destination.expanduser().resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        target.unlink()
+    shutil.copy2(source, target)
+    if rows:
+        _append_cordis_rows(target, rows)
+    return target, hash_path(target)
+
+
+def _append_cordis_rows(
+    cordis_path: Path,
+    rows: tuple[dict[str, Any], ...],
+) -> None:
+    with cordis_path.open("a", encoding="utf-8") as handle:
+        handle.write("\n# Content-addressed DSH plugin evolution overlay.\n")
+        for row in rows:
+            handle.write(f"- id: {json.dumps(row['id'])}\n")
+            handle.write(f"  name: {json.dumps(row['name'])}\n")
+            if row.get("config") is not None:
+                config_json = json.dumps(
+                    row["config"], sort_keys=True, separators=(",", ":")
+                )
+                handle.write(f"  config: {config_json}\n")
 
 
 def _validated_cordis_plugins(profile: Mapping[str, Any]) -> tuple[dict[str, Any], ...]:

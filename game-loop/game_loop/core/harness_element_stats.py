@@ -556,6 +556,16 @@ def resolve_target_category(tags: tuple[str, ...]) -> str | None:
     return None
 
 
+def resolve_target_categories(tags: tuple[str, ...]) -> tuple[str, ...]:
+    """Resolve all explicitly ordered element categories in a gradient."""
+    categories: list[str] = []
+    for tag in dict.fromkeys(item.casefold() for item in tags):
+        category = tag if tag in ELEMENT_CATEGORIES else CATEGORY_ALIASES.get(tag)
+        if category in ELEMENT_CATEGORIES and category not in categories:
+            categories.append(category)
+    return tuple(categories)
+
+
 def mutate_category_elements(
     *,
     active: list["HarnessActiveElement"],

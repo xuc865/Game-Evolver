@@ -724,6 +724,18 @@ class HarnessEvolutionConfig:
     max_active_modules: int = 3
     max_active_tool_interfaces: int = 2
     mutation_width: int = 1
+    bundle_width: int = 1
+    attribution_mode: str = "single"
+    outer_library_max_actions: int = 1
+    outer_library_max_additions: int = 1
+    enable_agent_circuit_evolution: bool = False
+    circuit_max_actions: int = 4
+    circuit_bundle_width: int = 1
+    circuit_max_roles: int = 8
+    circuit_max_model_calls: int = 12
+    circuit_max_cost_units: float = 12.0
+    circuit_max_feedback_traversals: int = 3
+    circuit_min_net_utility: float = 0.0
     replay_min_cases: int = 2
     promotion_delta_min: float = 0.0
     max_case_regression: float = 0.08
@@ -812,6 +824,30 @@ class HarnessEvolutionConfig:
             max_active_modules=int(value.get("max_active_modules", 3)),
             max_active_tool_interfaces=int(value.get("max_active_tool_interfaces", 2)),
             mutation_width=int(value.get("mutation_width", 1)),
+            bundle_width=int(value.get("bundle_width", 1)),
+            attribution_mode=str(value.get("attribution_mode", "single"))
+            .strip()
+            .casefold(),
+            outer_library_max_actions=int(
+                value.get("outer_library_max_actions", 1)
+            ),
+            outer_library_max_additions=int(
+                value.get("outer_library_max_additions", 1)
+            ),
+            enable_agent_circuit_evolution=bool(
+                value.get("enable_agent_circuit_evolution", False)
+            ),
+            circuit_max_actions=int(value.get("circuit_max_actions", 4)),
+            circuit_bundle_width=int(value.get("circuit_bundle_width", 1)),
+            circuit_max_roles=int(value.get("circuit_max_roles", 8)),
+            circuit_max_model_calls=int(value.get("circuit_max_model_calls", 12)),
+            circuit_max_cost_units=float(value.get("circuit_max_cost_units", 12.0)),
+            circuit_max_feedback_traversals=int(
+                value.get("circuit_max_feedback_traversals", 3)
+            ),
+            circuit_min_net_utility=float(
+                value.get("circuit_min_net_utility", 0.0)
+            ),
             replay_min_cases=int(value.get("replay_min_cases", 2)),
             promotion_delta_min=float(value.get("promotion_delta_min", 0.0)),
             max_case_regression=float(value.get("max_case_regression", 0.08)),
@@ -874,6 +910,36 @@ class HarnessEvolutionConfig:
             raise ValueError("L4 seed_tool_interfaces exceeds max_active_tool_interfaces")
         if not 1 <= result.mutation_width <= result.max_active_modules:
             raise ValueError("L4 mutation_width must be within 1..max_active_modules")
+        if not 1 <= result.bundle_width <= 4:
+            raise ValueError("harness bundle_width must be within 1..4")
+        if result.attribution_mode not in {"single", "bundle_then_ablate"}:
+            raise ValueError(
+                "harness attribution_mode must be single or bundle_then_ablate"
+            )
+        if result.bundle_width > 1 and result.attribution_mode != "bundle_then_ablate":
+            raise ValueError(
+                "bundle_width > 1 requires attribution_mode=bundle_then_ablate"
+            )
+        if not 1 <= result.outer_library_max_actions <= 8:
+            raise ValueError("outer_library_max_actions must be within 1..8")
+        if not 0 <= result.outer_library_max_additions <= result.outer_library_max_actions:
+            raise ValueError(
+                "outer_library_max_additions must be within 0..outer_library_max_actions"
+            )
+        if not 1 <= result.circuit_max_actions <= 8:
+            raise ValueError("circuit_max_actions must be within 1..8")
+        if not 1 <= result.circuit_bundle_width <= 4:
+            raise ValueError("circuit_bundle_width must be within 1..4")
+        if not 1 <= result.circuit_max_roles <= 16:
+            raise ValueError("circuit_max_roles must be within 1..16")
+        if not 1 <= result.circuit_max_model_calls <= 32:
+            raise ValueError("circuit_max_model_calls must be within 1..32")
+        if not 0 < result.circuit_max_cost_units <= 32:
+            raise ValueError("circuit_max_cost_units must be within (0, 32]")
+        if not 1 <= result.circuit_max_feedback_traversals <= 4:
+            raise ValueError(
+                "circuit_max_feedback_traversals must be within 1..4"
+            )
         if result.replay_min_cases < 1:
             raise ValueError("L4 replay_min_cases must be >= 1")
         if result.max_case_regression < 0:

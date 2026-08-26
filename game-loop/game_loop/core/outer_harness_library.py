@@ -68,16 +68,31 @@ def _extract_json_object(text: str) -> dict[str, Any]:
         try:
             parsed = json.loads(repaired)
         except json.JSONDecodeError:
-            literal_value = re.sub(r"\btrue\b", "True", repaired, flags=re.IGNORECASE)
-            literal_value = re.sub(
-                r"\bfalse\b", "False", literal_value, flags=re.IGNORECASE
-            )
-            literal_value = re.sub(
-                r"\bnull\b", "None", literal_value, flags=re.IGNORECASE
-            )
-            parsed = ast.literal_eval(literal_value)
+            repaired = _repair_bare_json_values(repaired)
+            try:
+                parsed = json.loads(repaired)
+            except json.JSONDecodeError:
+                literal_value = re.sub(
+                    r"\btrue\b", "True", repaired, flags=re.IGNORECASE
+                )
+                literal_value = re.sub(
+                    r"\bfalse\b", "False", literal_value, flags=re.IGNORECASE
+                )
+                literal_value = re.sub(
+                    r"\bnull\b", "None", literal_value, flags=re.IGNORECASE
+                )
+                parsed = _safe_literal_eval_with_names(literal_value)
     if not isinstance(parsed, dict):
         raise TypeError("outer library agent must return one JSON object")
+    try:
+        # ``ast.Constant`` also represents Python's Ellipsis.  It is inert, but
+        # not JSON data; accepting it here lets a schema placeholder such as
+        # ``additions: [...]`` fail much later while persisting the epoch audit.
+        # Reject every non-JSON value at the parser boundary so the configured
+        # backbone retry can request a corrected payload.
+        json.dumps(parsed, ensure_ascii=False)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(f"outer library payload is not JSON-serializable: {exc}") from exc
     return parsed
 
 
@@ -122,6 +137,61 @@ def _repair_llm_json_object(value: str) -> str:
         r'\1"\2"\3',
         repaired,
     )
+
+
+def _repair_bare_json_values(value: str) -> str:
+    """Quote bare scalar values only where the JSON parser expects a value."""
+    repaired = value
+    for _ in range(32):
+        try:
+            json.loads(repaired)
+            return repaired
+        except json.JSONDecodeError as exc:
+            if exc.msg != "Expecting value":
+                return repaired
+            suffix = repaired[exc.pos :]
+            match = re.match(r"([A-Za-z_][A-Za-z0-9_.-]*)(?=\s*[,}\]])", suffix)
+            if not match:
+                return repaired
+            token = match.group(1)
+            if token.casefold() in {"true", "false", "null"}:
+                return repaired
+            repaired = (
+                repaired[: exc.pos]
+                + json.dumps(token)
+                + repaired[exc.pos + len(token) :]
+            )
+    return repaired
+
+
+def _safe_literal_eval_with_names(value: str) -> Any:
+    """Evaluate a data literal while treating bare enum names as strings."""
+    root = ast.parse(value, mode="eval").body
+
+    def decode(node: ast.AST) -> Any:
+        if isinstance(node, ast.Constant):
+            return node.value
+        if isinstance(node, ast.Name):
+            return node.id
+        if isinstance(node, ast.List):
+            return [decode(item) for item in node.elts]
+        if isinstance(node, ast.Tuple):
+            return tuple(decode(item) for item in node.elts)
+        if isinstance(node, ast.Set):
+            # Normalize inert Python set syntax into JSON-compatible data.
+            return [decode(item) for item in node.elts]
+        if isinstance(node, ast.Dict):
+            return {decode(key): decode(item) for key, item in zip(node.keys, node.values)}
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+            operand = decode(node.operand)
+            if not isinstance(operand, (int, float, complex)):
+                raise ValueError("unary literal operand must be numeric")
+            return operand if isinstance(node.op, ast.UAdd) else -operand
+        raise ValueError(
+            f"unsupported node in outer library data literal: {type(node).__name__}"
+        )
+
+    return decode(root)
 
 
 def _compact_inner_epoch_result(result: HarnessEpochResult) -> dict[str, Any]:
@@ -174,7 +244,41 @@ def _compact_inner_epoch_result(result: HarnessEpochResult) -> dict[str, Any]:
             )
             if key in rubric
         }
+        compact["rubric_validation"]["candidate_score_gaps"] = (
+            _compact_candidate_score_gaps(rubric)
+        )
     return compact
+
+
+def _compact_candidate_score_gaps(rubric: dict[str, Any]) -> list[dict[str, Any]]:
+    """Expose accepted-but-imperfect rubric dimensions as improvement evidence."""
+    gaps: list[dict[str, Any]] = []
+    for comparison in rubric.get("case_results") or []:
+        if not isinstance(comparison, dict):
+            continue
+        candidate = comparison.get("candidate")
+        if not isinstance(candidate, dict) or candidate.get("infrastructure_ok") is False:
+            continue
+        soft = candidate.get("soft")
+        if not isinstance(soft, dict):
+            soft = {}
+        underperforming = {
+            str(rubric_id): float(score)
+            for rubric_id, score in soft.items()
+            if isinstance(score, (int, float)) and float(score) < 1.0 - 1e-9
+        }
+        soft_total = candidate.get("soft_total")
+        if not underperforming and not (
+            isinstance(soft_total, (int, float))
+            and float(soft_total) < 1.0 - 1e-9
+        ):
+            continue
+        gaps.append({
+            "case_id": comparison.get("case_id"),
+            "candidate_soft_total": soft_total,
+            "underperforming_soft_rubrics": underperforming,
+        })
+    return gaps[:8]
 
 
 def _normalize_element_payload(value: Any) -> dict[str, Any]:
@@ -190,6 +294,31 @@ def _normalize_outer_plan(plan: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(plan, dict):
         raise ValueError("outer plan must be an object")
     result = dict(plan)
+
+    # Some planners return one complete addition payload at the plan root while
+    # also emitting empty operations/additions arrays. Treat that as a schema
+    # alias only when every admission field is present; apply_plan still checks
+    # evidence epochs, duplication, categories, and transaction safety.
+    root_element_id = result.get("id") or result.get("element_id")
+    if (
+        not (result.get("additions") or [])
+        and root_element_id
+        and {"category", "description"} <= set(result)
+        and str(result.get("capability_boundary_evidence", "")).strip()
+    ):
+        root_addition = {
+            "operation": "add",
+            "capability_boundary_evidence": result["capability_boundary_evidence"],
+            "supporting_epoch_ids": result.get("supporting_epoch_ids", []),
+            "element": _normalize_element_payload({
+                "id": root_element_id,
+                "category": result["category"],
+                "description": result["description"],
+                "spec": result.get("spec", {}),
+                "tags": result.get("tags", []),
+            }),
+        }
+        result["additions"] = [root_addition]
 
     operations = result.get("operations", [])
     promoted_additions = []
@@ -255,8 +384,10 @@ def _normalize_outer_plan(plan: dict[str, Any]) -> dict[str, Any]:
                 for epoch in supporting_epochs:
                     if isinstance(epoch, int):
                         converted.append(epoch)
-                    elif isinstance(epoch, str) and epoch.strip().isdigit():
-                        converted.append(int(epoch.strip()))
+                    elif isinstance(epoch, str):
+                        token = epoch.strip()
+                        match = re.fullmatch(r"(?:epoch[_:/-]*)?(\d+)", token, re.I)
+                        converted.append(int(match.group(1)) if match else epoch)
                     else:
                         converted.append(epoch)
                 item["supporting_epoch_ids"] = converted
@@ -332,6 +463,11 @@ def _compact_outer_inner_history(items: Iterable[dict[str, Any]]) -> list[dict[s
             ],
             "rubric_infrastructure_ok": (
                 rubric.get("infrastructure_ok") if isinstance(rubric, dict) else None
+            ),
+            "candidate_score_gaps": (
+                _compact_candidate_score_gaps(rubric)
+                if isinstance(rubric, dict)
+                else []
             ),
             "outer_library_status": library_update.get("status"),
             "outer_library_error": _clip_history_text(
@@ -613,6 +749,7 @@ class OuterHarnessLibraryStore:
         unknown = sorted(set(requested) - set(catalog))
         if unknown:
             raise ValueError(f"cannot attribute inner epoch to unknown outer elements: {unknown}")
+        score, hard_regression = inner_harness_score_and_hard_regression(result)
         usage_path = self.usage_dir / f"inner_epoch_{result.epoch:03d}.json"
         if usage_path.is_file():
             existing = read_json(usage_path)
@@ -621,8 +758,16 @@ class OuterHarnessLibraryStore:
                 "element_ids": list(requested),
             }
             actual = {key: existing.get(key) for key in expected}
-            if actual != expected:
-                if existing.get("recorded_in_metadata") is False:
+            replace_unscored = (
+                existing.get("recorded_in_metadata") is False and score is not None
+            )
+            replace_scored_retry = (
+                existing.get("recorded_in_metadata") is True
+                and existing.get("candidate_harness_id") != result.candidate_harness_id
+                and existing.get("element_ids") == list(requested)
+            )
+            if actual != expected or replace_unscored or replace_scored_retry:
+                if existing.get("recorded_in_metadata") is False or replace_scored_retry:
                     conflict_dir = self.usage_dir / "conflicts"
                     conflict_dir.mkdir(parents=True, exist_ok=True)
                     existing_harness = str(
@@ -639,6 +784,31 @@ class OuterHarnessLibraryStore:
                         / f"{usage_path.stem}.{existing_harness}.{timestamp}.json"
                     )
                     usage_path.replace(archive_path)
+                    if replace_scored_retry:
+                        stats = HarnessElementStatsStore.load(self.stats_path)
+                        old_score = existing.get("candidate_total_score")
+                        for element_id in requested:
+                            spec = catalog[element_id]
+                            stat = stats.items.get(
+                                element_stat_key(spec.category, spec.element_id)
+                            )
+                            if stat is None or result.epoch not in stat.attributed_inner_epochs:
+                                continue
+                            stat.usage_count = max(0, stat.usage_count - 1)
+                            if existing.get("accepted") is True:
+                                stat.success_count = max(0, stat.success_count - 1)
+                            if isinstance(old_score, (int, float)):
+                                numeric_score = float(old_score)
+                                stat.score_count = max(0, stat.score_count - 1)
+                                stat.score_total -= numeric_score
+                                stat.score_sum_squares -= numeric_score * numeric_score
+                            if existing.get("hard_regression") is True:
+                                stat.hard_regression_count = max(
+                                    0, stat.hard_regression_count - 1
+                                )
+                                stat.hard_regression_ever = stat.hard_regression_count > 0
+                            stat.attributed_inner_epochs.remove(result.epoch)
+                        stats.save(self.stats_path)
                 else:
                     raise ValueError(
                         f"conflicting outer-element attribution for inner epoch {result.epoch}"
@@ -646,7 +816,6 @@ class OuterHarnessLibraryStore:
             else:
                 return existing
 
-        score, hard_regression = inner_harness_score_and_hard_regression(result)
         record = {
             "schema_version": "outer-element-inner-usage.v1",
             "inner_epoch": result.epoch,
@@ -823,6 +992,7 @@ class OuterHarnessLibraryStore:
         plan: dict[str, Any],
         failed_history_epochs: Iterable[int] = (),
         failed_outer_library_epochs: Iterable[int] = (),
+        imperfect_score_epochs: Iterable[int] = (),
         current_inner_element_ids: Iterable[str] = (),
     ) -> OuterLibraryUpdate:
         catalog = self.catalog()
@@ -948,7 +1118,9 @@ class OuterHarnessLibraryStore:
             raise ValueError("outer plan may add at most 2 boundary elements per epoch")
         available_epochs = {int(item) for item in failed_history_epochs}
         available_epochs.update(int(item) for item in failed_outer_library_epochs)
+        available_epochs.update(int(item) for item in imperfect_score_epochs)
         added_ids: list[str] = []
+        applied_additions: list[dict[str, Any]] = []
         for addition in additions:
             if str(addition.get("operation", "add")).casefold() != "add":
                 raise ValueError("outer addition must use operation=add")
@@ -957,26 +1129,38 @@ class OuterHarnessLibraryStore:
             supporting_epochs = addition.get("supporting_epoch_ids", [])
             if not isinstance(supporting_epochs, list):
                 raise ValueError(
-                    "add requires supporting failed inner or outer-library epoch ids"
+                    "add requires supporting failed or imperfect-score epoch ids"
                 )
             if not supporting_epochs and not _outer_dynamics_mode():
                 raise ValueError(
-                    "add requires supporting failed inner or outer-library epoch ids"
+                    "add requires supporting failed or imperfect-score epoch ids"
                 )
             if supporting_epochs and not all(
                 isinstance(item, int) and item in available_epochs
                 for item in supporting_epochs
             ):
                 raise ValueError(
-                    "add requires supporting failed inner or outer-library epoch ids"
+                    "add requires supporting failed or imperfect-score epoch ids"
                 )
             spec = HarnessElementConfig.from_dict(dict(addition.get("element", {})))
             if spec.category not in ELEMENT_CATEGORIES:
                 raise ValueError(f"invalid added element category {spec.category}")
             if spec.element_id in next_catalog:
+                if spec == next_catalog[spec.element_id]:
+                    # Re-adding an active element is idempotent. Re-adding an exact
+                    # dormant catalog element is an evidence-backed activation and
+                    # must enter the next progressive selection to escape cold start.
+                    if spec.element_id not in current_inner_ids:
+                        if spec.element_id not in added_ids:
+                            added_ids.append(spec.element_id)
+                        activation = dict(addition)
+                        activation["activation_only"] = True
+                        applied_additions.append(activation)
+                    continue
                 if _outer_dynamics_mode():
                     if spec.element_id not in added_ids:
                         added_ids.append(spec.element_id)
+                    applied_additions.append(addition)
                     continue
                 raise ValueError(f"added element id already exists: {spec.element_id}")
             for existing in next_catalog.values():
@@ -990,6 +1174,7 @@ class OuterHarnessLibraryStore:
                     )
             next_catalog[spec.element_id] = spec
             added_ids.append(spec.element_id)
+            applied_additions.append(addition)
 
         next_inner_ids: list[str] = []
         for element_id in current_inner_ids:
@@ -1031,7 +1216,7 @@ class OuterHarnessLibraryStore:
             for element_id, decision in decisions.items()
             if str(decision["operation"]).casefold() != "unchanged"
         }
-        revision_after = revision_before + (1 if changed or additions else 0)
+        revision_after = revision_before + (1 if changed or applied_additions else 0)
         if revision_after == revision_before:
             return OuterLibraryUpdate(
                 epoch=epoch,
@@ -1129,7 +1314,7 @@ class OuterHarnessLibraryStore:
             revision_after=revision_after,
             shortlist=shortlisted,
             operations=tuple(decisions[element_id] for element_id in sorted(decisions)),
-            additions=tuple(dict(item) for item in additions),
+            additions=tuple(dict(item) for item in applied_additions),
             next_inner_element_ids=tuple(next_inner_ids),
         )
 
@@ -1145,9 +1330,142 @@ class OuterHarnessLibraryAgent:
         self,
         store: OuterHarnessLibraryStore,
         request_json: Callable[[str, dict[str, Any]], dict[str, Any]] | None = None,
+        *,
+        max_structural_actions: int = 1,
+        max_additions: int = 1,
     ):
+        if max_structural_actions < 1:
+            raise ValueError("max_structural_actions must be positive")
+        if not 0 <= max_additions <= max_structural_actions:
+            raise ValueError("max_additions must be within the structural action limit")
         self.store = store
         self.request_json = request_json or self._request_with_configured_backbone
+        self.max_structural_actions = max_structural_actions
+        self.max_additions = max_additions
+
+    def _validate_plan_throughput(self, plan: dict[str, Any]) -> dict[str, Any]:
+        normalized = _normalize_outer_plan(plan)
+        additions = normalized.get("additions", [])
+        if not isinstance(additions, list):
+            raise ValueError("outer plan additions must be a list")
+        if len(additions) > self.max_additions:
+            raise ValueError(
+                f"outer plan additions {len(additions)} exceed configured limit "
+                f"{self.max_additions}"
+            )
+        operations = normalized.get("operations", [])
+        if not isinstance(operations, list):
+            raise ValueError("outer plan operations must be a list")
+        merge_pairs: set[frozenset[str]] = set()
+        ordinary_actions = 0
+        for operation in operations:
+            if not isinstance(operation, dict):
+                continue
+            kind = str(operation.get("operation", "unchanged")).casefold()
+            if kind == "unchanged":
+                continue
+            if kind == "merge":
+                merge_pairs.add(
+                    frozenset(
+                        {
+                            str(operation.get("element_id", "")),
+                            str(operation.get("merge_with", "")),
+                        }
+                    )
+                )
+            else:
+                ordinary_actions += 1
+        action_count = ordinary_actions + len(merge_pairs) + len(additions)
+        if action_count > self.max_structural_actions:
+            raise ValueError(
+                f"outer plan structural actions {action_count} exceed configured "
+                f"limit {self.max_structural_actions}"
+            )
+        for operation in operations:
+            if not isinstance(operation, dict):
+                continue
+            kind = str(operation.get("operation", "")).casefold()
+            if kind == "merge":
+                element_id = str(operation.get("element_id", "")).strip()
+                merge_with = str(operation.get("merge_with", "")).strip()
+                if not element_id or not merge_with or merge_with == element_id:
+                    raise ValueError(
+                        f"merge requires a distinct non-empty partner: {element_id}"
+                    )
+                merged_element = operation.get("merged_element")
+                if not isinstance(merged_element, dict) or not merged_element:
+                    raise ValueError(
+                        f"merge requires a complete merged_element: {element_id}"
+                    )
+                HarnessElementConfig.from_dict(merged_element)
+            if kind == "modify" and not str(
+                operation.get("correction_hypothesis", "")
+            ).strip():
+                element_id = str(operation.get("element_id", ""))
+                raise ValueError(
+                    f"modify requires a correction hypothesis: {element_id}"
+                )
+            if kind == "modify":
+                replacement = operation.get("replacement")
+                if not isinstance(replacement, dict) or not replacement:
+                    raise ValueError(
+                        "modify requires a complete replacement element: "
+                        f"{operation.get('element_id', '')}"
+                    )
+                HarnessElementConfig.from_dict(replacement)
+        if not self.store.catalog_path.is_file():
+            return normalized
+        catalog = self.store.catalog()
+        metadata = self.store.metadata()
+        merge_operations = {
+            str(operation.get("element_id", "")): operation
+            for operation in operations
+            if isinstance(operation, dict)
+            and str(operation.get("operation", "")).casefold() == "merge"
+        }
+        for element_id, operation in merge_operations.items():
+            merge_with = str(operation.get("merge_with", ""))
+            if element_id not in catalog or merge_with not in catalog:
+                raise ValueError(
+                    f"merge elements must already exist: {element_id}, {merge_with}"
+                )
+            partner = merge_operations.get(merge_with)
+            if (
+                partner is None
+                or str(partner.get("merge_with", "")) != element_id
+                or partner.get("merged_element") != operation.get("merged_element")
+            ):
+                raise ValueError(
+                    f"merge decisions must be symmetric: {element_id}, {merge_with}"
+                )
+            left = catalog[element_id]
+            right = catalog[merge_with]
+            similarity_threshold = 0.40 if _outer_dynamics_mode() else 0.55
+            content_threshold = 0.35 if _outer_dynamics_mode() else 0.50
+            if (
+                element_similarity(left, right) < similarity_threshold
+                or _element_content_similarity(left, right) < content_threshold
+            ):
+                raise ValueError("merge requires similar same-category elements")
+        for operation in operations:
+            if not isinstance(operation, dict):
+                continue
+            if str(operation.get("operation", "")).casefold() != "modify":
+                continue
+            element_id = str(operation.get("element_id", ""))
+            if element_id not in catalog:
+                continue
+            replacement = HarnessElementConfig.from_dict(
+                dict(operation["replacement"])
+            )
+            self.store._validate_modify(
+                element_id=element_id,
+                decision=operation,
+                replacement=replacement,
+                current=catalog[element_id],
+                metadata=metadata,
+            )
+        return normalized
 
     @staticmethod
     def _request_with_configured_backbone(
@@ -1160,20 +1478,40 @@ class OuterHarnessLibraryAgent:
             "You evolve an outer-loop harness element library. Return one JSON object only. "
             "Use evidence conservatively and never invent benchmark-private information."
         )
-        response = LocalChatAgent()._call_api(
-            [
-                {"role": "system", "content": system},
-                {
-                    "role": "user",
-                    "content": json.dumps(
-                        {"stage": stage, **payload}, ensure_ascii=False
-                    ),
-                },
-            ]
-        )
-        message = response["choices"][0]["message"]
-        content = message.get("content") or message.get("reasoning_content") or ""
-        return _extract_json_object(str(content))
+        agent = LocalChatAgent()
+        request = json.dumps({"stage": stage, **payload}, ensure_ascii=False)
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": request},
+        ]
+        last_error: Exception | None = None
+        for attempt in range(4):
+            response = agent._call_api(messages)
+            message = response["choices"][0]["message"]
+            content = message.get("content") or message.get("reasoning_content") or ""
+            try:
+                return _extract_json_object(str(content))
+            except (TypeError, ValueError, SyntaxError) as exc:
+                last_error = exc
+                if attempt == 3:
+                    break
+                messages = [
+                    *messages,
+                    {"role": "assistant", "content": str(content)[:12000]},
+                    {
+                        "role": "user",
+                        "content": (
+                            "Your previous response could not be parsed as the required inert "
+                            f"JSON object ({type(exc).__name__}: {exc}). Return only one valid "
+                            "JSON object matching the requested schema. Do not include prose, "
+                            "markdown fences, Python literals, commentary, or placeholder values. "
+                            "Every operations/additions item must be fully populated; use an empty "
+                            "JSON array when there are no items, never [...]."
+                        ),
+                    },
+                ]
+        assert last_error is not None
+        raise last_error
 
     def evolve(
         self,
@@ -1219,7 +1557,10 @@ class OuterHarnessLibraryAgent:
             shortlist_task = (
                 f"Select at most {shortlist_limit} elements with enough evidence to consider delete, modify, "
                 "or merge. Return {shortlist:[ids], addition_needed:boolean, rationale:string}. "
-                "You have only index metadata now; do not claim to know hidden details."
+                "You have only index metadata now; do not claim to know hidden details. "
+                "An accepted inner epoch is not a solved task: any infrastructure-valid candidate "
+                "rubric dimension below 1.0 is explicit improvement-gap evidence and may justify "
+                "addition_needed=true."
             )
             if _outer_dynamics_mode():
                 shortlist_task += (
@@ -1227,9 +1568,7 @@ class OuterHarnessLibraryAgent:
                     "contrasting outer_exposure patterns, including repeatedly disclosed unchanged "
                     "elements, inactive/dormant elements, and active high-use elements."
                 )
-            shortlist_response = self.request_json(
-                "shortlist",
-                {
+            shortlist_payload = {
                     "catalog_index": record["catalog_index"],
                     "shortlist_limit": shortlist_limit,
                     "inner_history": _compact_outer_inner_history(inner_history[-20:]),
@@ -1238,23 +1577,42 @@ class OuterHarnessLibraryAgent:
                     ),
                     "current_inner_element_ids": list(current_inner_ids),
                     "task": shortlist_task,
-                },
-            )
-            shortlist_raw = shortlist_response.get("shortlist", [])
-            if not isinstance(shortlist_raw, list):
-                raise TypeError("outer shortlist must be a list")
-            unknown_shortlist = sorted(
-                {str(item) for item in shortlist_raw} - catalog_ids
-            )
-            if unknown_shortlist:
-                raise ValueError(
-                    f"outer shortlist returned unknown ids: {unknown_shortlist}"
-                )
-            if len(shortlist_raw) > shortlist_limit:
-                raise ValueError(
-                    "outer shortlist exceeds progressive disclosure limit "
-                    f"{shortlist_limit}: {len(shortlist_raw)}"
-                )
+            }
+            shortlist_response: dict[str, Any] = {}
+            shortlist_raw: list[Any] = []
+            for semantic_attempt in range(4):
+                shortlist_response = self.request_json("shortlist", shortlist_payload)
+                try:
+                    raw_value = shortlist_response.get("shortlist", [])
+                    if not isinstance(raw_value, list):
+                        raise TypeError("outer shortlist must be a list")
+                    unknown_shortlist = sorted(
+                        {str(item) for item in raw_value} - catalog_ids
+                    )
+                    if unknown_shortlist:
+                        raise ValueError(
+                            f"outer shortlist returned unknown ids: {unknown_shortlist}"
+                        )
+                    if len(raw_value) > shortlist_limit:
+                        raise ValueError(
+                            "outer shortlist exceeds progressive disclosure limit "
+                            f"{shortlist_limit}: {len(raw_value)}"
+                        )
+                    shortlist_raw = raw_value
+                    break
+                except (TypeError, ValueError) as exc:
+                    if semantic_attempt == 3:
+                        raise
+                    shortlist_payload = {
+                        **shortlist_payload,
+                        "previous_invalid_response": shortlist_response,
+                        "validation_error": f"{type(exc).__name__}: {exc}",
+                        "task": (
+                            shortlist_task
+                            + " Correct the previous response using only exact ids from "
+                            "catalog_index; do not emit schema placeholders such as 'ids'."
+                        ),
+                    }
             shortlist = tuple(
                 dict.fromkeys(str(item) for item in shortlist_raw)
             )
@@ -1273,13 +1631,19 @@ class OuterHarnessLibraryAgent:
                 "cannot repair it; include modification_inadequate_reason. Modify elements "
                 "near deletion when a concrete correction may improve them, preserving id and "
                 "category in replacement. Merge only two highly similar disclosed elements, "
-                "with symmetric merge decisions and the same merged_element payload. Add only "
-                "when historical failures prove a capability boundary; put additions in a "
-                "separate additions list with capability_boundary_evidence and supporting failed "
-                "inner or outer-library epoch IDs in supporting_epoch_ids. Schema: "
+                "with symmetric merge decisions and the same merged_element payload. Add when "
+                "historical failures or infrastructure-valid candidate rubric dimensions below "
+                "1.0 prove a remaining capability boundary; ACCEPT is not perfection. Put additions "
+                "in a separate additions list with capability_boundary_evidence and supporting "
+                "failed or imperfect-score inner/outer epoch IDs in supporting_epoch_ids. Schema: "
                 "{operations:[{element_id,operation,reason,...}], additions:[...]}. "
+                "Every modify operation must include correction_hypothesis and a complete "
+                "replacement object with id, category, description, spec, and tags. "
                 "Use operation=unchanged only when you intentionally want to document why a "
-                "disclosed element was inspected but kept."
+                "disclosed element was inspected but kept. "
+                f"You may combine add/delete/modify/merge when they support one coherent "
+                f"hypothesis, with at most {self.max_structural_actions} structural actions "
+                f"and at most {self.max_additions} additions."
             )
             if _outer_dynamics_mode():
                 plan_task = (
@@ -1293,15 +1657,16 @@ class OuterHarnessLibraryAgent:
                     "with symmetric merge decisions. You may add a distinct exploratory boundary "
                     "element from repeated no-op, shortlist, or outer-library failure patterns; "
                     "supporting_epoch_ids may be empty only when the evidence is repeated "
-                    "outer_exposure rather than a failed epoch. Keep actions sparse: normally 1 "
-                    "structural action per epoch, at most 2 additions. Schema: "
+                    "outer_exposure rather than a failed epoch. Prefer a coherent evidence-backed "
+                    f"transaction of at most {self.max_structural_actions} structural actions "
+                    f"and at most {self.max_additions} additions. Schema: "
                     "{operations:[{element_id,operation,reason,...}], additions:[...]}. "
+                    "Every modify must include correction_hypothesis and a complete replacement "
+                    "object with id, category, description, spec, and tags. "
                     "For zero-use deletion include unused_or_dormant_evidence and "
                     "modification_inadequate_reason."
                 )
-            plan = self.request_json(
-                "plan",
-                {
+            plan_payload = {
                     "all_element_ids": sorted(catalog_ids),
                     "shortlist": list(shortlist),
                     "disclosed_elements": record["disclosed_elements"],
@@ -1313,8 +1678,31 @@ class OuterHarnessLibraryAgent:
                     "current_inner_element_ids": list(current_inner_ids),
                     "operations": sorted(OUTER_LIBRARY_OPERATIONS),
                     "task": plan_task,
-                },
-            )
+            }
+            plan: dict[str, Any] = {}
+            for semantic_attempt in range(4):
+                plan = self.request_json("plan", plan_payload)
+                try:
+                    plan = self._validate_plan_throughput(plan)
+                    break
+                except (TypeError, ValueError) as exc:
+                    record.update(status="planning", plan=plan)
+                    self.store.write_epoch_record(epoch, record)
+                    if semantic_attempt == 3:
+                        raise
+                    plan_payload = {
+                        **plan_payload,
+                        "previous_invalid_response": plan,
+                        "validation_error": f"{type(exc).__name__}: {exc}",
+                        "task": (
+                            plan_task
+                            + " Correct the previous response to satisfy the exact schema, "
+                            "action limits, and disclosed-element constraints. For modify, copy "
+                            "the disclosed element into replacement and concretely change its "
+                            "description/spec; include id, category, description, spec, tags, "
+                            "and correction_hypothesis."
+                        ),
+                    }
             record.update(status="applying", plan=plan)
             audit_record_error: str | None = None
             try:
@@ -1323,8 +1711,16 @@ class OuterHarnessLibraryAgent:
                 audit_record_error = f"audit_record_error: {type(exc).__name__}: {exc}"
             failed_history_epochs: set[int] = set()
             failed_outer_library_epochs: set[int] = set()
+            imperfect_score_epochs: set[int] = set()
             if not latest_inner_result.accepted:
                 failed_history_epochs.add(latest_inner_result.epoch)
+            latest_rubric = latest_inner_result.rubric_validation
+            if (
+                isinstance(latest_rubric, dict)
+                and latest_rubric.get("infrastructure_ok") is True
+                and _compact_candidate_score_gaps(latest_rubric)
+            ):
+                imperfect_score_epochs.add(latest_inner_result.epoch)
             for item in inner_history:
                 if not isinstance(item, dict):
                     continue
@@ -1332,11 +1728,39 @@ class OuterHarnessLibraryAgent:
                 if isinstance(inner, dict):
                     raw_epoch = inner.get("epoch")
                     accepted = inner.get("accepted")
+                    rubric = inner.get("rubric_validation")
+                    inner_evidence = inner
                 else:
                     raw_epoch = item.get("epoch")
                     accepted = item.get("accepted")
-                if isinstance(raw_epoch, int) and accepted is False:
+                    rubric = item.get("rubric_validation")
+                    inner_evidence = item
+                infrastructure_ok = (
+                    rubric.get("infrastructure_ok")
+                    if isinstance(rubric, dict)
+                    else None
+                )
+                outcomes = [
+                    outcome
+                    for side in ("parent_outcomes", "candidate_outcomes")
+                    for outcome in (inner_evidence.get(side) or [])
+                    if isinstance(outcome, dict)
+                ]
+                if any(outcome.get("infrastructure_ok") is False for outcome in outcomes):
+                    infrastructure_ok = False
+                if (
+                    isinstance(raw_epoch, int)
+                    and accepted is False
+                    and infrastructure_ok is True
+                ):
                     failed_history_epochs.add(raw_epoch)
+                if (
+                    isinstance(raw_epoch, int)
+                    and infrastructure_ok is True
+                    and isinstance(rubric, dict)
+                    and _compact_candidate_score_gaps(rubric)
+                ):
+                    imperfect_score_epochs.add(raw_epoch)
                 library_update = item.get("outer_element_library_update")
                 if isinstance(library_update, dict):
                     update_payload = library_update.get("library_update", library_update)
@@ -1362,6 +1786,7 @@ class OuterHarnessLibraryAgent:
                 plan=plan,
                 failed_history_epochs=failed_history_epochs,
                 failed_outer_library_epochs=failed_outer_library_epochs,
+                imperfect_score_epochs=imperfect_score_epochs,
                 current_inner_element_ids=current_inner_ids,
             )
             record.update(status=update.status, plan=plan, update=update.to_dict())

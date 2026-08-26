@@ -35,17 +35,15 @@ wheels = [
 
 [[package]]
 name = "game-loop"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "." }
-
-[package.optional-dependencies]
-deepseek-harness = [
+dependencies = [
     { name = "deepseek-harness-sdk" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "deepseek-harness-sdk", marker = "extra == 'deepseek-harness'", specifier = "==0.1.0rc7" }]
-provides-extras = ["deepseek-harness"]
+requires-dist = [{ name = "deepseek-harness-sdk", specifier = "==0.1.0rc7" }]
+provides-extras = ["dev"]
 
 [[package]]
 name = "pydantic"

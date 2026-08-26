@@ -77,9 +77,11 @@ def stage_local_runtime_overlay(
     runtime_note.write_text(
         "# Local runtime paths\n\n"
         "These paths are preconfigured for this run. **Do not search the filesystem for Godot.**\n\n"
+        "- Writable workspace root: the process current working directory (`pwd`)\n"
         f"- Godot binary: `{godot}`\n"
         "- Godot command: `tools/godot` (wrapper in this workspace)\n"
         "- Game project: `game/` (same as `/workspace/game/` in the task spec)\n"
+        "- Use relative paths under `pwd`; a staging path from an earlier phase is not writable output.\n"
         "- CLI reference: `tools/godot_command_line.md`\n"
         + visual_note,
         encoding="utf-8",
@@ -105,6 +107,9 @@ def render_runtime_instruction_block(runtime: dict[str, str]) -> str:
     )
     return (
         "## Local runtime (preconfigured)\n\n"
+        "- Writable workspace root: the process current working directory (`pwd`).\n"
+        "- Treat `pwd` as `/workspace`; use its `game/` project only.\n"
+        "- Use relative paths. Do not reuse an absolute staging or repository path from the task text.\n"
         f"- Godot: `{godot}` — run via `tools/godot` from the workspace root\n"
         "- Project: `game/`\n"
         + tools_line
