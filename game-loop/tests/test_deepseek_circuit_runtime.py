@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 from game_loop.core.agent_circuit import AgentBudget, AgentRole, RoleHarnessSpec
 from game_loop.core.agent_circuit_runtime import CircuitArtifact, CircuitRoleRequest
@@ -19,9 +21,11 @@ class FakeRunner:
         self,
         response: str = "Reviewed.\nCIRCUIT_STATUS: REVISE",
         finish_reason: str = "completed",
+        model_calls: int = 1,
     ):
         self.response = response
         self.finish_reason = finish_reason
+        self.model_calls = model_calls
         self.calls = []
 
     def run(self, prompt, **kwargs):
@@ -32,6 +36,7 @@ class FakeRunner:
             events=(
                 {"data": {"turn": 1, "step": 1, "usage": {"inputTokens": 7, "outputTokens": 3}}},
             ),
+            model_calls=self.model_calls,
         )
 
 
@@ -155,6 +160,8 @@ class DeepSeekCircuitRoleRunnerTests(unittest.TestCase):
             self.assertEqual(result.artifacts[0].kind, "review")
             prompt, kwargs = fake.calls[0]
             self.assertIn("Role: Playtester", prompt)
+            self.assertIn("## Hard runtime deadline", prompt)
+            self.assertIn("hard 90-second wall-clock limit", prompt)
             self.assertIn("handoffs/game.zip", prompt)
             self.assertIn("CIRCUIT_STATUS: PASS", prompt)
             self.assertEqual(kwargs["config"].max_tokens, 1000)
@@ -387,6 +394,91 @@ class DeepSeekCircuitRoleRunnerTests(unittest.TestCase):
             self.assertEqual(result.status, "failed")
             self.assertFalse(result.infrastructure_ok)
             self.assertIn("timeout", result.error or "")
+
+    def test_finalization_call_uses_role_budget_as_total_cost_ceiling(self):
+        with tempfile.TemporaryDirectory() as td:
+            role = AgentRole(
+                role_id="maker",
+                name="Maker",
+                kind="operator",
+                objective="Build the game.",
+                system_prompt="Implement and verify.",
+                budget=AgentBudget(max_model_calls=2, cost_units=2.0),
+            )
+            result = DeepSeekCircuitRoleRunner(
+                DeepSeekHarnessRuntimeConfig(backbone_provider=None),
+                runner=FakeRunner("Done.", model_calls=2),
+            ).run_role(CircuitRoleRequest("Build.", role, Path(td), attempt=1))
+
+            self.assertEqual(result.model_calls, 2)
+            self.assertEqual(result.cost_units, 2.0)
+
+    def test_mixed_polaris_role_passes_resolved_model_to_runner(self):
+        with tempfile.TemporaryDirectory() as td:
+            fake = FakeRunner("Done.")
+            role = AgentRole(
+                role_id="worker",
+                name="Worker",
+                kind="operator",
+                objective="Build the game.",
+                system_prompt="Implement and verify.",
+            )
+            environment = {
+                "DEEPSEEK_API_KEY": "official-secret",
+                "DEEPSEEK_API_BASE": "https://api.deepseek.com",
+                "DEEPSEEK_ROUTE_MODE": "mixed",
+                "DEEPSEEK_POLARIS_BASE_URL": "http://polaris.invalid/v1",
+                "DEEPSEEK_POLARIS_API_KEY": "polaris-secret",
+                "DEEPSEEK_POLARIS_MODEL": "kaiwu-llm-model",
+            }
+
+            with patch.dict(os.environ, environment, clear=False):
+                result = DeepSeekCircuitRoleRunner(
+                    DeepSeekHarnessRuntimeConfig(),
+                    runner=fake,
+                ).run_role(CircuitRoleRequest("Build.", role, Path(td), attempt=1))
+
+            self.assertEqual(fake.calls[0][1]["config"].model, "kaiwu-llm-model")
+            self.assertEqual(result.provider_route, "polaris")
+            self.assertEqual(result.provider_model, "kaiwu-llm-model")
+            self.assertNotIn(
+                "GAME_LOOP_PROVIDER_KEY_SALT",
+                fake.calls[0][1]["config"].environment,
+            )
+
+    def test_role_runner_preserves_provider_evidence_when_sdk_raises(self):
+        class RaisingRunner:
+            def run(self, prompt, **kwargs):
+                raise TimeoutError("bounded timeout")
+
+        with tempfile.TemporaryDirectory() as td:
+            role = AgentRole(
+                role_id="worker",
+                name="Worker",
+                kind="operator",
+                objective="Build the game.",
+                system_prompt="Implement and verify.",
+            )
+            environment = {
+                "DEEPSEEK_API_KEY": "official-secret",
+                "DEEPSEEK_API_BASE": "https://api.deepseek.com",
+                "DEEPSEEK_ROUTE_MODE": "mixed",
+                "DEEPSEEK_POLARIS_BASE_URL": "http://polaris.invalid/v1",
+                "DEEPSEEK_POLARIS_API_KEY": "polaris-secret",
+                "DEEPSEEK_POLARIS_MODEL": "kaiwu-llm-model",
+            }
+
+            with patch.dict(os.environ, environment, clear=False):
+                result = DeepSeekCircuitRoleRunner(
+                    DeepSeekHarnessRuntimeConfig(),
+                    runner=RaisingRunner(),
+                ).run_role(CircuitRoleRequest("Build.", role, Path(td), attempt=1))
+
+            self.assertEqual(result.status, "failed")
+            self.assertFalse(result.infrastructure_ok)
+            self.assertEqual(result.provider_route, "polaris")
+            self.assertEqual(result.provider_model, "kaiwu-llm-model")
+            self.assertIn("TimeoutError", result.error or "")
 
 
 if __name__ == "__main__":

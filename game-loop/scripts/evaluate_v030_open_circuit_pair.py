@@ -108,6 +108,28 @@ def _load_submission(path: Path) -> GameSubmission:
     return submission
 
 
+def _reserve_finalization_call(circuit: AgentCircuit) -> AgentCircuit:
+    """Migrate legacy one-call role ceilings within the existing total policy."""
+    roles = tuple(
+        replace(
+            role,
+            budget=replace(
+                role.budget,
+                max_model_calls=max(2, role.budget.max_model_calls),
+                cost_units=max(2.0, role.budget.cost_units),
+            ),
+        )
+        for role in circuit.roles
+    )
+    required_calls = sum(role.budget.max_model_calls for role in roles)
+    required_cost = sum(role.budget.cost_units for role in roles)
+    if required_calls > circuit.policy.max_total_model_calls:
+        raise ValueError("candidate total model-call policy cannot reserve finalization")
+    if required_cost > circuit.policy.max_total_cost_units:
+        raise ValueError("candidate total cost policy cannot reserve finalization")
+    return replace(circuit, roles=roles)
+
+
 def _materialize_evidence_run(
     *,
     destination: Path,
@@ -148,18 +170,54 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     proof = read_json(args.proof)
     parent_circuit = AgentCircuit.from_dict(dict(proof["parent_circuit"]))
     candidate_circuit = AgentCircuit.from_dict(dict(proof["candidate_circuit"]))
+    proposed_candidate_circuit_id = candidate_circuit.circuit_id
+    if args.reserve_finalization_call:
+        candidate_circuit = _reserve_finalization_call(candidate_circuit)
 
     task_source = output / "task"
     task_source.mkdir(exist_ok=True)
     (task_source / "instruction.md").write_text(args.task + "\n", encoding="utf-8")
     task = GameTask(
-        task_id="v030-open-circuit-paired-proof",
+        task_id=args.task_id,
         benchmark_id="studio-proof",
         prompt=args.task,
         task_source_ref=str(task_source),
         workspace_seed_ref=str(args.seed.resolve()),
         artifact_relpath=".",
     )
+
+    if args.candidate_only:
+        candidate_config = _runtime_config(
+            circuit=candidate_circuit,
+            runtime_profile=args.runtime_profile,
+            inner_config=args.inner_config,
+            wall_timeout_seconds=args.wall_timeout_seconds,
+        )
+        candidate_runtime = DeepSeekCircuitRuntime(candidate_config)
+        candidate_doctor = candidate_runtime.doctor()
+        atomic_write_json(output / "candidate-doctor.json", candidate_doctor)
+        if candidate_doctor.get("ok") is not True:
+            raise RuntimeError("circuit candidate doctor failed")
+        candidate_submission = candidate_runtime.run(
+            task,
+            episode_dir=output / "candidate-runtime",
+        )
+        payload: dict[str, object] = {
+            "schema": "v030-open-circuit-candidate-execution.v1",
+            "accepted": False,
+            "formal_pair_available": False,
+            "infrastructure_ok": candidate_submission.status == "completed",
+            "reason": "candidate-only execution does not receive a formal ACCEPT decision",
+            "candidate": {
+                "circuit_id": candidate_circuit.circuit_id,
+                "source_circuit_id": proposed_candidate_circuit_id,
+                "runtime_budget_migration": args.reserve_finalization_call,
+                "roles": [role.role_id for role in candidate_circuit.roles],
+                "submission": candidate_submission.to_dict(),
+            },
+        }
+        atomic_write_json(output / "candidate-execution.json", payload)
+        return payload
 
     parent_submission_path = output / "parent-runtime" / "submission.json"
     if parent_submission_path.is_file() and not args.force_parent:
@@ -289,6 +347,8 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         },
         "candidate": {
             "circuit_id": candidate_circuit.circuit_id,
+            "source_circuit_id": proposed_candidate_circuit_id,
+            "runtime_budget_migration": args.reserve_finalization_call,
             "roles": [role.role_id for role in candidate_circuit.roles],
             "submission": candidate_submission.to_dict(),
         },
@@ -314,15 +374,19 @@ def main() -> int:
     parser.add_argument("--seed", type=Path, default=DEFAULT_SEED)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--task", default=DEFAULT_TASK)
+    parser.add_argument("--task-id", default="v030-open-circuit-paired-proof")
     parser.add_argument("--wall-timeout-seconds", type=int, default=600)
     parser.add_argument("--force-parent", action="store_true")
     parser.add_argument("--force-candidate", action="store_true")
+    parser.add_argument("--candidate-only", action="store_true")
+    parser.add_argument("--reserve-finalization-call", action="store_true")
     args = parser.parse_args()
     payload = run(args)
+    proof_name = "candidate-execution.json" if args.candidate_only else "paired-proof.json"
     print(
         f"accepted={payload['accepted']} "
         f"infrastructure_ok={payload['infrastructure_ok']} "
-        f"proof={args.output_dir.resolve() / 'paired-proof.json'}"
+        f"proof={args.output_dir.resolve() / proof_name}"
     )
     return 0 if payload["infrastructure_ok"] else 2
 

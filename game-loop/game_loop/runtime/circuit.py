@@ -162,6 +162,14 @@ class DeepSeekCircuitRuntime:
                 "agent_roles": list(result.role_attempts),
                 "role_attempts": result.role_attempts,
                 "infrastructure_ok": result.infrastructure_ok,
+                "provider_routes": {
+                    item.role_id: {
+                        "route": item.provider_route,
+                        "base_url": item.provider_base_url,
+                        "model": item.provider_model,
+                    }
+                    for item in result.role_results
+                },
             },
         )
         atomic_write_json(episode_dir / "submission.json", submission.to_dict())

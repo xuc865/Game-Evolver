@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from game_loop.backends.command import CommandBackend
+from game_loop.chat_agent import LocalChatAgent
 from game_loop.config import BackendConfig
 from game_loop.core.models import PreparedTask
 from game_loop.gcbench_runtime import (
@@ -47,6 +48,65 @@ class ProviderLaunchTests(unittest.TestCase):
         self.assertEqual(resolved.base_url, "https://api.deepseek.com")
         self.assertEqual(resolved.model, "deepseek-v4-flash")
         self.assertTrue(resolved.doctor()["ready"])
+
+    def test_deepseek_mixed_routes_are_stable_and_strip_completion_suffix(self) -> None:
+        environment = {
+            "DEEPSEEK_API_KEY": "official-secret",
+            "DEEPSEEK_API_BASE": "https://api.deepseek.com",
+            "DEEPSEEK_MODEL": "deepseek-v4-flash",
+            "DEEPSEEK_ROUTE_MODE": "mixed",
+            "DEEPSEEK_POLARIS_BASE_URL": (
+                "http://kaiwu.llm.dsv4flash0731.polaris:8080/v1/chat/completions"
+            ),
+            "DEEPSEEK_POLARIS_API_KEY": "polaris-secret",
+            "DEEPSEEK_POLARIS_MODEL": "kaiwu-llm-model",
+        }
+        resolved = [
+            load_provider("deepseek").resolve({
+                **environment,
+                "GAME_LOOP_PROVIDER_KEY_SALT": f"role-{index}",
+            })
+            for index in range(20)
+        ]
+        self.assertEqual({item.route_id for item in resolved}, {"official", "polaris"})
+        self.assertTrue(all(item.doctor()["ready"] for item in resolved))
+        self.assertTrue(
+            all(not item.base_url.endswith("/chat/completions") for item in resolved)
+        )
+        self.assertEqual(
+            {item.model for item in resolved if item.route_id == "polaris"},
+            {"kaiwu-llm-model"},
+        )
+        repeated = load_provider("deepseek").resolve({
+            **environment,
+            "GAME_LOOP_PROVIDER_KEY_SALT": "role-7",
+        })
+        self.assertEqual(repeated, resolved[7])
+
+    def test_local_chat_agent_uses_the_same_mixed_deepseek_route(self) -> None:
+        environment = {
+            "CODEX_API_BASE": "https://api.deepseek.com",
+            "CODEX_MODEL": "deepseek-v4-flash",
+            "GAME_LOOP_BACKBONE_PROVIDER": "deepseek",
+            "DEEPSEEK_API_KEY": "official-secret",
+            "DEEPSEEK_API_BASE": "https://api.deepseek.com",
+            "DEEPSEEK_MODEL": "deepseek-v4-flash",
+            "DEEPSEEK_ROUTE_MODE": "mixed",
+            "DEEPSEEK_POLARIS_BASE_URL": "http://polaris.invalid/v1",
+            "DEEPSEEK_POLARIS_API_KEY": "polaris-secret",
+            "DEEPSEEK_POLARIS_MODEL": "kaiwu-llm-model",
+        }
+        with patch.dict(os.environ, environment, clear=True):
+            agent = LocalChatAgent(route_salt="hpa:plan")
+            expected = load_provider("deepseek").resolve({
+                **environment,
+                "GAME_LOOP_PROVIDER_KEY_SALT": "hpa:plan",
+            })
+
+        self.assertEqual(agent.provider_route, expected.route_id)
+        self.assertEqual(agent.api_base, expected.base_url)
+        self.assertEqual(agent.model, expected.model)
+        self.assertEqual(agent.api_keys, [expected.api_key])
 
     def test_text_only_removes_visual_tool_from_prompt_and_workspace(self) -> None:
         instruction = (

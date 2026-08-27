@@ -76,7 +76,12 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         shutil.rmtree(output)
     output.mkdir(parents=True, exist_ok=True)
     proof = read_json(source / "proof.json")
-    pair = read_json(source / "formal-pair/paired-proof.json")
+    pair_path = (
+        args.pair.resolve()
+        if args.pair is not None
+        else source / "formal-pair/paired-proof.json"
+    )
+    pair = read_json(pair_path)
     if pair.get("infrastructure_ok") is not True or pair.get("accepted") is not False:
         raise ValueError("source pair must be an infrastructure-healthy formal rejection")
     parent_circuit = AgentCircuit.from_dict(dict(proof["parent_circuit"]))
@@ -126,7 +131,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     )
     payload: dict[str, object] = {
         "schema": "v030-hpa-rejection-feedback.v1",
-        "source_pair": str((source / "formal-pair/paired-proof.json").resolve()),
+        "source_pair": str(pair_path),
         "hpa_update": update.to_dict(),
         "library_revision": store.revision(),
         "library_stats": {
@@ -176,6 +181,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source-run", type=Path, default=DEFAULT_SOURCE)
+    parser.add_argument("--pair", type=Path)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--inner-config", type=Path, default=DEFAULT_INNER)
     parser.add_argument("--force", action="store_true")

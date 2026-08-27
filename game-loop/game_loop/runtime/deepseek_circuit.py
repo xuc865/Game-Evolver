@@ -17,6 +17,7 @@ from game_loop.runtime.deepseek_harness import (
     DeepSeekHarnessRuntimeConfig,
     PythonSDKRunner,
     _collect_usage,
+    _deadline_contract,
     _load_system_prompt,
     _runtime_base_environment,
 )
@@ -82,7 +83,19 @@ class DeepSeekCircuitRoleRunner:
     def run_role(self, request: CircuitRoleRequest) -> CircuitRoleResult:
         resolved_harness = self._resolve_harness(request.role)
         config = self._role_config(request, resolved_harness=resolved_harness)
-        environment = self._environment(config, request.workspace)
+        route_salt = (
+            f"{sha256_json(request.task)}:role:{request.role.role_id}:attempt:{request.attempt}"
+        )
+        environment = self._environment(
+            config,
+            request.workspace,
+            route_salt=route_salt,
+        )
+        if environment.get("GAME_LOOP_RESOLVED_PROVIDER_ROUTE") == "polaris":
+            config = replace(
+                config,
+                model=environment["GAME_LOOP_RESOLVED_PROVIDER_MODEL"],
+            )
         session_root = (
             request.workspace
             / ".circuit_sessions"
@@ -90,13 +103,29 @@ class DeepSeekCircuitRoleRunner:
             / f"attempt_{request.attempt:02d}"
         )
         session_root.mkdir(parents=True, exist_ok=True)
-        result = self.runner.run(
-            self._prompt(request, config, resolved_harness=resolved_harness),
-            cwd=request.workspace,
-            session_root=session_root,
-            config=config,
-            environment=environment,
-        )
+        try:
+            result = self.runner.run(
+                self._prompt(request, config, resolved_harness=resolved_harness),
+                cwd=request.workspace,
+                session_root=session_root,
+                config=config,
+                environment=environment,
+            )
+        except Exception as exc:  # noqa: BLE001 - preserve route evidence on infra failure.
+            return CircuitRoleResult(
+                role_id=request.role.role_id,
+                status="failed",
+                summary="",
+                error=f"runner exception: {type(exc).__name__}: {exc}",
+                infrastructure_ok=False,
+                effective_harness_hash=resolved_harness.effective_hash,
+                effective_cordis_hash=(
+                    None if config.cordis is None else hash_path(Path(config.cordis))
+                ),
+                provider_route=environment.get("GAME_LOOP_RESOLVED_PROVIDER_ROUTE"),
+                provider_base_url=environment.get("DEEPSEEK_BASE_URL"),
+                provider_model=config.model,
+            )
         usage = _collect_usage(result.events, result.notifications)
         tokens = int(usage.get("totalTokens", 0))
         if not tokens:
@@ -115,9 +144,13 @@ class DeepSeekCircuitRoleRunner:
             status="completed" if success else "failed",
             summary=final_response[: request.role.context.max_output_chars],
             artifacts=artifacts,
-            model_calls=1,
+            model_calls=result.model_calls,
             tokens=tokens,
-            cost_units=request.role.budget.cost_units,
+            cost_units=(
+                request.role.budget.cost_units
+                / request.role.budget.max_model_calls
+                * result.model_calls
+            ),
             feedback_requested=feedback_requested,
             error=(
                 None
@@ -131,6 +164,9 @@ class DeepSeekCircuitRoleRunner:
             effective_cordis_hash=(
                 None if config.cordis is None else hash_path(Path(config.cordis))
             ),
+            provider_route=environment.get("GAME_LOOP_RESOLVED_PROVIDER_ROUTE"),
+            provider_base_url=environment.get("DEEPSEEK_BASE_URL"),
+            provider_model=config.model,
         )
 
     def _role_config(
@@ -297,6 +333,8 @@ class DeepSeekCircuitRoleRunner:
     def _environment(
         config: DeepSeekHarnessRuntimeConfig,
         workspace: Path,
+        *,
+        route_salt: str | None = None,
     ) -> dict[str, str]:
         environment = _runtime_base_environment()
         environment.update(config.environment)
@@ -317,6 +355,8 @@ class DeepSeekCircuitRoleRunner:
             provider = load_provider(config.backbone_provider)
             provider_environment = dict(os.environ)
             provider_environment.update(config.environment)
+            if route_salt:
+                provider_environment["GAME_LOOP_PROVIDER_KEY_SALT"] = route_salt
             resolved = provider.resolve(provider_environment)
             if resolved.api_key is None and resolved.requires_credential:
                 raise RuntimeError(
@@ -328,6 +368,8 @@ class DeepSeekCircuitRoleRunner:
                     {
                         "DEEPSEEK_BASE_URL": resolved.base_url,
                         "DEEPSEEK_API_KEY": resolved.api_key or "EMPTY",
+                        "GAME_LOOP_RESOLVED_PROVIDER_ROUTE": resolved.route_id,
+                        "GAME_LOOP_RESOLVED_PROVIDER_MODEL": resolved.model,
                     }
                 )
             else:
@@ -357,6 +399,14 @@ class DeepSeekCircuitRoleRunner:
                 f"max_tokens={request.role.budget.max_tokens or 'runtime default'}, "
                 f"timeout_seconds={request.role.budget.timeout_seconds}, "
                 f"cost_units={request.role.budget.cost_units:g}"
+            ),
+            _deadline_contract(
+                request.role.budget.timeout_seconds
+                if request.runtime_timeout_seconds is None
+                else min(
+                    request.role.budget.timeout_seconds,
+                    request.runtime_timeout_seconds,
+                )
             ),
             request.role.system_prompt,
             "",

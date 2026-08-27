@@ -84,6 +84,9 @@ class CircuitRoleResult:
     infrastructure_ok: bool = True
     effective_harness_hash: str | None = None
     effective_cordis_hash: str | None = None
+    provider_route: str | None = None
+    provider_base_url: str | None = None
+    provider_model: str | None = None
 
     def __post_init__(self) -> None:
         if self.status not in _ROLE_STATUSES:
@@ -111,6 +114,9 @@ class CircuitRoleResult:
             "infrastructure_ok": self.infrastructure_ok,
             "effective_harness_hash": self.effective_harness_hash,
             "effective_cordis_hash": self.effective_cordis_hash,
+            "provider_route": self.provider_route,
+            "provider_base_url": self.provider_base_url,
+            "provider_model": self.provider_model,
         }
 
 

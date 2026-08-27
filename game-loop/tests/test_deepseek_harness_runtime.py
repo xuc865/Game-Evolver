@@ -33,6 +33,7 @@ from game_loop.runtime_profile_snapshot import (
     capture_runtime_profile,
     materialize_runtime_profile,
 )
+from game_loop.runtime.deepseek_harness import _collect_usage
 
 
 class FakeDeepSeekHarnessRunner:
@@ -228,6 +229,7 @@ class DeepSeekHarnessRuntimeTests(unittest.TestCase):
                 system_prompt_variables={"[[MODE]]": "evolution"},
                 skills_source=str(skills),
                 backbone_provider=None,
+                timeout_seconds=600,
             )
             runtime = DeepSeekHarnessRuntime(config, runner=runner)
             task = GameTask(
@@ -248,8 +250,11 @@ class DeepSeekHarnessRuntimeTests(unittest.TestCase):
                 "outputTokens": 3,
                 "cacheReadTokens": 2,
                 "reasoningTokens": 1,
+                "modelCalls": 1,
             })
             self.assertIn("Harness evolution", runner.calls[0]["prompt"])
+            self.assertIn("## Hard runtime deadline", runner.calls[0]["prompt"])
+            self.assertIn("hard 600-second wall-clock limit", runner.calls[0]["prompt"])
             isolated_workspace = (root / "episode" / "workspace").resolve()
             self.assertIn(
                 f"Your only writable workspace for this episode is `{isolated_workspace}`",
@@ -328,6 +333,44 @@ class DeepSeekHarnessRuntimeTests(unittest.TestCase):
             self.assertTrue((installed / "godot" / "SKILL.md").is_file())
             self.assertFalse((installed / "skills").exists())
             self.assertFalse((installed / "stale").exists())
+
+    def test_mixed_polaris_route_passes_resolved_model_to_runner(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            seed = root / "seed"
+            seed.mkdir()
+            runner = FakeDeepSeekHarnessRunner()
+            runtime = DeepSeekHarnessRuntime(
+                DeepSeekHarnessRuntimeConfig(),
+                runner=runner,
+            )
+            environment = {
+                "DEEPSEEK_API_KEY": "official-secret",
+                "DEEPSEEK_API_BASE": "https://api.deepseek.com",
+                "DEEPSEEK_ROUTE_MODE": "mixed",
+                "DEEPSEEK_POLARIS_BASE_URL": "http://polaris.invalid/v1",
+                "DEEPSEEK_POLARIS_API_KEY": "polaris-secret",
+                "DEEPSEEK_POLARIS_MODEL": "kaiwu-llm-model",
+            }
+            task = GameTask(
+                task_id="v030-open-circuit-paired-proof",
+                benchmark_id="provider-test",
+                prompt="Build.",
+                task_source_ref=str(root),
+                workspace_seed_ref=str(seed),
+                artifact_relpath="game.txt",
+            )
+
+            with patch.dict(os.environ, environment, clear=False):
+                submission = runtime.run(task, episode_dir=root / "episode")
+
+            self.assertEqual(runner.calls[0]["config"].model, "kaiwu-llm-model")
+            self.assertEqual(submission.metadata["provider_route"], "polaris")
+            self.assertEqual(submission.metadata["provider_model"], "kaiwu-llm-model")
+            self.assertNotIn(
+                "GAME_LOOP_PROVIDER_KEY_SALT",
+                runner.calls[0]["config"].environment,
+            )
 
     def test_existing_seed_artifact_must_be_changed_by_the_agent(self):
         with tempfile.TemporaryDirectory() as td:
@@ -651,12 +694,16 @@ class DeepSeekHarnessRuntimeTests(unittest.TestCase):
 
         class HangingHarness:
             def __init__(self, **kwargs):
-                pass
+                self.client = self
+                self.id = "hanging-session"
 
             def start(self):
                 started_environment.update(os.environ)
 
-            def run(self, prompt):
+            def start_session(self):
+                return self
+
+            def run(self, prompt, on_notification=None):
                 closed.wait(10)
                 raise RuntimeError("transport closed")
 
@@ -683,6 +730,170 @@ class DeepSeekHarnessRuntimeTests(unittest.TestCase):
             self.assertTrue(closed.is_set())
             self.assertNotIn("AWS_SECRET_ACCESS_KEY", started_environment)
             self.assertEqual(os.environ["AWS_SECRET_ACCESS_KEY"], "must-not-leak")
+
+    def test_python_sdk_runner_cancels_and_finishes_in_same_session(self):
+        cancelled = threading.Event()
+        prompts: list[str] = []
+        notifications: list[tuple[str, dict[str, str]]] = []
+
+        class Result:
+            def __init__(self, reason, response, turn):
+                self.finish_reason = reason
+                self.final_response = response
+                self.events = ({
+                    "type": "assistant/message",
+                    "data": {
+                        "turn": turn,
+                        "step": 1,
+                        "usage": {"inputTokens": turn * 10, "outputTokens": turn},
+                    },
+                },)
+                self.notifications = ()
+                self.session_root = "/fake/session"
+
+        class Session:
+            id = "shared-session"
+
+            def run(self, prompt, on_notification=None):
+                prompts.append(prompt)
+                if len(prompts) == 1:
+                    cancelled.wait(5)
+                    return Result("cancelled", "partial", 1)
+                return Result("completed", "finalized", 2)
+
+        class ControlledHarness:
+            def __init__(self, **kwargs):
+                self.client = self
+                self.session = Session()
+
+            def start(self):
+                pass
+
+            def start_session(self):
+                return self.session
+
+            def notify(self, method, params):
+                notifications.append((method, params))
+                cancelled.set()
+
+            def close(self):
+                cancelled.set()
+
+        fake_module = types.ModuleType("deepseek_harness")
+        fake_module.DeepSeekHarness = ControlledHarness
+        with tempfile.TemporaryDirectory() as td, patch.dict(
+            sys.modules, {"deepseek_harness": fake_module}
+        ):
+            root = Path(td)
+            result = PythonSDKRunner().run(
+                "build",
+                cwd=root,
+                session_root=root / "sessions",
+                config=DeepSeekHarnessRuntimeConfig(
+                    backbone_provider=None,
+                    timeout_seconds=3,
+                    finalization_reserve_seconds=2,
+                    finalization_cancel_grace_seconds=0.5,
+                ),
+                environment={},
+            )
+
+        self.assertEqual(result.finish_reason, "completed")
+        self.assertEqual(result.final_response, "finalized")
+        self.assertEqual(result.model_calls, 2)
+        self.assertTrue(result.finalization_attempted)
+        self.assertTrue(result.finalization_completed)
+        self.assertEqual(len(prompts), 2)
+        self.assertIn("Do not call any tool", prompts[1])
+        self.assertEqual(
+            notifications,
+            [("session/cancel", {"sessionId": "shared-session"})],
+        )
+        usage = _collect_usage(result.events, result.notifications)
+        self.assertEqual(usage["inputTokens"], 30)
+        self.assertEqual(usage["outputTokens"], 3)
+
+    def test_python_sdk_runner_restarts_finalization_when_cancel_is_blocked(self):
+        instances = []
+
+        class Result:
+            finish_reason = "completed"
+            final_response = "recovered"
+            events = ()
+            notifications = ()
+            session_root = "/fake/session"
+
+        class Session:
+            id = "session"
+
+            def __init__(self, owner):
+                self.owner = owner
+
+            def run(self, prompt, on_notification=None):
+                if self.owner.index == 0:
+                    if on_notification is not None:
+                        on_notification({
+                            "method": "session.event",
+                            "payload": {
+                                "sessionId": "session",
+                                "event": {
+                                    "type": "assistant/message",
+                                    "data": {
+                                        "turn": 1,
+                                        "step": 1,
+                                        "usage": {"inputTokens": 9, "outputTokens": 1},
+                                    },
+                                },
+                            },
+                        })
+                    self.owner.closed.wait(5)
+                    raise RuntimeError("transport closed")
+                return Result()
+
+        class RestartedHarness:
+            def __init__(self, **kwargs):
+                self.index = len(instances)
+                self.closed = threading.Event()
+                self.client = self
+                instances.append(self)
+
+            def start(self):
+                pass
+
+            def start_session(self):
+                return Session(self)
+
+            def notify(self, method, params):
+                pass
+
+            def close(self):
+                self.closed.set()
+
+        fake_module = types.ModuleType("deepseek_harness")
+        fake_module.DeepSeekHarness = RestartedHarness
+        with tempfile.TemporaryDirectory() as td, patch.dict(
+            sys.modules, {"deepseek_harness": fake_module}
+        ):
+            root = Path(td)
+            result = PythonSDKRunner().run(
+                "build",
+                cwd=root,
+                session_root=root / "sessions",
+                config=DeepSeekHarnessRuntimeConfig(
+                    backbone_provider=None,
+                    timeout_seconds=3,
+                    finalization_reserve_seconds=2,
+                    finalization_cancel_grace_seconds=0.1,
+                ),
+                environment={},
+            )
+
+        self.assertEqual(len(instances), 2)
+        self.assertEqual(result.finish_reason, "completed")
+        self.assertTrue(result.finalization_restarted)
+        self.assertEqual(result.model_calls, 2)
+        usage = _collect_usage(result.events, result.notifications)
+        self.assertEqual(usage, {"inputTokens": 9, "outputTokens": 1})
 
     def test_runtime_profile_content_changes_app_config_fingerprint(self):
         with tempfile.TemporaryDirectory() as td:

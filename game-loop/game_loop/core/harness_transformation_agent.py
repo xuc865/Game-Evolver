@@ -88,7 +88,7 @@ class HarnessTransformationLibraryAgent:
         from game_loop.chat_agent import LocalChatAgent
         from game_loop.core.outer_harness_library import _extract_json_object
 
-        agent = LocalChatAgent()
+        agent = LocalChatAgent(route_salt=f"hpa:{stage}")
         messages = [
             {
                 "role": "system",

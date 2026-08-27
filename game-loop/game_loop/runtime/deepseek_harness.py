@@ -7,9 +7,10 @@ import os
 import shutil
 import tempfile
 import threading
+import time
 from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -22,6 +23,12 @@ from game_loop.utils import atomic_write_json, sha256_json
 
 
 _PROCESS_ENVIRONMENT_LOCK = threading.Lock()
+_FINALIZATION_PROMPT = (
+    "The runtime soft deadline has been reached. Stop all implementation, inspection, "
+    "and verification now. Do not call any tool. Briefly summarize the artifact already "
+    "written in the workspace, any verification already completed, and any known "
+    "limitations, then end this turn immediately."
+)
 
 
 @dataclass(frozen=True)
@@ -49,6 +56,8 @@ class DeepSeekHarnessRuntimeConfig:
     runtime_cwd: str | None = None
     timeout_seconds: int = 3600
     shutdown_timeout_seconds: float = 5.0
+    finalization_reserve_seconds: int = 120
+    finalization_cancel_grace_seconds: float = 15.0
     environment: dict[str, str] = field(default_factory=dict)
     successful_finish_reasons: tuple[str, ...] = ("completed",)
     runtime_id: str = "deepseek-harness-sdk-v1"
@@ -64,6 +73,10 @@ class DeepSeekHarnessRuntimeConfig:
             raise ValueError("max_tokens must be positive")
         if self.timeout_seconds <= 0 or self.shutdown_timeout_seconds <= 0:
             raise ValueError("runtime timeouts must be positive")
+        if self.finalization_reserve_seconds < 0:
+            raise ValueError("finalization_reserve_seconds must not be negative")
+        if self.finalization_cancel_grace_seconds <= 0:
+            raise ValueError("finalization_cancel_grace_seconds must be positive")
         if not self.successful_finish_reasons:
             raise ValueError("successful_finish_reasons must not be empty")
         if self.backbone_provider is not None:
@@ -189,6 +202,12 @@ class DeepSeekHarnessRuntimeConfig:
             ),
             timeout_seconds=int(value.get("timeout_seconds", 3600)),
             shutdown_timeout_seconds=float(value.get("shutdown_timeout_seconds", 5.0)),
+            finalization_reserve_seconds=int(
+                value.get("finalization_reserve_seconds", 120)
+            ),
+            finalization_cancel_grace_seconds=float(
+                value.get("finalization_cancel_grace_seconds", 15.0)
+            ),
             environment={str(key): str(item) for key, item in value.get("environment", {}).items()},
             successful_finish_reasons=tuple(
                 str(item) for item in value.get("successful_finish_reasons", ["completed"])
@@ -210,6 +229,10 @@ class DeepSeekHarnessRunnerResult:
     events: tuple[dict[str, Any], ...] = ()
     notifications: tuple[dict[str, Any], ...] = ()
     session_root: str | None = None
+    model_calls: int = 1
+    finalization_attempted: bool = False
+    finalization_completed: bool = False
+    finalization_restarted: bool = False
 
 
 class DeepSeekHarnessRunner(Protocol):
@@ -247,6 +270,8 @@ class PythonSDKRunner:
         kwargs = _sdk_kwargs(config, cwd, session_root, environment)
         harness = DeepSeekHarness(**kwargs)
         outcome: dict[str, Any] = {}
+        observed_notifications: list[dict[str, Any]] = []
+        started = time.monotonic()
 
         def execute() -> None:
             try:
@@ -256,36 +281,160 @@ class PythonSDKRunner:
                 # launcher's environment for normal controller bookkeeping.
                 with _temporary_process_environment(environment):
                     harness.start()
-                outcome["result"] = harness.run(prompt)
+                session = harness.start_session()
+                outcome["session"] = session
+                outcome["result"] = session.run(
+                    prompt,
+                    on_notification=lambda item: observed_notifications.append(
+                        _notification_dict(item)
+                    ),
+                )
             except BaseException as exc:  # noqa: BLE001 - cross-thread transport outcome.
                 outcome["error"] = exc
 
         worker = threading.Thread(target=execute, name="dsh-owned-turn", daemon=True)
         worker.start()
-        worker.join(config.timeout_seconds)
+        reserve = min(
+            config.finalization_reserve_seconds,
+            max(0, config.timeout_seconds - 1),
+        )
+        soft_timeout = config.timeout_seconds - reserve
+        worker.join(soft_timeout)
         if worker.is_alive():
-            _close_harness(harness)
-            worker.join(config.shutdown_timeout_seconds)
-            if worker.is_alive():
+            if reserve <= 0:
+                _close_harness(harness)
+                worker.join(config.shutdown_timeout_seconds)
                 raise TimeoutError(
-                    "DeepSeek Harness turn timed out and did not stop after runtime shutdown"
+                    f"DeepSeek Harness turn timed out after {config.timeout_seconds}s"
                 )
-            raise TimeoutError(
-                f"DeepSeek Harness turn timed out after {config.timeout_seconds}s"
+            session = outcome.get("session")
+            if session is None:
+                _close_harness(harness)
+                worker.join(config.shutdown_timeout_seconds)
+                raise TimeoutError(
+                    "DeepSeek Harness turn timed out before session initialization"
+                )
+            try:
+                harness.client.notify("session/cancel", {"sessionId": session.id})
+            except BaseException:  # noqa: BLE001 - ensure the owned process is reaped.
+                _close_harness(harness)
+                worker.join(config.shutdown_timeout_seconds)
+                raise
+            cancel_grace = min(
+                config.finalization_cancel_grace_seconds,
+                max(0.0, config.timeout_seconds - (time.monotonic() - started)),
+            )
+            worker.join(cancel_grace)
+            finalization_restarted = worker.is_alive()
+            if worker.is_alive():
+                _close_harness(harness)
+                worker.join(config.shutdown_timeout_seconds)
+                if worker.is_alive():
+                    raise TimeoutError(
+                        "DeepSeek Harness turn did not stop after owned runtime shutdown"
+                    )
+                harness = DeepSeekHarness(**kwargs)
+                with _temporary_process_environment(environment):
+                    harness.start()
+                session = harness.start_session()
+                first_result = None
+            else:
+                if "error" in outcome:
+                    _close_harness(harness)
+                    raise outcome["error"]
+                first_result = outcome["result"]
+            final_outcome: dict[str, Any] = {}
+
+            def finalize() -> None:
+                try:
+                    final_outcome["result"] = session.run(_FINALIZATION_PROMPT)
+                except BaseException as exc:  # noqa: BLE001 - cross-thread transport outcome.
+                    final_outcome["error"] = exc
+
+            final_worker = threading.Thread(
+                target=finalize,
+                name="dsh-owned-finalization-turn",
+                daemon=True,
+            )
+            final_worker.start()
+            remaining = max(0.0, config.timeout_seconds - (time.monotonic() - started))
+            final_worker.join(remaining)
+            if final_worker.is_alive():
+                _close_harness(harness)
+                final_worker.join(config.shutdown_timeout_seconds)
+                raise TimeoutError(
+                    "DeepSeek Harness finalization turn exceeded the hard runtime deadline"
+                )
+            if "error" in final_outcome:
+                _close_harness(harness)
+                raise final_outcome["error"]
+            final_result = final_outcome["result"]
+            result = DeepSeekHarnessRunnerResult(
+                finish_reason=final_result.finish_reason,
+                final_response=final_result.final_response,
+                events=(
+                    ()
+                    if first_result is None
+                    else tuple(dict(item) for item in first_result.events)
+                )
+                + tuple(dict(item) for item in final_result.events),
+                notifications=(
+                    tuple(observed_notifications)
+                    if first_result is None
+                    else tuple(
+                        _notification_dict(item)
+                        for item in first_result.notifications
+                    )
+                )
+                + ({
+                    "method": "game-loop.finalization",
+                    "payload": {
+                        "trigger": "soft-deadline",
+                        "cancelled_finish_reason": (
+                            "disposed"
+                            if first_result is None
+                            else first_result.finish_reason
+                        ),
+                        "session_restarted": finalization_restarted,
+                    },
+                },)
+                + tuple(
+                    _notification_dict(item) for item in final_result.notifications
+                ),
+                session_root=(
+                    str(final_result.session_root)
+                    if final_result.session_root is not None
+                    else (
+                        None
+                        if first_result is None or first_result.session_root is None
+                        else str(first_result.session_root)
+                    )
+                ),
+                model_calls=2,
+                finalization_attempted=True,
+                finalization_completed=final_result.finish_reason == "completed",
+                finalization_restarted=finalization_restarted,
+            )
+        else:
+            if "error" in outcome:
+                _close_harness(harness)
+                raise outcome["error"]
+            sdk_result = outcome["result"]
+            result = DeepSeekHarnessRunnerResult(
+                finish_reason=sdk_result.finish_reason,
+                final_response=sdk_result.final_response,
+                events=tuple(dict(item) for item in sdk_result.events),
+                notifications=tuple(
+                    _notification_dict(item) for item in sdk_result.notifications
+                ),
+                session_root=(
+                    None if sdk_result.session_root is None else str(sdk_result.session_root)
+                ),
             )
         try:
-            if "error" in outcome:
-                raise outcome["error"]
-            result = outcome["result"]
+            return result
         finally:
             _close_harness(harness)
-        return DeepSeekHarnessRunnerResult(
-            finish_reason=result.finish_reason,
-            final_response=result.final_response,
-            events=tuple(dict(item) for item in result.events),
-            notifications=tuple(_notification_dict(item) for item in result.notifications),
-            session_root=(None if result.session_root is None else str(result.session_root)),
-        )
 
     def doctor(
         self,
@@ -405,6 +554,7 @@ class DeepSeekHarnessRuntime:
 
     def run(self, task: GameTask, *, episode_dir: Path) -> GameSubmission:
         system_prompt = _load_system_prompt(self.config)
+        run_config = self.config
         isolation = EpisodeIsolation.create(
             episode_dir,
             workspace_seed=(
@@ -423,6 +573,7 @@ class DeepSeekHarnessRuntime:
             _runtime_base_environment(), inherit_process=False
         )
         environment.update(self.config.environment)
+        environment.setdefault("GAME_LOOP_PROVIDER_KEY_SALT", task.task_id)
         environment.update({
             "DSH_HOME": str(dsh_home),
             "DSH_SESSION_ROOT": str(sessions),
@@ -431,6 +582,7 @@ class DeepSeekHarnessRuntime:
             provider = load_provider(self.config.backbone_provider)
             provider_environment = dict(os.environ)
             provider_environment.update(self.config.environment)
+            provider_environment["GAME_LOOP_PROVIDER_KEY_SALT"] = task.task_id
             resolved = provider.resolve(provider_environment)
             if resolved.api_key is None and resolved.requires_credential:
                 expected = ", ".join(
@@ -444,12 +596,15 @@ class DeepSeekHarnessRuntime:
                     "DEEPSEEK_BASE_URL": resolved.base_url,
                     "DEEPSEEK_API_KEY": resolved.api_key or "EMPTY",
                 })
+                if resolved.route_id == "polaris":
+                    run_config = replace(self.config, model=resolved.model)
             else:
                 environment = resolved.inject(environment)
 
         prompt = task.prompt
         if system_prompt:
             prompt = f"{system_prompt.rstrip()}\n\n## Task\n\n{task.prompt}"
+        prompt = f"{_deadline_contract(run_config.timeout_seconds)}\n\n{prompt}"
         prompt = (
             "## Runtime workspace authority\n\n"
             f"Your only writable workspace for this episode is `{isolation.workspace}`. "
@@ -475,7 +630,7 @@ class DeepSeekHarnessRuntime:
                 prompt,
                 cwd=isolation.workspace,
                 session_root=sessions,
-                config=self.config,
+                config=run_config,
                 environment=environment,
             )
         except Exception as exc:  # noqa: BLE001 - normalize runtime failures.
@@ -491,7 +646,7 @@ class DeepSeekHarnessRuntime:
             diagnostics.append(error)
         if result.finish_reason is None:
             diagnostics.append("DeepSeek Harness did not emit a turn/end finish reason")
-        elif result.finish_reason not in self.config.successful_finish_reasons:
+        elif result.finish_reason not in run_config.successful_finish_reasons:
             diagnostics.append(f"DeepSeek Harness finish reason: {result.finish_reason}")
         if not _artifact_exists(artifact):
             diagnostics.append(f"expected artifact is missing: {task.artifact_relpath}")
@@ -505,6 +660,8 @@ class DeepSeekHarnessRuntime:
             "finish_reason": result.finish_reason,
             "diagnostics": diagnostics,
         })
+        usage = _collect_usage(result.events, result.notifications)
+        usage["modelCalls"] = result.model_calls
         submission = GameSubmission.create(
             task_id=task.task_id,
             runtime_id=self.config.runtime_id,
@@ -513,23 +670,44 @@ class DeepSeekHarnessRuntime:
             trajectory_ref=trajectory.path,
             result_text=result.final_response,
             diagnostics=tuple(diagnostics),
-            usage=_collect_usage(result.events, result.notifications),
+            usage=usage,
             metadata={
                 "episode_root": str(isolation.root),
-                "runtime_config_hash": sha256_json(self.config.to_dict()),
+                "runtime_config_hash": sha256_json(run_config.to_dict()),
                 "finish_reason": result.finish_reason,
                 "session_root": result.session_root or str(sessions),
+                "provider_route": None if self.config.backbone_provider is None else resolved.route_id,
+                "provider_base_url": None if self.config.backbone_provider is None else resolved.base_url,
+                "provider_model": run_config.model,
+                "finalization_attempted": result.finalization_attempted,
+                "finalization_completed": result.finalization_completed,
+                "finalization_restarted": result.finalization_restarted,
             },
         )
         atomic_write_json(isolation.root / "submission.json", submission.to_dict())
         atomic_write_json(isolation.root / "runtime_manifest.json", {
-            "runtime": self.config.to_dict(redact_environment=True),
-            "runtime_config_hash": sha256_json(self.config.to_dict()),
+            "runtime": run_config.to_dict(redact_environment=True),
+            "runtime_config_hash": sha256_json(run_config.to_dict()),
             "isolation": isolation.to_dict(),
             "trajectory_ref": str(trajectory.path),
             "submission_ref": str(isolation.root / "submission.json"),
         })
         return submission
+
+
+def _deadline_contract(timeout_seconds: int) -> str:
+    reserve_seconds = max(15, min(90, timeout_seconds // 10))
+    inspection_seconds = max(15, timeout_seconds // 5)
+    return (
+        "## Hard runtime deadline\n\n"
+        f"This session has a hard {timeout_seconds}-second wall-clock limit. "
+        f"Finish tool use and send the final response at least {reserve_seconds} seconds "
+        "before that limit; work lost to timeout is an infrastructure failure. "
+        f"Limit initial inspection and planning to about {inspection_seconds} seconds, "
+        "then implement the smallest complete solution that satisfies the task. "
+        "Avoid exhaustive asset enumeration and repeated long tests. Prioritize a "
+        "launchable, changed artifact, then use remaining time for bounded verification."
+    )
 
 
 def _load_system_prompt(config: DeepSeekHarnessRuntimeConfig) -> str | None:

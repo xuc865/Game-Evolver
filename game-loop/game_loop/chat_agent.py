@@ -79,15 +79,37 @@ _BLOCKED_COMMAND_PATTERNS = (
 class LocalChatAgent:
     """Agent that directly calls an OpenAI-compatible ``/v1/chat/completions`` API."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, route_salt: str | None = None) -> None:
         self.api_base = os.environ.get("CODEX_API_BASE", "").rstrip("/")
         self.model = os.environ.get("CODEX_MODEL", "")
         self.provider = os.environ.get(
             "CODEX_PROVIDER",
             os.environ.get("GAME_LOOP_BACKBONE_PROVIDER", ""),
         ).strip().casefold()
-        self.api_key = self._resolve_api_key(self.provider)
-        self.api_keys = self._resolve_api_keys(self.provider, self.api_key)
+        mixed_route = None
+        if (
+            self.provider in {"deepseek", "deepseek_v4"}
+            and os.environ.get("DEEPSEEK_ROUTE_MODE", "").strip().casefold()
+            == "mixed"
+        ):
+            from game_loop.runtime.providers import load_provider
+
+            route_environment = dict(os.environ)
+            if route_salt is not None:
+                route_environment["GAME_LOOP_PROVIDER_KEY_SALT"] = route_salt
+            mixed_route = load_provider("deepseek").resolve(route_environment)
+            self.api_base = mixed_route.base_url.rstrip("/")
+            self.model = mixed_route.model
+            self.api_key = mixed_route.api_key or ""
+            self.provider_route = mixed_route.route_id
+        else:
+            self.api_key = self._resolve_api_key(self.provider)
+            self.provider_route = None
+        self.api_keys = (
+            [self.api_key]
+            if mixed_route is not None and self.api_key
+            else self._resolve_api_keys(self.provider, self.api_key)
+        )
         self._api_key_index = provider_key_start_index(self.provider, self.api_keys)
         self.thinking_mode = os.environ.get("CODEX_THINKING", "").strip().lower()
 

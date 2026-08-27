@@ -4,6 +4,7 @@ import json
 import os
 import urllib.error
 import urllib.request
+import zlib
 from dataclasses import dataclass
 from typing import Mapping
 from urllib.parse import urlparse
@@ -55,6 +56,24 @@ class BackboneProviderSpec:
             or env.get("CODEX_MODEL")
             or self.model
         )
+        route_id = "official"
+        if self.provider_id == "deepseek" and str(
+            env.get("DEEPSEEK_ROUTE_MODE", "")
+        ).strip().casefold() == "mixed":
+            polaris_base = str(env.get("DEEPSEEK_POLARIS_BASE_URL", "")).strip()
+            polaris_key = str(env.get("DEEPSEEK_POLARIS_API_KEY", "")).strip()
+            polaris_model = str(env.get("DEEPSEEK_POLARIS_MODEL", "")).strip()
+            salt = str(env.get("GAME_LOOP_PROVIDER_KEY_SALT", "")).strip()
+            if polaris_base and polaris_key and polaris_model and salt and (
+                zlib.crc32(f"deepseek-route:{salt}".encode("utf-8")) % 2
+            ):
+                provider_base = polaris_base
+                if provider_base.endswith("/chat/completions"):
+                    provider_base = provider_base[: -len("/chat/completions")]
+                pooled_api_key = polaris_key
+                provider_model = polaris_model
+                credential_env = "DEEPSEEK_POLARIS_API_KEY"
+                route_id = "polaris"
         return ResolvedBackbone(
             provider_id=self.provider_id,
             # Experiment backends historically expose CODEX_API_BASE/CODEX_MODEL.
@@ -67,7 +86,7 @@ class BackboneProviderSpec:
             ),
             official_docs=self.official_docs,
             requires_credential=self.requires_credential,
-            allow_http=self.allow_http,
+            allow_http=(self.allow_http or route_id == "polaris"),
             fallback_base_url=(
                 None
                 if self.fallback_base_url is None
@@ -86,6 +105,7 @@ class BackboneProviderSpec:
                 if not next((name for name in self.fallback_credential_envs if env.get(name)), None)
                 else str(env[next(name for name in self.fallback_credential_envs if env.get(name))])
             ),
+            route_id=route_id,
         )
 
 
@@ -103,6 +123,7 @@ class ResolvedBackbone:
     fallback_model: str | None = None
     fallback_credential_env: str | None = None
     fallback_api_key: str | None = None
+    route_id: str = "official"
 
     def doctor(self) -> dict[str, object]:
         parsed = urlparse(self.base_url)
@@ -113,6 +134,7 @@ class ResolvedBackbone:
             "provider_id": self.provider_id,
             "base_url": self.base_url,
             "model": self.model,
+            "route_id": self.route_id,
             "credential_env": self.credential_env,
             "accepted_credential_envs": list(
                 PROVIDERS[self.provider_id].credential_envs
