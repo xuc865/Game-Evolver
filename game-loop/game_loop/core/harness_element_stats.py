@@ -22,6 +22,7 @@ ELEMENT_CATEGORIES = frozenset({
     "protocol",
     "workflow",
     "dsh_plugin",
+    "subagent",
 })
 
 CATEGORY_ALIASES: dict[str, str] = {
@@ -36,6 +37,9 @@ CATEGORY_ALIASES: dict[str, str] = {
     "plugins": "dsh_plugin",
     "cordis": "dsh_plugin",
     "cordis_plugin": "dsh_plugin",
+    "child_agent": "subagent",
+    "fork_agent": "subagent",
+    "subagent_prototype": "subagent",
 }
 
 DEFAULT_ELEMENT_MUTATION_POLICY: dict[str, Any] = {

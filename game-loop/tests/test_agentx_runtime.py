@@ -108,6 +108,112 @@ class AgentXRuntimeTests(unittest.TestCase):
             self.assertIsNone(transaction)
             self.assertEqual(coordinator.circuit_transformation_store.catalog(), {})
 
+    def test_hpa_subagent_prototypes_are_all_mounted_without_goa_toggle(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            inner, _ = self._builder_configs(circuit_evolution=False)
+            outer = HarnessEvolutionConfig.from_dict({
+                "modules": [{"id": "outer", "instruction": "outer", "tags": []}],
+                "seed_modules": ["outer"],
+                "max_active_modules": 1,
+                "mutation_width": 1,
+                "replay_min_cases": 1,
+                "require_rubric_validation": False,
+                "element_catalog": [{
+                    "id": "evidence_shaping_child",
+                    "category": "subagent",
+                    "description": "Fork target evolved from evidence-shaping failures.",
+                    "spec": {
+                        "persona": "Turn the delegated evidence into one bounded artifact.",
+                    },
+                    "tags": ["subagent", "evidence"],
+                }, {
+                    "id": "mechanic_probe_child",
+                    "category": "subagent",
+                    "description": "Fork target evolved from mechanic uncertainty.",
+                    "spec": {
+                        "persona": "Probe one bounded mechanic and return evidence.",
+                    },
+                    "tags": ["subagent", "mechanic"],
+                }],
+            })
+            app_config = mock.Mock()
+            app_config.backend.runtime_profile_value = {}
+            coordinator = build_agentx_nested_evolution(
+                run_dir=root / "dynamic-fork-run",
+                runtime=AgentXRuntimeConfig(
+                    inner_harness=inner,
+                    outer_harness=outer,
+                    app_config=app_config,
+                    task_source=root / "task",
+                    seed_artifact=root / "seed",
+                ),
+                init_handler=mock.Mock(),
+                evolve_handler=mock.Mock(),
+            )
+            self.assertIn(
+                "evidence_shaping_child",
+                coordinator.inner_engine.elements,
+            )
+            frozen_outer = coordinator.outer_engine.initialize()
+            inner_parent = coordinator.inner_engine.initialize()
+            self.assertEqual(
+                [
+                    item.element_id
+                    for item in inner_parent.active_elements
+                    if item.category == "subagent"
+                ],
+                ["evidence_shaping_child", "mechanic_probe_child"],
+            )
+            gradient = coordinator.inner_gradient_proposer.propose_inner(
+                AttributionReport(("trace://gap",), {}, (), 0),
+                proposer_harness=frozen_outer,
+                target_harness=inner_parent,
+            )
+            self.assertNotIn("subagent", gradient.target_tags)
+            self.assertFalse(coordinator.inner_engine.category_is_mutable("subagent"))
+            self.assertEqual(
+                [
+                    item.element_id
+                    for item in inner_parent.active_elements
+                    if item.category == "subagent"
+                ],
+                ["evidence_shaping_child", "mechanic_probe_child"],
+            )
+
+            evolved = HarnessElementConfig.from_dict({
+                "id": "evidence_shaping_child",
+                "category": "subagent",
+                "description": "Fork target refined from new evidence.",
+                "spec": {
+                    "persona": "Return one bounded artifact plus executable evidence.",
+                    "max_tokens": 4096,
+                },
+                "tags": ["subagent", "evidence", "refined"],
+            })
+            coordinator.inner_engine.sync_element_library("subagent", [evolved])
+            refreshed = coordinator.inner_engine.champion()
+            self.assertEqual(
+                [
+                    item.element_id
+                    for item in refreshed.active_elements
+                    if item.category == "subagent"
+                ],
+                ["evidence_shaping_child"],
+            )
+            self.assertEqual(
+                next(
+                    item.spec["persona"]
+                    for item in refreshed.active_elements
+                    if item.element_id == "evidence_shaping_child"
+                ),
+                "Return one bounded artifact plus executable evidence.",
+            )
+            self.assertIn(
+                "mechanic_probe_child",
+                coordinator.inner_engine.elements,
+            )
+
     def test_circuit_proposer_bundles_evidence_linked_transformations(self):
         with tempfile.TemporaryDirectory() as td:
             from game_loop.core.harness_transformation_library import (

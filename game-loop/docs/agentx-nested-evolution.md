@@ -36,6 +36,17 @@ Each `HarnessProfile` is content-addressed and can evolve one of these harness d
 - context compilation policy;
 - infrastructure recovery policy;
 - deterministic validation/repair policy.
+- evidence-evolved fork-target prototypes for dynamic child agents.
+
+Fork-target evolution does not replace the singleton GOA with a fixed circuit.
+HPA owns a library of behavior-only child prototypes. Every prototype in its
+current audited library is automatically exposed by DSH as a separate fork
+tool; per-prototype enablement is not an evolutionary gene. The root chooses
+which tool to call for each concrete task at runtime.
+The parent generates the actual child task dynamically and remains responsible
+for workspace ownership and delivery. Mechanism switches such as fork enablement,
+communication mode, context inheritance, and recursion depth are deliberately
+outside the evolutionary genome.
 
 Each inner and outer engine writes its own immutable profile archive, manifest, epoch ledger,
 and champion pointer. The coordinator additionally writes `nested_evolution.json`, including

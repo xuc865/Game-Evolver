@@ -13,7 +13,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from game_loop.backends.command import CommandBackend
-from game_loop.config import AppConfig, BackendConfig
+from game_loop.config import AppConfig, BackendConfig, HarnessElementConfig
 from game_loop.benchmarks.terminalbench import TerminalBenchAdapter
 from game_loop.core.models import BackendExecution, PreparedTask
 from game_loop.core.agent_circuit import AgentCircuit
@@ -156,6 +156,61 @@ class DeepSeekHarnessRuntimeTests(unittest.TestCase):
                 },
             )
 
+    def test_frozen_episode_compiles_active_child_prototype(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cordis = root / "seed.cordis.yml"
+            cordis.write_text("- id: seed\n  name: '@deepseek-ai/dsh-seed'\n")
+            runtime_profile = root / "runtime.json"
+            runtime_profile.write_text(json.dumps({
+                "runtime_type": "deepseek-harness",
+                "cordis": str(cordis),
+                "cordis_plugin_catalog": {
+                    "fork_context_subagent": [{
+                        "id": "evolved-fork-provider",
+                        "name": "@deepseek-ai/dsh-subagent-fork-in-process",
+                        "config": {"providerName": "fork"},
+                    }],
+                },
+                "active_cordis_plugins": [],
+            }))
+            source = (
+                Path(__file__).resolve().parents[1]
+                / "experiments/configs-v4/gcbench-L4_deepseek_v4.json"
+            )
+            raw = json.loads(source.read_text())
+            raw["evolution"]["max_generations"] = 1
+            raw["evolution"]["candidates_per_generation"] = 1
+            app_path = root / "app.json"
+            app_path.write_text(json.dumps(raw))
+            config = AppConfig.load(app_path)
+            config = replace(config, backend=BackendConfig.from_dict({
+                "command": ["true"],
+                "cwd": str(root),
+                "runtime_profile": str(runtime_profile),
+            }))
+            harness = HarnessProfile.from_dict({
+                "harness_id": "prototype-profile",
+                "active_elements": [{
+                    "element_id": "evidence_mapper",
+                    "category": "subagent",
+                    "description": "Map delegated evidence.",
+                    "spec": {
+                        "persona": "Map evidence into one bounded recommendation.",
+                    },
+                }],
+            })
+            payload = _episode_config_dict(config, harness=harness)
+            runtime = payload["backend"]["runtime_profile_value"]
+            self.assertEqual(
+                runtime["active_cordis_plugins"],
+                ["fork_context_subagent"],
+            )
+            self.assertEqual(
+                runtime["active_subagent_prototypes"][0]["id"],
+                "evidence_mapper",
+            )
+
     def test_runtime_profile_materializes_validated_cordis_plugin_overlay(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -200,6 +255,78 @@ class DeepSeekHarnessRuntimeTests(unittest.TestCase):
             }))
             with self.assertRaisesRegex(ValueError, "unknown plugins"):
                 capture_runtime_profile(profile)
+
+    def test_runtime_profile_materializes_evolved_fork_targets(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cordis = root / "seed.cordis.yml"
+            cordis.write_text("- id: seed\n  name: '@deepseek-ai/dsh-seed'\n")
+            profile = root / "runtime.json"
+            profile.write_text(json.dumps({
+                "runtime_type": "deepseek-harness",
+                "cordis": str(cordis),
+                "cordis_plugin_catalog": {
+                    "fork_context_subagent": [{
+                        "id": "evolved-fork-provider",
+                        "name": "@deepseek-ai/dsh-subagent-fork-in-process",
+                        "config": {"providerName": "fork"},
+                    }],
+                },
+                "active_cordis_plugins": ["fork_context_subagent"],
+                "active_subagent_prototypes": [
+                    {
+                        "id": "evidence_mapper",
+                        "description": "Map task evidence into bounded work.",
+                        "persona": "Map evidence and return one concrete recommendation.",
+                        "tool_filter": {"deny": ["fork_agent"]},
+                        "max_tokens": 4096,
+                    },
+                    {
+                        "id": "artifact_refiner",
+                        "description": "Refine one delegated artifact slice.",
+                        "persona": "Implement the delegated artifact slice and verify it.",
+                    },
+                ],
+            }))
+            captured, _, assets = capture_runtime_profile(profile)
+            materialized, _ = materialize_runtime_profile(
+                profile=captured,
+                assets=assets,
+                destination=root / "snapshot",
+            )
+            value = json.loads(materialized.read_text())
+            effective = Path(value["cordis"]).read_text()
+            self.assertIn("fork_agent_evidence_mapper", effective)
+            self.assertIn("fork_agent_artifact_refiner", effective)
+            self.assertIn("Map evidence and return one concrete recommendation.", effective)
+            self.assertIn('\"maxTokens\":4096', effective)
+            self.assertIn('\"enableRunInBackground\":false', effective)
+            self.assertIn('\"maxDepth\":2', effective)
+
+    def test_subagent_prototype_rejects_fork_policy_genes(self):
+        with self.assertRaisesRegex(ValueError, "not fork policy"):
+            HarnessElementConfig.from_dict({
+                "id": "bad_child",
+                "category": "subagent",
+                "description": "Invalid policy-bearing child.",
+                "spec": {
+                    "persona": "Do one delegated task.",
+                    "maxDepth": 9,
+                },
+                "tags": ["subagent"],
+            })
+
+    def test_subagent_prototype_rejects_root_ownership_persona(self):
+        with self.assertRaisesRegex(ValueError, "injected into a child"):
+            HarnessElementConfig.from_dict({
+                "id": "bad_root_child",
+                "category": "subagent",
+                "description": "Invalid root-claiming child.",
+                "spec": {
+                    "persona": "You are the singleton builder and own the final delivery.",
+                },
+                "tags": ["subagent"],
+            })
 
     def test_runtime_factory_is_backward_compatible_and_selects_dsh(self):
         legacy = load_runtime_config({"runtime_id": "opengame-typescript-sdk-v1"})

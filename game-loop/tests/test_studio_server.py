@@ -232,7 +232,7 @@ class StudioManagerTests(unittest.TestCase):
                     for item in inner["element_catalog"]
                     if item["category"] == "dsh_plugin"
                 },
-                audited_plugins,
+                audited_plugins - {"fork_context_subagent"},
             )
             self.assertEqual(inner["replay_min_cases"], 1)
             self.assertEqual(outer["rubric_validation_sample_size"], 1)

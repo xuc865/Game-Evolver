@@ -393,6 +393,7 @@ class HarnessElementConfig:
             "protocol",
             "workflow",
             "dsh_plugin",
+            "subagent",
         }:
             raise ValueError(f"harness element {element_id}: unsupported category {category!r}")
         description = str(value.get("description", "")).strip()
@@ -401,6 +402,13 @@ class HarnessElementConfig:
         raw_spec = value.get("spec", {})
         if not isinstance(raw_spec, dict):
             raise ValueError(f"harness element {element_id}: spec must be an object")
+        if category == "subagent":
+            from game_loop.subagent_prototype import validate_subagent_prototype_spec
+
+            raw_spec = validate_subagent_prototype_spec(
+                raw_spec,
+                prototype_id=element_id,
+            )
         raw_tags = value.get("tags", [])
         if not isinstance(raw_tags, list) or not all(isinstance(item, str) for item in raw_tags):
             raise ValueError(f"harness element {element_id}: tags must be a string list")
@@ -444,6 +452,9 @@ def _parse_max_active_elements(raw: dict | None) -> dict[str, int]:
         "protocol": 2,
         "workflow": 3,
         "dsh_plugin": 4,
+        # HPA-managed prototypes bypass this fallback and mount the full live
+        # audited library; the value remains for standalone legacy profiles.
+        "subagent": 1,
     }
     if not raw:
         return defaults

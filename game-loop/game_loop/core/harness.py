@@ -4,7 +4,7 @@ import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from statistics import median
-from typing import Any, Mapping, Protocol, Sequence
+from typing import Any, Iterable, Mapping, Protocol, Sequence
 
 from game_loop.config import (
     HarnessElementConfig,
@@ -458,6 +458,7 @@ class HarnessEvolutionEngine:
         *,
         allow_mutation: bool = True,
         role_runtime_contract: Mapping[str, Any] | None = None,
+        managed_element_categories: Iterable[str] = (),
     ):
         self.root = run_dir / "harness_archive"
         self.profiles = self.root / "profiles"
@@ -466,6 +467,12 @@ class HarnessEvolutionEngine:
         self.role_runtime_contract = (
             None if role_runtime_contract is None else dict(role_runtime_contract)
         )
+        self.managed_element_categories = frozenset(
+            str(category).strip().casefold()
+            for category in managed_element_categories
+            if str(category).strip()
+        )
+        self._live_managed_element_ids: dict[str, frozenset[str]] = {}
         self.modules = {module.module_id: module for module in config.modules}
         self.module_categories = {
             module.module_id: module.category for module in config.modules
@@ -478,12 +485,15 @@ class HarnessEvolutionEngine:
         self._load_extended_element_catalog()
 
     def category_is_mutable(self, category: str) -> bool:
+        if category.casefold() in self.managed_element_categories:
+            return False
         allowed = self.config.allowed_element_categories
         return not allowed or category.casefold() in allowed
 
     def role_harness_catalog(self) -> dict[str, Any]:
         """Disclose the audited component vocabulary available to HPA roles."""
 
+        live_managed_ids = set().union(*self._live_managed_element_ids.values())
         plugins = []
         for element in self.elements.values():
             if element.category != "dsh_plugin":
@@ -521,7 +531,13 @@ class HarnessEvolutionEngine:
                     "spec_hash": HarnessActiveElement.from_config(item).spec_hash,
                 }
                 for item in sorted(
-                    self.elements.values(), key=lambda value: value.element_id
+                    (
+                        item
+                        for item in self.elements.values()
+                        if item.category not in self.managed_element_categories
+                        or item.element_id in live_managed_ids
+                    ),
+                    key=lambda value: value.element_id,
                 )
             ],
             "tool_interfaces": [
@@ -543,6 +559,7 @@ class HarnessEvolutionEngine:
                 "tool_interfaces": self.config.max_active_tool_interfaces,
                 "elements": dict(self.config.max_active_elements),
             },
+            "managed_element_categories": sorted(self.managed_element_categories),
         }
         if self.role_runtime_contract is not None:
             catalog["runtime_contract"] = dict(self.role_runtime_contract)
@@ -617,6 +634,7 @@ class HarnessEvolutionEngine:
             "seed_harness_id": profile.harness_id,
             "max_active_modules": self.config.max_active_modules,
             "max_active_tool_interfaces": self.config.max_active_tool_interfaces,
+            "managed_element_categories": sorted(self.managed_element_categories),
             "mutation_width": self.config.mutation_width,
             "bundle_width": self.config.bundle_width,
             "attribution_mode": self.config.attribution_mode,
@@ -678,7 +696,7 @@ class HarnessEvolutionEngine:
         }
         if (
             target_categories
-            and self.config.element_catalog
+            and self.elements
             and self.config.enable_usage_driven_mutation
         ):
             stats = HarnessElementStatsStore.load(self.root / "element_stats.json")
@@ -1620,6 +1638,8 @@ class HarnessEvolutionEngine:
         counts: dict[str, int] = {}
         for element in profile.active_elements:
             counts[element.category] = counts.get(element.category, 0) + 1
+            if element.category in self.managed_element_categories:
+                continue
             limit = self.config.max_active_elements.get(element.category)
             if profile.agent_circuit is None and limit and counts[element.category] > limit:
                 raise ValueError(
@@ -1685,6 +1705,8 @@ class HarnessEvolutionEngine:
                         continue
                     count = role_category_counts.get(element.category, 0) + 1
                     role_category_counts[element.category] = count
+                    if element.category in self.managed_element_categories:
+                        continue
                     limit = self.config.max_active_elements.get(element.category)
                     if limit and count > limit:
                         raise ValueError(
@@ -1759,11 +1781,20 @@ class HarnessEvolutionEngine:
         )
 
     def _seed_elements(self) -> tuple[HarnessActiveElement, ...]:
-        seeded: list[HarnessActiveElement] = []
+        seeded: dict[str, HarnessActiveElement] = {}
         for category, element_ids in self.config.seed_elements.items():
             for element_id in element_ids:
-                seeded.append(HarnessActiveElement.from_config(self.elements[element_id]))
-        return tuple(sorted(seeded, key=lambda item: (item.category, item.element_id)))
+                seeded[element_id] = HarnessActiveElement.from_config(
+                    self.elements[element_id]
+                )
+        for category, element_ids in self._live_managed_element_ids.items():
+            for element_id in element_ids:
+                seeded[element_id] = HarnessActiveElement.from_config(
+                    self.elements[element_id]
+                )
+        return tuple(
+            sorted(seeded.values(), key=lambda item: (item.category, item.element_id))
+        )
 
     def _extended_catalog_path(self) -> Path:
         return self.root / "element_catalog_extensions.json"
@@ -1809,6 +1840,116 @@ class HarnessEvolutionEngine:
             "schema_version": "harness-element-extensions.v1",
             "updated_at": utc_now(),
             "items": items,
+        })
+
+    def upsert_element(self, spec) -> None:
+        """Persist a validated HPA library element without losing old profiles."""
+
+        from game_loop.config import HarnessElementConfig
+
+        if not isinstance(spec, HarnessElementConfig):
+            raise TypeError("upsert_element expects HarnessElementConfig")
+        if (
+            not self.category_is_mutable(spec.category)
+            and spec.category not in self.managed_element_categories
+        ):
+            raise ValueError(
+                f"harness element category {spec.category!r} is frozen by this ablation"
+            )
+        self.elements[spec.element_id] = spec
+        path = self._extended_catalog_path()
+        payload = {"schema_version": "harness-element-extensions.v1", "items": []}
+        if path.is_file():
+            payload = read_json(path)
+        item = {
+            "id": spec.element_id,
+            "category": spec.category,
+            "description": spec.description,
+            "spec": dict(spec.spec),
+            "tags": list(spec.tags),
+        }
+        items = [
+            existing
+            for existing in payload.get("items", [])
+            if str(existing.get("id", "")) != spec.element_id
+        ]
+        items.append(item)
+        atomic_write_json(path, {
+            "schema_version": "harness-element-extensions.v1",
+            "updated_at": utc_now(),
+            "items": items,
+        })
+
+    def sync_element_library(self, category: str, specs) -> None:
+        """Mirror an external live catalog while frozen profiles stay self-contained."""
+
+        from game_loop.config import HarnessElementConfig
+
+        desired: dict[str, HarnessElementConfig] = {}
+        for spec in specs:
+            if not isinstance(spec, HarnessElementConfig):
+                raise TypeError("sync_element_library expects HarnessElementConfig rows")
+            if spec.category != category:
+                raise ValueError(
+                    f"cannot sync {spec.category!r} element into {category!r} library"
+                )
+            desired[spec.element_id] = spec
+        if category in self.managed_element_categories:
+            # Retain superseded definitions so frozen content-addressed profiles
+            # remain replayable. Only the live id set is automatically mounted.
+            self._live_managed_element_ids[category] = frozenset(desired)
+        else:
+            self.elements = {
+                element_id: spec
+                for element_id, spec in self.elements.items()
+                if spec.category != category or element_id in desired
+            }
+        for spec in desired.values():
+            self.upsert_element(spec)
+        if category in self.managed_element_categories:
+            self._refresh_managed_champion(category)
+
+    def _refresh_managed_champion(self, category: str) -> None:
+        archive_paths = (
+            self.root / "manifest.json",
+            self.root / "epochs.json",
+            self.root / "champion.json",
+        )
+        if not all(path.is_file() for path in archive_paths):
+            return
+        champion = self.champion()
+        live_ids = self._live_managed_element_ids.get(category, frozenset())
+        active = [
+            element
+            for element in champion.active_elements
+            if element.category != category
+        ]
+        active.extend(
+            HarnessActiveElement.from_config(self.elements[element_id])
+            for element_id in sorted(live_ids)
+        )
+        normalized = tuple(
+            sorted(active, key=lambda item: (item.category, item.element_id))
+        )
+        if normalized == champion.active_elements:
+            return
+        refreshed = self._profile(
+            parent_id=champion.harness_id,
+            modules=champion.active_modules,
+            tool_interfaces=champion.active_tool_interfaces,
+            active_elements=normalized,
+            context_compiler=champion.context_compiler,
+            recovery_policy=champion.recovery_policy,
+            validation_policy=champion.validation_policy,
+            generation=champion.generation + 1,
+            rationale=f"HPA live {category} library synchronization",
+            agent_circuit=champion.agent_circuit,
+        )
+        self._write_profile(refreshed)
+        atomic_write_json(self.root / "champion.json", {
+            "harness_id": refreshed.harness_id,
+            "updated_at": utc_now(),
+            "managed_library_sync": category,
         })
 
     def _targets_tool_interface(self, gradient: HarnessSemanticGradient) -> bool:

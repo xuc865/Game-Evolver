@@ -8,6 +8,10 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from game_loop.utils import atomic_write_json, sha256_json
+from game_loop.subagent_prototype import (
+    cordis_rows_for_subagent_prototypes,
+    validate_subagent_prototype_spec,
+)
 
 ASSET_FIELDS = ("cordis", "skills_source", "system_prompt_path", "runtime_bin")
 MATERIALIZED_FIELDS = {"cordis", "skills_source", "system_prompt_path"}
@@ -23,6 +27,7 @@ def capture_runtime_profile(
         raise ValueError("backend.runtime_profile must contain a JSON object")
     captured = dict(value)
     _validated_cordis_plugins(captured)
+    _validated_subagent_prototypes(captured)
     assets: dict[str, dict[str, str]] = {}
     for field in ASSET_FIELDS:
         raw = captured.get(field)
@@ -76,12 +81,21 @@ def materialize_runtime_profile(
                 snapshot["cordis_seed"] = str(seed_target)
         snapshot[field] = str(target)
     active_rows = _validated_cordis_plugins(snapshot)
-    if active_rows:
+    prototype_rows = cordis_rows_for_subagent_prototypes(
+        _validated_subagent_prototypes(snapshot)
+    )
+    if prototype_rows and "fork_context_subagent" not in set(
+        snapshot.get("active_cordis_plugins", [])
+    ):
+        raise ValueError(
+            "active_subagent_prototypes requires fork_context_subagent"
+        )
+    if active_rows or prototype_rows:
         cordis = snapshot.get("cordis")
         if cordis is None:
             raise ValueError("active_cordis_plugins requires a cordis seed asset")
         cordis_path = Path(str(cordis))
-        _append_cordis_rows(cordis_path, active_rows)
+        _append_cordis_rows(cordis_path, (*active_rows, *prototype_rows))
         snapshot["effective_cordis_sha256"] = hash_path(cordis_path)
     snapshot_hash = sha256_json(snapshot)
     snapshot_path = root / f"profile-{snapshot_hash}.json"
@@ -184,6 +198,54 @@ def _validated_cordis_plugins(profile: Mapping[str, Any]) -> tuple[dict[str, Any
             rows.append(normalized)
             seen_row_ids.add(row_id)
     return tuple(rows)
+
+
+def _validated_subagent_prototypes(
+    profile: Mapping[str, Any],
+) -> tuple[dict[str, Any], ...]:
+    raw = profile.get("active_subagent_prototypes", [])
+    if not isinstance(raw, list):
+        raise ValueError("active_subagent_prototypes must be an object list")
+    normalized: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in raw:
+        if not isinstance(item, Mapping):
+            raise ValueError("active_subagent_prototypes must be an object list")
+        unexpected = sorted(
+            set(item)
+            - {
+                "id",
+                "description",
+                "persona",
+                "tool_filter",
+                "max_tokens",
+                "evolved_from",
+                "merged_from",
+                "derived_from",
+                "variant",
+                "inner_tags",
+            }
+        )
+        if unexpected:
+            raise ValueError(
+                "unsupported active_subagent_prototype fields: "
+                + ", ".join(unexpected)
+            )
+        prototype_id = str(item.get("id", "")).strip()
+        if prototype_id in seen:
+            raise ValueError(f"duplicate subagent prototype id: {prototype_id}")
+        description = str(item.get("description", "")).strip()
+        if not description:
+            raise ValueError(
+                f"subagent prototype {prototype_id!r} requires a description"
+            )
+        spec = validate_subagent_prototype_spec(
+            {key: value for key, value in item.items() if key not in {"id", "description"}},
+            prototype_id=prototype_id,
+        )
+        normalized.append({"id": prototype_id, "description": description, **spec})
+        seen.add(prototype_id)
+    return tuple(normalized)
 
 
 def hash_path(path: Path) -> str:

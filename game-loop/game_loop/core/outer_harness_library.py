@@ -281,6 +281,90 @@ def _compact_candidate_score_gaps(rubric: dict[str, Any]) -> list[dict[str, Any]
     return gaps[:8]
 
 
+def _evidence_epoch_sets(
+    *,
+    latest_inner_result: HarnessEpochResult,
+    inner_history: list[dict[str, Any]],
+) -> tuple[set[int], set[int], set[int]]:
+    """Collect formal failure/gap epochs before asking HPA for an actionable plan."""
+
+    failed_history_epochs: set[int] = set()
+    failed_outer_library_epochs: set[int] = set()
+    imperfect_score_epochs: set[int] = set()
+    if not latest_inner_result.accepted:
+        failed_history_epochs.add(latest_inner_result.epoch)
+    latest_rubric = latest_inner_result.rubric_validation
+    if (
+        isinstance(latest_rubric, dict)
+        and latest_rubric.get("infrastructure_ok") is True
+        and _compact_candidate_score_gaps(latest_rubric)
+    ):
+        imperfect_score_epochs.add(latest_inner_result.epoch)
+    for item in inner_history:
+        if not isinstance(item, dict):
+            continue
+        inner = item.get("inner")
+        if isinstance(inner, dict):
+            raw_epoch = inner.get("epoch")
+            accepted = inner.get("accepted")
+            rubric = inner.get("rubric_validation")
+            inner_evidence = inner
+        else:
+            raw_epoch = item.get("epoch")
+            accepted = item.get("accepted")
+            rubric = item.get("rubric_validation")
+            inner_evidence = item
+        infrastructure_ok = (
+            rubric.get("infrastructure_ok")
+            if isinstance(rubric, dict)
+            else None
+        )
+        outcomes = [
+            outcome
+            for side in ("parent_outcomes", "candidate_outcomes")
+            for outcome in (inner_evidence.get(side) or [])
+            if isinstance(outcome, dict)
+        ]
+        if any(outcome.get("infrastructure_ok") is False for outcome in outcomes):
+            infrastructure_ok = False
+        if (
+            isinstance(raw_epoch, int)
+            and accepted is False
+            and infrastructure_ok is True
+        ):
+            failed_history_epochs.add(raw_epoch)
+        if (
+            isinstance(raw_epoch, int)
+            and infrastructure_ok is True
+            and isinstance(rubric, dict)
+            and _compact_candidate_score_gaps(rubric)
+        ):
+            imperfect_score_epochs.add(raw_epoch)
+        library_update = item.get("outer_element_library_update")
+        if isinstance(library_update, dict):
+            update_payload = library_update.get("library_update", library_update)
+            update_status = update_payload.get("status")
+        else:
+            update_status = None
+        if update_status is None:
+            outer = item.get("outer") if isinstance(item.get("outer"), dict) else {}
+            validation = outer.get("rubric_validation") if isinstance(outer, dict) else {}
+            if isinstance(validation, dict):
+                nested_update = validation.get("library_update")
+                if isinstance(nested_update, dict):
+                    update_status = nested_update.get("status")
+        if (
+            isinstance(raw_epoch, int)
+            and update_status == "failed_infrastructure_or_validation"
+        ):
+            failed_outer_library_epochs.add(raw_epoch)
+    return (
+        failed_history_epochs,
+        failed_outer_library_epochs,
+        imperfect_score_epochs,
+    )
+
+
 def _normalize_element_payload(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         return {}
@@ -300,10 +384,21 @@ def _normalize_outer_plan(plan: dict[str, Any]) -> dict[str, Any]:
     # alias only when every admission field is present; apply_plan still checks
     # evidence epochs, duplication, categories, and transaction safety.
     root_element_id = result.get("id") or result.get("element_id")
+    root_looks_like_element = bool(
+        root_element_id and {"category", "description", "spec"} <= set(result)
+    )
     if (
         not (result.get("additions") or [])
-        and root_element_id
-        and {"category", "description"} <= set(result)
+        and root_looks_like_element
+        and not str(result.get("capability_boundary_evidence", "")).strip()
+    ):
+        raise ValueError(
+            "root-level element addition requires capability_boundary_evidence and "
+            "supporting_epoch_ids"
+        )
+    if (
+        not (result.get("additions") or [])
+        and root_looks_like_element
         and str(result.get("capability_boundary_evidence", "")).strip()
     ):
         root_addition = {
@@ -1468,6 +1563,34 @@ class OuterHarnessLibraryAgent:
         return normalized
 
     @staticmethod
+    def _validate_plan_evidence(
+        plan: dict[str, Any],
+        *,
+        available_epochs: set[int],
+    ) -> None:
+        additions = plan.get("additions", [])
+        if not isinstance(additions, list):
+            raise ValueError("outer plan additions must be a list")
+        for addition in additions:
+            if not isinstance(addition, dict):
+                raise ValueError("outer plan additions must be objects")
+            supporting = addition.get("supporting_epoch_ids", [])
+            if not isinstance(supporting, list):
+                raise ValueError("add requires supporting_epoch_ids list")
+            if not supporting and not _outer_dynamics_mode():
+                raise ValueError(
+                    "add requires supporting failed or imperfect-score epoch ids"
+                )
+            if not all(
+                isinstance(item, int) and item in available_epochs
+                for item in supporting
+            ):
+                raise ValueError(
+                    "add cites unavailable supporting failed or imperfect-score epoch ids"
+                )
+            HarnessElementConfig.from_dict(dict(addition.get("element", {})))
+
+    @staticmethod
     def _request_with_configured_backbone(
         stage: str,
         payload: dict[str, Any],
@@ -1644,6 +1767,19 @@ class OuterHarnessLibraryAgent:
                 f"You may combine add/delete/modify/merge when they support one coherent "
                 f"hypothesis, with at most {self.max_structural_actions} structural actions "
                 f"and at most {self.max_additions} additions."
+                " Category subagent is reserved for evolvable fork targets. Its spec must "
+                "contain persona and may contain tool_filter or max_tokens. Never put provider, "
+                "enableRunInBackground, backgroundMode, maxDepth, communication, or inheritance "
+                "switches in a subagent spec; fork mechanics are fixed runtime policy. Subagent "
+                "ids and personas must describe evidence-derived behavior, not a source-defined "
+                "team roster. The persona is injected into the forked child, so address the child "
+                "as a subordinate bounded worker that returns evidence to its parent; never tell "
+                "the child it is the singleton/root, owns the final workspace, or performs final "
+                "delivery. Root-agent delegation policy does not belong in child persona. A "
+                "prototype-synthesis skill is only an HPA meta-capability and cannot itself be "
+                "forked. Every current audited category=subagent element counted by "
+                "executable_subagent_prototype_count is automatically mounted as a GOA fork "
+                "target; do not propose per-prototype enablement switches."
             )
             if _outer_dynamics_mode():
                 plan_task = (
@@ -1677,13 +1813,34 @@ class OuterHarnessLibraryAgent:
                     ),
                     "current_inner_element_ids": list(current_inner_ids),
                     "operations": sorted(OUTER_LIBRARY_OPERATIONS),
+                    "executable_subagent_prototype_count": sum(
+                        item.category == "subagent"
+                        for item in self.store.catalog().values()
+                    ),
                     "task": plan_task,
+            }
+            (
+                failed_history_epochs,
+                failed_outer_library_epochs,
+                imperfect_score_epochs,
+            ) = _evidence_epoch_sets(
+                latest_inner_result=latest_inner_result,
+                inner_history=inner_history,
+            )
+            available_evidence_epochs = {
+                *failed_history_epochs,
+                *failed_outer_library_epochs,
+                *imperfect_score_epochs,
             }
             plan: dict[str, Any] = {}
             for semantic_attempt in range(4):
                 plan = self.request_json("plan", plan_payload)
                 try:
                     plan = self._validate_plan_throughput(plan)
+                    self._validate_plan_evidence(
+                        plan,
+                        available_epochs=available_evidence_epochs,
+                    )
                     break
                 except (TypeError, ValueError) as exc:
                     record.update(status="planning", plan=plan)

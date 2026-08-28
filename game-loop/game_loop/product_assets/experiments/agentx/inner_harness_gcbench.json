@@ -571,21 +571,6 @@
       ]
     },
     {
-      "id": "dsh_plugin_fork_context_subagent",
-      "category": "dsh_plugin",
-      "description": "Install a fork-context specialist subagent that inherits completed parent turns and returns a bounded foreground result.",
-      "spec": {
-        "plugin_id": "fork_context_subagent"
-      },
-      "tags": [
-        "dsh_plugin",
-        "subagent",
-        "fork",
-        "specialist",
-        "aggressive_bundle"
-      ]
-    },
-    {
       "id": "dsh_plugin_context_efficiency_guards",
       "category": "dsh_plugin",
       "description": "Install coordinated guards for large-result pruning and cooperative tool deadlines during long tool-heavy episodes.",

@@ -47,6 +47,7 @@ class DeepSeekHarnessRuntimeConfig:
     cordis_seed: str | None = None
     cordis_plugin_catalog: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     active_cordis_plugins: tuple[str, ...] = ()
+    active_subagent_prototypes: tuple[dict[str, Any], ...] = ()
     effective_cordis_sha256: str | None = None
     harness_module_catalog: dict[str, dict[str, Any]] = field(default_factory=dict)
     harness_element_catalog: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -131,6 +132,9 @@ class DeepSeekHarnessRuntimeConfig:
         value["launch_args_override"] = list(self.launch_args_override)
         value["successful_finish_reasons"] = list(self.successful_finish_reasons)
         value["active_cordis_plugins"] = list(self.active_cordis_plugins)
+        value["active_subagent_prototypes"] = [
+            dict(item) for item in self.active_subagent_prototypes
+        ]
         if redact_environment:
             value["environment"] = {key: "<redacted>" for key in self.environment}
         return value
@@ -171,6 +175,9 @@ class DeepSeekHarnessRuntimeConfig:
             },
             active_cordis_plugins=tuple(
                 str(item) for item in value.get("active_cordis_plugins", [])
+            ),
+            active_subagent_prototypes=tuple(
+                dict(item) for item in value.get("active_subagent_prototypes", [])
             ),
             effective_cordis_sha256=(
                 None

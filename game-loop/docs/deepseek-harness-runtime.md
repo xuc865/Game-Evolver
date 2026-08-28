@@ -96,6 +96,7 @@ mapping rather than a field-for-field translation:
 | Active modules and context compiler | Frozen episode instruction assembled before the SDK prompt |
 | Skill elements / `skills_source` | Materialized under `.agents/skills`, then catalogued and loaded by DSH |
 | Tool, MCP, workflow, recovery elements | Pinned Cordis composition and its plugins |
+| `subagent` prototype elements | Separate `fork_agent_*` tools over one fixed fork-context provider |
 | Agent trajectory | JSON-RPC session events and notifications normalized into `trajectory.jsonl` |
 | Model usage and finish state | Folded from SDK events into `GameSubmission` |
 | Paired replay and admission | Existing AgentX/game-loop evaluator-side logic, unchanged |
@@ -105,6 +106,16 @@ catalog disclosure, compaction, checkpoint, workflow, and subagent plugins.
 Those are additional loading/execution modes; progressive disclosure is not the
 only harness behavior. A formal comparison must pin the Cordis composition so
 that plugin changes occur only through the declared outer harness evolution.
+
+Subagent prototypes evolve child behavior, not the delegation mechanism. HPA may
+add, modify, or merge a prototype `persona`, tool filter, and token budget from
+epoch evidence. Every prototype in the current audited HPA library is compiled
+into its own DSH subagent tool; GOA does not evolve a redundant enablement bit.
+The root agent still chooses a tool and creates the concrete task at call time. Provider choice,
+context inheritance, foreground/background mode, communication, and recursion
+depth are fixed runtime policy and are rejected if they appear in a prototype
+genome. Prototype capacity follows the audited HPA library size rather than a
+source-defined team width or role roster.
 
 Each episode receives a copied workspace, isolated `HOME`, `DSH_HOME`, session
 root, and cleaned `.agents/skills` roster. The DSH subprocess receives only a

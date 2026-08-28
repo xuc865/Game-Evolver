@@ -1014,9 +1014,18 @@ class AgentXNestedEvolution:
                     )
             engine_catalog_sync_error: str | None = None
             try:
-                # Profile activation remains a separate content-addressed decision.
+                # HPA owns the live child-prototype library. Every audited
+                # prototype is mounted; GOA does not evolve per-prototype toggles.
                 self.outer_engine.elements.update(
                     self.outer_library_agent.store.catalog()
+                )
+                self.inner_engine.sync_element_library(
+                    "subagent",
+                    (
+                        element
+                        for element in self.outer_library_agent.store.catalog().values()
+                        if element.category == "subagent"
+                    ),
                 )
             except Exception as exc:  # noqa: BLE001 - legacy sync is best effort.
                 engine_catalog_sync_error = f"{type(exc).__name__}: {exc}"

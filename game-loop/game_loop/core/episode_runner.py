@@ -134,11 +134,25 @@ def _episode_config_dict(
     if config.backend.runtime_profile_value is not None:
         runtime_profile = dict(config.backend.runtime_profile_value)
         if active_profile is not None:
-            runtime_profile["active_cordis_plugins"] = sorted({
+            active_subagent_prototypes = [
+                {
+                    "id": element.element_id,
+                    "description": element.description,
+                    **dict(element.spec),
+                }
+                for element in active_profile.active_elements
+                if element.category == "subagent"
+            ]
+            active_cordis_plugins = {
                 str(element.spec.get("plugin_id", element.element_id))
                 for element in active_profile.active_elements
                 if element.category == "dsh_plugin"
-            })
+            }
+            if active_subagent_prototypes:
+                active_cordis_plugins.add("fork_context_subagent")
+            runtime_profile["active_cordis_plugins"] = sorted(
+                active_cordis_plugins
+            )
             runtime_profile["agent_circuit"] = (
                 None
                 if active_profile.agent_circuit is None
@@ -163,6 +177,9 @@ def _episode_config_dict(
                 interface.interface_id: interface.to_dict()
                 for interface in active_profile.active_tool_interfaces
             }
+            runtime_profile["active_subagent_prototypes"] = (
+                active_subagent_prototypes
+            )
         backend["runtime_profile_value"] = runtime_profile
     element_catalog = [
         {

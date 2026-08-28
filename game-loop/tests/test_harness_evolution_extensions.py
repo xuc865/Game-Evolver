@@ -33,6 +33,7 @@ from game_loop.core.outer_harness_library import (
     OuterHarnessLibraryAgent,
     OuterHarnessLibraryStore,
     _extract_json_object,
+    _normalize_outer_plan,
 )
 from game_loop.harness_element_catalog import INNER_ELEMENT_CATALOG
 from game_loop.utils import atomic_write_json, read_json
@@ -361,6 +362,82 @@ def _epoch_result(epoch: int = 1) -> HarnessEpochResult:
 
 
 class OuterHarnessLibraryTests(unittest.TestCase):
+    def test_root_element_plan_without_evidence_is_not_silently_unchanged(self):
+        with self.assertRaisesRegex(ValueError, "root-level element addition"):
+            _normalize_outer_plan({
+                "id": "adaptive_child",
+                "category": "subagent",
+                "description": "A child prototype.",
+                "spec": {"persona": "Return evidence to the parent."},
+                "operations": [],
+                "additions": [],
+            })
+
+    def test_outer_agent_retries_missing_addition_evidence_before_apply(self):
+        with tempfile.TemporaryDirectory() as td:
+            store = OuterHarnessLibraryStore(Path(td) / "library")
+            store.initialize((_outer_element("prototype_synthesis", "skill"),))
+            plans = [
+                {
+                    "operations": [],
+                    "additions": [{
+                        "operation": "add",
+                        "capability_boundary_evidence": "epoch 1 rejected fixed teamwork",
+                        "supporting_epoch_ids": [],
+                        "element": {
+                            "id": "adaptive_child",
+                            "category": "subagent",
+                            "description": "Evidence-derived fork target.",
+                            "spec": {"persona": "Resolve the delegated task."},
+                            "tags": ["subagent"],
+                        },
+                    }],
+                },
+                {
+                    "operations": [],
+                    "additions": [{
+                        "operation": "add",
+                        "capability_boundary_evidence": "epoch 1 rejected fixed teamwork",
+                        "supporting_epoch_ids": [1],
+                        "element": {
+                            "id": "adaptive_child",
+                            "category": "subagent",
+                            "description": "Evidence-derived fork target.",
+                            "spec": {"persona": "Resolve the delegated task."},
+                            "tags": ["subagent"],
+                        },
+                    }],
+                },
+            ]
+
+            def request(stage, _payload):
+                if stage == "shortlist":
+                    return {
+                        "shortlist": ["prototype_synthesis"],
+                        "addition_needed": True,
+                        "rationale": "fixed team failed",
+                    }
+                return plans.pop(0)
+
+            failed = replace(
+                _epoch_result(),
+                accepted=False,
+                rubric_validation={"infrastructure_ok": True, "case_results": []},
+            )
+            update = OuterHarnessLibraryAgent(
+                store,
+                request,
+                max_additions=1,
+            ).evolve(
+                epoch=2,
+                inner_history=[],
+                latest_inner_result=failed,
+                current_inner_element_ids=("prototype_synthesis",),
+            )
+            self.assertEqual(update.status, "applied")
+            self.assertIn("adaptive_child", store.catalog())
+            self.assertEqual(plans, [])
+
     def test_outer_plan_throughput_counts_symmetric_merge_once(self):
         with tempfile.TemporaryDirectory() as td:
             agent = OuterHarnessLibraryAgent(

@@ -142,6 +142,26 @@
       ]
     },
     {
+      "id": "skill_subagent_prototype_synthesis",
+      "category": "skill",
+      "description": "Synthesize evidence-derived fork-target prototypes whose child behavior can evolve without defining a fixed team roster or changing fork mechanics.",
+      "spec": {
+        "mode": "subagent_prototype_synthesis",
+        "prototype_fields": [
+          "persona",
+          "tool_filter",
+        "max_tokens"
+      ]
+      },
+      "tags": [
+        "skill",
+        "subagent",
+        "prototype",
+        "evidence_driven",
+        "universal"
+      ]
+    },
+    {
       "id": "skill_harness_gap_analysis",
       "category": "skill",
       "description": "Identify missing reusable harness-generation experience from recent game-agent traces.",
@@ -247,7 +267,8 @@
       "ctx_element_usage_accuracy_digest"
     ],
     "skill": [
-      "skill_failure_to_element_mapping"
+      "skill_failure_to_element_mapping",
+      "skill_subagent_prototype_synthesis"
     ],
     "tool": [
       "tool_outer_stats_inspector"

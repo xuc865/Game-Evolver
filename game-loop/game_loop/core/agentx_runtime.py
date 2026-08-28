@@ -525,16 +525,19 @@ def build_agentx_nested_evolution(
         else {}
     )
     inner_harness = runtime.inner_harness
-    if dsh_plugin_catalog:
+    evolvable_dsh_plugin_ids = {
+        str(element.spec.get("plugin_id", element.element_id))
+        for element in inner_harness.element_catalog
+        if element.category == "dsh_plugin"
+    }
+    if evolvable_dsh_plugin_ids:
         # The audited catalog is the natural boundary. Do not impose a second,
-        # smaller activation ceiling that prevents HPA from evaluating entries.
+        # smaller activation ceiling. Runtime-only substrates such as the fork
+        # provider are intentionally absent from this evolutionary boundary.
         max_active_elements = dict(inner_harness.max_active_elements)
         max_active_elements["dsh_plugin"] = max(
-            len(dsh_plugin_catalog),
-            sum(
-                element.category == "dsh_plugin"
-                for element in inner_harness.element_catalog
-            ),
+            len(evolvable_dsh_plugin_ids),
+            max_active_elements.get("dsh_plugin", 0),
         )
         inner_harness = replace(
             inner_harness,
@@ -550,6 +553,7 @@ def build_agentx_nested_evolution(
         run_dir / "inner",
         inner_harness,
         role_runtime_contract=role_runtime_contract,
+        managed_element_categories=("subagent",),
     )
     outer_engine = HarnessEvolutionEngine(run_dir / "outer", runtime.outer_harness)
     inner_memory = (
@@ -568,6 +572,14 @@ def build_agentx_nested_evolution(
         max_additions=runtime.outer_harness.outer_library_max_additions,
     )
     outer_library_agent.store.initialize(outer_engine.elements.values())
+    inner_engine.sync_element_library(
+        "subagent",
+        (
+            element
+            for element in outer_library_agent.store.catalog().values()
+            if element.category == "subagent"
+        ),
+    )
     circuit_proposer = None
     transformation_store = None
     transformation_agent = None
@@ -602,7 +614,7 @@ def build_agentx_nested_evolution(
         circuit_ablation_queue = CircuitAblationQueue(
             run_dir / "inner" / "harness_archive" / "circuit_ablation.json"
         )
-    dsh_plugin_target_count = len(dsh_plugin_catalog)
+    dsh_plugin_target_count = len(evolvable_dsh_plugin_ids)
     judge = HeuristicRubricJudge() if offline_rubric_judge else None
     oracle = HarnessLoopNestedReplayOracle(
         config=runtime.app_config,
@@ -622,7 +634,7 @@ def build_agentx_nested_evolution(
             inner_memory,
             outer_library_agent.store,
             dsh_plugin_evolution=bool(
-                dsh_plugin_catalog
+                evolvable_dsh_plugin_ids
             ),
             dsh_plugin_target_count=max(1, dsh_plugin_target_count),
         ),

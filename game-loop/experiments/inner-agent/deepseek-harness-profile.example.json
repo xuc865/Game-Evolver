@@ -22,8 +22,7 @@
       {"id": "evolved-tool-workflow", "name": "@deepseek-ai/dsh-tool-workflow", "config": {"toolName": "workflow", "maxResultChars": 12000}}
     ],
     "fork_context_subagent": [
-      {"id": "evolved-subagent-fork-provider", "name": "@deepseek-ai/dsh-subagent-fork-in-process", "config": {"providerName": "fork"}},
-      {"id": "evolved-tool-fork-agent", "name": "@deepseek-ai/dsh-tool-subagent", "config": {"provider": "fork", "toolName": "fork_agent", "enableRunInBackground": false, "maxDepth": 2, "persona": "You are a bounded game-building specialist. Inspect or implement the delegated slice, verify executable evidence, report concrete findings, and avoid duplicating the parent agent's work."}}
+      {"id": "evolved-subagent-fork-provider", "name": "@deepseek-ai/dsh-subagent-fork-in-process", "config": {"providerName": "fork"}}
     ],
     "context_efficiency_guards": [
       {"id": "evolved-compaction-result-pruner", "name": "@deepseek-ai/dsh-compaction-tool-result-pruner", "config": {"thresholdChars": 12000, "headChars": 7000, "tailChars": 3000}},
