@@ -1485,6 +1485,52 @@ class OuterHarnessLibraryAgent:
         self.max_structural_actions = max_structural_actions
         self.max_additions = max_additions
 
+    def _operation_eligibility(
+        self,
+        element_ids: Iterable[str],
+    ) -> dict[str, dict[str, Any]]:
+        catalog = self.store.catalog()
+        metadata = self.store.metadata()
+        requested = tuple(dict.fromkeys(str(item) for item in element_ids))
+        result: dict[str, dict[str, Any]] = {}
+        for element_id in requested:
+            stat = metadata[element_id]
+            usage_count = int(stat.get("usage_count", 0))
+            if _outer_dynamics_mode():
+                modify_min = _outer_dynamics_int(
+                    "GAME_LOOP_OUTER_LIBRARY_DYNAMICS_MODIFY_MIN_USAGE", 0
+                )
+                modify_allowed = usage_count >= modify_min
+                delete_allowed = usage_count == 0 or (
+                    usage_count >= 5 and self.store._is_low_score(element_id, metadata)
+                )
+            else:
+                modify_allowed = usage_count >= 3 and (
+                    self.store._is_low_score(element_id, metadata)
+                    or stat.get("hard_regression_ever") is True
+                )
+                delete_allowed = usage_count >= 5 and self.store._is_low_score(
+                    element_id, metadata
+                )
+            merge_partners = [
+                other_id
+                for other_id in requested
+                if other_id != element_id
+                and catalog[other_id].category == catalog[element_id].category
+                and element_similarity(catalog[element_id], catalog[other_id])
+                >= (0.40 if _outer_dynamics_mode() else 0.55)
+                and _element_content_similarity(catalog[element_id], catalog[other_id])
+                >= (0.35 if _outer_dynamics_mode() else 0.50)
+            ]
+            result[element_id] = {
+                "usage_count": usage_count,
+                "unchanged": True,
+                "modify": modify_allowed,
+                "delete": delete_allowed,
+                "merge_with": merge_partners,
+            }
+        return result
+
     def _validate_plan_throughput(self, plan: dict[str, Any]) -> dict[str, Any]:
         normalized = _normalize_outer_plan(plan)
         additions = normalized.get("additions", [])
@@ -1592,9 +1638,17 @@ class OuterHarnessLibraryAgent:
         for operation in operations:
             if not isinstance(operation, dict):
                 continue
-            if str(operation.get("operation", "")).casefold() != "modify":
-                continue
+            kind = str(operation.get("operation", "")).casefold()
             element_id = str(operation.get("element_id", ""))
+            if kind == "delete" and element_id in catalog:
+                self.store._validate_delete(
+                    element_id=element_id,
+                    decision=operation,
+                    metadata=metadata,
+                )
+                continue
+            if kind != "modify":
+                continue
             if element_id not in catalog:
                 continue
             replacement = HarnessElementConfig.from_dict(
@@ -1827,6 +1881,7 @@ class OuterHarnessLibraryAgent:
                     "modification_inadequate_reason."
                 )
             element_metadata = self.store.metadata()
+            operation_eligibility = self._operation_eligibility(shortlist)
             plan_payload = {
                     "all_element_ids": sorted(catalog_ids),
                     "shortlist": list(shortlist),
@@ -1835,6 +1890,7 @@ class OuterHarnessLibraryAgent:
                         element_id: element_metadata[element_id]
                         for element_id in shortlist
                     },
+                    "element_operation_eligibility": operation_eligibility,
                     "inner_history": _compact_outer_inner_history(inner_history[-20:]),
                     "latest_inner_result": _compact_inner_epoch_result(
                         latest_inner_result
@@ -1844,6 +1900,12 @@ class OuterHarnessLibraryAgent:
                     "evolution_contract": _simple_evolution_contract(),
                     "task": plan_task,
             }
+            plan_payload["task"] += (
+                " element_operation_eligibility is authoritative. Never emit modify or "
+                "delete when its value is false, and only merge with a listed partner. "
+                "When all existing-object structural actions are ineligible, use additions "
+                "for a genuinely distinct evidence-backed object or return empty arrays."
+            )
             (
                 failed_history_epochs,
                 failed_outer_library_epochs,
@@ -1883,6 +1945,10 @@ class OuterHarnessLibraryAgent:
                             "the disclosed element into replacement and concretely change its "
                             "description/spec; include id, category, description, spec, tags, "
                             "and correction_hypothesis."
+                            " Obey element_operation_eligibility exactly. If the validation "
+                            "error says an operation lacks enough uses or evidence, remove that "
+                            "operation; add a distinct boundary object instead only when the "
+                            "available evidence supports it."
                         ),
                     }
             record.update(status="applying", plan=plan)

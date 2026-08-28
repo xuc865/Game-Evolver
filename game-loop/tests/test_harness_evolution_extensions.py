@@ -447,6 +447,77 @@ class OuterHarnessLibraryTests(unittest.TestCase):
             self.assertIn("adaptive_child", store.catalog())
             self.assertEqual(plans, [])
 
+    def test_outer_agent_discloses_modify_eligibility_and_retries_invalid_modify(self):
+        with tempfile.TemporaryDirectory() as td:
+            store = OuterHarnessLibraryStore(Path(td) / "library")
+            store.initialize((_outer_element("prototype_synthesis", "skill"),))
+            plans = [
+                {
+                    "operations": [{
+                        "element_id": "prototype_synthesis",
+                        "operation": "modify",
+                        "reason": "make it concrete",
+                        "correction_hypothesis": "a concrete schema will help",
+                        "replacement": {
+                            "id": "prototype_synthesis",
+                            "category": "skill",
+                            "description": "A changed synthesis skill.",
+                            "spec": {
+                                "inner_tags": ["evidence_first"],
+                                "rule": "probe every named requirement",
+                            },
+                            "tags": ["skill", "evidence", "verify"],
+                        },
+                    }],
+                    "additions": [],
+                },
+                {
+                    "operations": [],
+                    "additions": [{
+                        "operation": "add",
+                        "capability_boundary_evidence": "epoch 1 needs a distinct child job",
+                        "supporting_epoch_ids": [1],
+                        "element": {
+                            "id": "probe_worker",
+                            "category": "subagent",
+                            "description": "Validate every named probe.",
+                            "spec": {"persona": "Validate every delegated probe and report each result."},
+                            "tags": ["subagent"],
+                        },
+                    }],
+                },
+            ]
+            seen_eligibility = []
+
+            def request(stage, payload):
+                if stage == "shortlist":
+                    return {
+                        "shortlist": ["prototype_synthesis"],
+                        "addition_needed": True,
+                        "rationale": "a distinct child job is needed",
+                    }
+                seen_eligibility.append(payload["element_operation_eligibility"])
+                return plans.pop(0)
+
+            failed = replace(
+                _epoch_result(),
+                accepted=False,
+                rubric_validation={"infrastructure_ok": True, "case_results": []},
+            )
+            update = OuterHarnessLibraryAgent(store, request).evolve(
+                epoch=2,
+                inner_history=[],
+                latest_inner_result=failed,
+                current_inner_element_ids=("prototype_synthesis",),
+            )
+
+            self.assertEqual(update.status, "applied")
+            self.assertFalse(
+                seen_eligibility[0]["prototype_synthesis"]["modify"]
+            )
+            self.assertIn("probe_worker", store.catalog())
+            self.assertEqual(plans, [])
+
     def test_outer_plan_throughput_counts_symmetric_merge_once(self):
         with tempfile.TemporaryDirectory() as td:
             agent = OuterHarnessLibraryAgent(

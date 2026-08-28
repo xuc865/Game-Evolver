@@ -95,7 +95,12 @@ def _rejection_result(
         "measured marginal cost to evolve the smallest reusable behavior object."
     )
     if pair.get("source_hpa_proof"):
-        usage = _fork_usage(pair_path)
+        recorded_usage = pair.get("fork_usage")
+        usage = (
+            dict(recorded_usage)
+            if isinstance(recorded_usage, dict)
+            else _fork_usage(pair_path)
+        )
         evidence_note = (
             "The formal candidate exposed an HPA-evolved child job, but trajectory evidence "
             f"recorded {usage['fork_tool_call_count']} fork tool calls, quality delta "
