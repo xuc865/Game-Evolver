@@ -26,6 +26,37 @@ from game_loop.utils import atomic_write_json, read_json, utc_now
 OUTER_LIBRARY_OPERATIONS = frozenset({"add", "delete", "modify", "merge", "unchanged"})
 
 
+def _simple_evolution_contract() -> dict[str, Any]:
+    """Describe behavior-level choices without exposing runtime machinery."""
+
+    return {
+        "decision": (
+            "Choose the smallest reusable behavior change supported by the evidence."
+        ),
+        "operations": {
+            "add": "Create one missing reusable object.",
+            "modify": "Improve one disclosed object while preserving its id and category.",
+            "merge": "Combine two overlapping disclosed objects.",
+            "delete": "Remove one proven harmful object that modification cannot repair.",
+        },
+        "categories": {
+            "context": "Information the builder should receive.",
+            "skill": "A reusable reasoning capability.",
+            "tool": "An executable inspection or action capability.",
+            "protocol": "A reusable invariant or safety boundary.",
+            "workflow": "A reusable ordered procedure.",
+            "subagent": {
+                "purpose": "One reusable bounded job that a child agent can perform.",
+                "required_spec": ["persona"],
+                "rule": (
+                    "Write the child job directly. The runtime automatically creates and "
+                    "mounts its fork tool. Do not configure fork mechanics."
+                ),
+            },
+        },
+    }
+
+
 def _outer_dynamics_mode() -> bool:
     return os.environ.get("GAME_LOOP_OUTER_LIBRARY_DYNAMICS_MODE", "").casefold() in {
         "1",
@@ -1678,12 +1709,10 @@ class OuterHarnessLibraryAgent:
                     max(1, min(8, (len(catalog_ids) + 2) // 3)),
                 )
             shortlist_task = (
-                f"Select at most {shortlist_limit} elements with enough evidence to consider delete, modify, "
-                "or merge. Return {shortlist:[ids], addition_needed:boolean, rationale:string}. "
-                "You have only index metadata now; do not claim to know hidden details. "
-                "An accepted inner epoch is not a solved task: any infrastructure-valid candidate "
-                "rubric dimension below 1.0 is explicit improvement-gap evidence and may justify "
-                "addition_needed=true."
+                f"Select at most {shortlist_limit} existing objects that the evidence makes "
+                "worth inspecting. Return {shortlist:[ids], addition_needed:boolean, "
+                "rationale:string}. You have index metadata only, so do not infer hidden "
+                "details. A valid rubric score below 1.0 may justify addition_needed=true."
             )
             if _outer_dynamics_mode():
                 shortlist_task += (
@@ -1747,43 +1776,22 @@ class OuterHarnessLibraryAgent:
             )
             self.store.write_epoch_record(epoch, record)
             plan_task = (
-                "Return operations only for existing elements that should be delete, modify, "
-                "or merge. Omit elements that should remain unchanged; the system will treat "
-                "omitted elements as unchanged. Undisclosed elements may not be changed. "
-                "Delete only when usage is high, score is low, and modification "
-                "cannot repair it; include modification_inadequate_reason. Modify elements "
-                "near deletion when a concrete correction may improve them, preserving id and "
-                "category in replacement. Merge only two highly similar disclosed elements, "
-                "with symmetric merge decisions and the same merged_element payload. Add when "
-                "historical failures or infrastructure-valid candidate rubric dimensions below "
-                "1.0 prove a remaining capability boundary; ACCEPT is not perfection. Put additions "
-                "in a separate additions list with capability_boundary_evidence and supporting "
-                "failed or imperfect-score inner/outer epoch IDs in supporting_epoch_ids. Schema: "
-                "{operations:[{element_id,operation,reason,...}], additions:[...]}. "
-                "Every modify operation must include correction_hypothesis and a complete "
-                "replacement object with id, category, description, spec, and tags. "
-                "Use operation=unchanged only when you intentionally want to document why a "
-                "disclosed element was inspected but kept. "
-                f"You may combine add/delete/modify/merge when they support one coherent "
-                f"hypothesis, with at most {self.max_structural_actions} structural actions "
-                f"and at most {self.max_additions} additions."
-                " Category subagent is reserved for evolvable fork targets. Its spec must "
-                "contain persona and may contain tool_filter or max_tokens. Never put provider, "
-                "enableRunInBackground, backgroundMode, maxDepth, communication, or inheritance "
-                "switches in a subagent spec; fork mechanics are fixed runtime policy. Subagent "
-                "ids and personas must describe evidence-derived behavior, not a source-defined "
-                "team roster. The persona is injected into the forked child, so address the child "
-                "as a subordinate bounded worker that returns evidence to its parent; never tell "
-                "the child it is the singleton/root, owns the final workspace, or performs final "
-                "delivery. Root-agent delegation policy does not belong in child persona. A "
-                "prototype-synthesis skill is only an HPA meta-capability and cannot itself be "
-                "forked. Every current audited category=subagent element counted by "
-                "executable_subagent_prototype_count is automatically mounted as a GOA fork "
-                "target; do not propose per-prototype enablement switches."
+                "Use evolution_contract to make the smallest coherent evidence-backed library "
+                "change. Omit disclosed objects that should stay unchanged. Change only "
+                "disclosed existing objects. For modify, preserve id/category and provide "
+                "correction_hypothesis plus a complete replacement. For merge, emit symmetric "
+                "decisions with the same merged_element. Delete only when modification cannot "
+                "repair the object and include modification_inadequate_reason. Put new objects "
+                "in additions with capability_boundary_evidence and supporting_epoch_ids. "
+                "Schema: {operations:[{element_id,operation,reason,...}], additions:[...]}. "
+                f"Use at most {self.max_structural_actions} structural actions and "
+                f"{self.max_additions} additions. For category=subagent, write one bounded child "
+                "job in persona; the system handles fork automatically."
             )
             if _outer_dynamics_mode():
                 plan_task = (
-                    "Dynamics-study mode is active. Produce sparse non-keep actions when the "
+                    "Dynamics-study mode is active. Use evolution_contract and produce sparse "
+                    "non-keep actions when the "
                     "evidence shows useful library differentiation; do not emit operations for "
                     "elements that should merely stay unchanged. You may delete dormant elements "
                     "that have been repeatedly shortlisted/disclosed yet remain unused when you "
@@ -1802,21 +1810,22 @@ class OuterHarnessLibraryAgent:
                     "For zero-use deletion include unused_or_dormant_evidence and "
                     "modification_inadequate_reason."
                 )
+            element_metadata = self.store.metadata()
             plan_payload = {
                     "all_element_ids": sorted(catalog_ids),
                     "shortlist": list(shortlist),
                     "disclosed_elements": record["disclosed_elements"],
-                    "element_metadata": self.store.metadata(),
+                    "element_metadata": {
+                        element_id: element_metadata[element_id]
+                        for element_id in shortlist
+                    },
                     "inner_history": _compact_outer_inner_history(inner_history[-20:]),
                     "latest_inner_result": _compact_inner_epoch_result(
                         latest_inner_result
                     ),
                     "current_inner_element_ids": list(current_inner_ids),
-                    "operations": sorted(OUTER_LIBRARY_OPERATIONS),
-                    "executable_subagent_prototype_count": sum(
-                        item.category == "subagent"
-                        for item in self.store.catalog().values()
-                    ),
+                    "operations": ["add", "delete", "modify", "merge"],
+                    "evolution_contract": _simple_evolution_contract(),
                     "task": plan_task,
             }
             (

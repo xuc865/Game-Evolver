@@ -108,9 +108,10 @@ only harness behavior. A formal comparison must pin the Cordis composition so
 that plugin changes occur only through the declared outer harness evolution.
 
 Subagent prototypes evolve child behavior, not the delegation mechanism. HPA may
-add, modify, or merge a prototype `persona`, tool filter, and token budget from
-epoch evidence. Every prototype in the current audited HPA library is compiled
-into its own DSH subagent tool; GOA does not evolve a redundant enablement bit.
+add, modify, or merge a prototype `persona` from epoch evidence. The normal HPA
+contract exposes no fork configuration fields. Every prototype in the current
+audited HPA library is compiled into its own DSH subagent tool; GOA does not
+evolve a redundant enablement bit.
 The root agent still chooses a tool and creates the concrete task at call time. Provider choice,
 context inheritance, foreground/background mode, communication, and recursion
 depth are fixed runtime policy and are rejected if they appear in a prototype

@@ -144,14 +144,10 @@
     {
       "id": "skill_subagent_prototype_synthesis",
       "category": "skill",
-      "description": "Synthesize evidence-derived fork-target prototypes whose child behavior can evolve without defining a fixed team roster or changing fork mechanics.",
+      "description": "Write one evidence-derived bounded child job; the runtime automatically turns every approved job into a fork target.",
       "spec": {
         "mode": "subagent_prototype_synthesis",
-        "prototype_fields": [
-          "persona",
-          "tool_filter",
-        "max_tokens"
-      ]
+        "required_field": "persona"
       },
       "tags": [
         "skill",

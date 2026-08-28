@@ -702,6 +702,17 @@ class OuterHarnessLibraryTests(unittest.TestCase):
                     self.assertNotIn("spec", str(payload["catalog_index"]))
                     return {"shortlist": ["a"]}
                 self.assertEqual([item["id"] for item in payload["disclosed_elements"]], ["a"])
+                self.assertEqual(set(payload["element_metadata"]), {"a"})
+                subagent = payload["evolution_contract"]["categories"]["subagent"]
+                self.assertEqual(subagent["required_spec"], ["persona"])
+                self.assertNotIn("advanced_optional_spec", subagent)
+                self.assertIn("automatically", subagent["rule"])
+                self.assertEqual(
+                    payload["operations"],
+                    ["add", "delete", "modify", "merge"],
+                )
+                self.assertNotIn("provider", payload["task"])
+                self.assertNotIn("communication", payload["task"])
                 return {"operations": [{"element_id": "a", "operation": "unchanged"}]}
 
             update = OuterHarnessLibraryAgent(store, request).evolve(
