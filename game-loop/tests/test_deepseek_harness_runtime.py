@@ -33,7 +33,7 @@ from game_loop.runtime_profile_snapshot import (
     capture_runtime_profile,
     materialize_runtime_profile,
 )
-from game_loop.runtime.deepseek_harness import _collect_usage
+from game_loop.runtime.deepseek_harness import _collect_usage, _finalization_prompt
 
 
 class FakeDeepSeekHarnessRunner:
@@ -94,6 +94,21 @@ class FakeDeepSeekHarnessRunner:
 
 
 class DeepSeekHarnessRuntimeTests(unittest.TestCase):
+    def test_restarted_finalizer_receives_real_workspace_inventory(self):
+        with tempfile.TemporaryDirectory() as td:
+            workspace = Path(td)
+            (workspace / "project.godot").write_text("[application]\n")
+            scripts = workspace / "scripts"
+            scripts.mkdir()
+            (scripts / "Main.gd").write_text("extends Node\n")
+
+            prompt = _finalization_prompt(workspace, session_restarted=True)
+
+            self.assertIn("2 artifact files", prompt)
+            self.assertIn("project.godot", prompt)
+            self.assertIn("scripts/Main.gd", prompt)
+            self.assertIn("Do not claim that no artifact was written", prompt)
+
     def test_frozen_episode_propagates_dsh_plugin_genome(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

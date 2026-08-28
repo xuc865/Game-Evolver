@@ -15,6 +15,7 @@ from game_loop.core.models import (
     PreparedTask,
 )
 from game_loop.gates import common_gate, merge_gates
+from game_loop.probe_tools import load_demo_traces
 from game_loop.gcbench_runtime import (
     render_runtime_instruction_block,
     sanitize_public_instruction,
@@ -221,16 +222,22 @@ class GameCraftBenchAdapter(BenchmarkAdapter):
     def validate(self, artifact: Path, common_config: GateConfig) -> GateResult:
         common = common_gate(artifact, common_config)
         errors = [] if (artifact / "project.godot").is_file() else ["project.godot is missing"]
-        evidence_count = sum(
-            1 for path in (artifact / "demo_outputs").rglob("*")
-            if path.is_file()
-        ) if (artifact / "demo_outputs").is_dir() else 0
+        traces, trace_errors = load_demo_traces(artifact, max_frames=3600)
+        evidence_count = len(traces)
+        if evidence_count < 3:
+            errors.append(
+                f"at least 3 valid actionable demo traces are required; found {evidence_count}"
+            )
+        errors.extend(f"invalid demo trace: {item}" for item in trace_errors)
         return merge_gates(
             common,
             GateResult(
                 not errors,
                 errors,
                 [],
-                {"behavior_evidence_count": evidence_count},
+                {
+                    "behavior_evidence_count": evidence_count,
+                    "behavior_evidence_invalid_count": len(trace_errors),
+                },
             ),
         )

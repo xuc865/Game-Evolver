@@ -275,9 +275,9 @@ def _gcbench_gameplay_replay_probe(
 ) -> dict[str, Any]:
     """Require official demo input traces and their completed runtime replays."""
 
-    demo_dir = artifact / "demo_outputs"
-    traces = sorted(demo_dir.glob("*.json")) if demo_dir.is_dir() else []
-    traces = [path for path in traces if path.name != "_example_trace.json"]
+    from game_loop.probe_tools import load_demo_traces
+
+    traces, trace_errors = load_demo_traces(artifact, max_frames=3600)
     attempt_dir = resolve_episode_attempt_dir(run_dir)
     replay_logs = [
         path
@@ -292,11 +292,7 @@ def _gcbench_gameplay_replay_probe(
         "mouse_click", "mouse_down", "mouse_up", "mouse_move",
         "key_press", "key_down", "key_up",
     }
-    for trace in traces:
-        try:
-            payload = json.loads(trace.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
+    for trace, payload in traces:
         events = payload.get("events", [])
         if isinstance(events, list) and events:
             input_traces += 1
@@ -330,6 +326,7 @@ def _gcbench_gameplay_replay_probe(
         and replay_logs
         and not missing_replays
         and not fatal_logs
+        and not trace_errors
     )
     return {
         "passed": passed,
@@ -342,6 +339,7 @@ def _gcbench_gameplay_replay_probe(
             f"replay_runtime_logs={len(replay_logs)}",
             f"missing_replay_traces={missing_replays}",
             f"fatal_replay_logs={fatal_logs}",
+            f"invalid_traces={trace_errors}",
         ],
     }
 
@@ -464,21 +462,41 @@ def collect_deep_playtest_evidence(
             )
         )
         if (artifact / "demo_outputs").is_dir():
+            from game_loop.probe_tools import load_demo_traces
+
             probes.append(
                 _run_probe(
                     [
                         python,
                         "-m",
                         "game_loop.probe_tools",
-                        "godot-interaction-replay",
+                        "gcbench-demo-evidence",
                         "--artifact",
                         str(artifact),
                         "--max-frames",
                         "600",
                     ],
-                    timeout=150,
                 )
             )
+            traces, _trace_errors = load_demo_traces(artifact, max_frames=600)
+            for trace_path, _trace in traces:
+                probes.append(
+                    _run_probe(
+                        [
+                            python,
+                            "-m",
+                            "game_loop.probe_tools",
+                            "godot-interaction-replay",
+                            "--artifact",
+                            str(artifact),
+                            "--max-frames",
+                            "600",
+                            "--trace-name",
+                            trace_path.name,
+                        ],
+                        timeout=150,
+                    )
+                )
         probes.append(
             _run_probe(
                 [python, "-m", "game_loop.probe_tools", "godot-quality-inventory", "--artifact", str(artifact)],
@@ -653,6 +671,48 @@ class HeuristicRubricJudge:
             judge=self.judge_id,
             evidence_ref=evidence.run_ref,
         )
+
+
+def _compact_pair_evidence(evidence: DeepPlaytestEvidence) -> dict[str, Any]:
+    """Keep every probe while removing bulky fields that can bias pair truncation."""
+
+    probes: list[dict[str, Any]] = []
+    for probe in evidence.probes:
+        result = probe.get("result", {})
+        if not isinstance(result, dict):
+            result = {}
+        probes.append({
+            "probe_id": probe.get("probe_id"),
+            "command_kind": (
+                list(probe.get("command", []))[3]
+                if isinstance(probe.get("command"), list)
+                and len(probe.get("command", [])) > 3
+                else list(probe.get("command", []))[:1]
+            ),
+            "result": {
+                key: value
+                for key, value in result.items()
+                if key not in {
+                    "before_frame_sha256",
+                    "after_frame_sha256",
+                    "before_scene_state_sha256",
+                    "after_scene_state_sha256",
+                    "diagnostics",
+                }
+            },
+            "diagnostics": list(result.get("diagnostics", []))[-2:],
+        })
+    return {
+        "case_id": evidence.case_id,
+        "benchmark_id": evidence.benchmark_id,
+        "artifact_path": evidence.artifact_path,
+        "probe_count": len(probes),
+        "probes": probes,
+        "file_count": len(evidence.file_inventory),
+        "file_inventory_sample": list(evidence.file_inventory[:20]),
+        "process_evidence": evidence.process_evidence,
+        "instruction_excerpt": evidence.instruction_excerpt[:900],
+    }
 
 
 class LLMRubricJudge:
@@ -919,8 +979,8 @@ class LLMRubricJudge:
             },
         }
         evidence_payload = {
-            "parent": parent_evidence.to_dict(),
-            "candidate": candidate_evidence.to_dict(),
+            "parent": _compact_pair_evidence(parent_evidence),
+            "candidate": _compact_pair_evidence(candidate_evidence),
         }
         prompt = (
             "Score parent and candidate together from their deep runtime evidence. "
@@ -934,15 +994,15 @@ class LLMRubricJudge:
             "logs are not gameplay evidence. Return only JSON matching this schema:\n"
             f"{json.dumps(schema, ensure_ascii=False)}\n"
             f"Rubrics: {json.dumps(rubric_text, ensure_ascii=False)}\n"
-            f"Evidence: {json.dumps(evidence_payload, ensure_ascii=False)[:10000]}"
+            f"Evidence: {json.dumps(evidence_payload, ensure_ascii=False)}"
         )
         compact_prompt = (
             "Return only valid JSON. Score observable game quality consistently; missing evidence is 0. "
             "Do not reward tools, skills, plans, logs, or file counts without successful gameplay evidence.\n"
             f"Schema={json.dumps(schema)}\n"
             f"Rubrics={json.dumps(rubric_text, ensure_ascii=False)}\n"
-            f"Parent={json.dumps(parent_evidence.to_dict(), ensure_ascii=False)[:3500]}\n"
-            f"Candidate={json.dumps(candidate_evidence.to_dict(), ensure_ascii=False)[:3500]}"
+            f"Parent={json.dumps(evidence_payload['parent'], ensure_ascii=False)}\n"
+            f"Candidate={json.dumps(evidence_payload['candidate'], ensure_ascii=False)}"
         )
         payload: dict[str, Any] = {
             "model": resolved.model,
@@ -1360,6 +1420,24 @@ class HarnessRubricValidator:
                 hard_rubrics=hard_rubrics,
                 soft_rubrics=soft_rubrics,
             )
+            incomplete_candidate_probes = tuple(
+                str(item.get("probe_id", "unknown"))
+                for item in candidate_evidence.probes
+                if not isinstance(item.get("result"), dict)
+                or item["result"].get("passed") is not True
+            )
+            if incomplete_candidate_probes:
+                probe_reason = (
+                    f"{case_id}: candidate deep probe coverage incomplete: "
+                    + ", ".join(incomplete_candidate_probes)
+                )
+                comparison = RubricPairComparison(
+                    case_id=comparison.case_id,
+                    passed=False,
+                    parent=comparison.parent,
+                    candidate=comparison.candidate,
+                    reasons=tuple(dict.fromkeys((*comparison.reasons, probe_reason))),
+                )
             case_results.append(comparison)
             reasons.extend(comparison.reasons)
             if not parent_scores.infrastructure_ok or not candidate_scores.infrastructure_ok:

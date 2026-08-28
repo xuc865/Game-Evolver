@@ -446,6 +446,22 @@ def _normalize_outer_plan(plan: dict[str, Any]) -> dict[str, Any]:
         }
         result["additions"] = [root_addition]
 
+    if not (result.get("operations") or result.get("additions")):
+        allowed_noop_keys = {
+            "operations",
+            "additions",
+            "rationale",
+            "reason",
+            "no_change_rationale",
+        }
+        unwrapped_fields = sorted(set(result) - allowed_noop_keys)
+        if unwrapped_fields:
+            raise ValueError(
+                "outer plan contains object content without an add/modify/merge/delete "
+                "action; wrap the intended change in operations or additions: "
+                + ", ".join(unwrapped_fields)
+            )
+
     operations = result.get("operations", [])
     promoted_additions = []
     if isinstance(operations, list):

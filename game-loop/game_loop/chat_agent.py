@@ -210,11 +210,14 @@ class LocalChatAgent:
 
     @staticmethod
     def _demo_trace_count(workspace: Path) -> int:
+        from game_loop.probe_tools import load_demo_traces
+
         candidates = (Path(workspace) / "game" / "demo_outputs", Path(workspace) / "demo_outputs")
         traces: set[Path] = set()
         for directory in candidates:
             if directory.is_dir():
-                traces.update(path.resolve() for path in directory.glob("*.json") if path.is_file())
+                valid, _errors = load_demo_traces(directory.parent, max_frames=3600)
+                traces.update(path.resolve() for path, _payload in valid)
         return len(traces)
 
     @staticmethod
@@ -1091,13 +1094,6 @@ class LocalChatAgent:
                 if demo_count < 3:
                     print(f"[chat_agent] deliverable milestone: demos={demo_count}/3")
                     messages.append(self._demo_gate_message(demo_count))
-            if require_gcbench_demos and self._should_stop_after_demo_delivery(turns, workspace):
-                final_text = (
-                    final_text
-                    or "Required GameCraftBench demo traces are present; stopping for verifier."
-                )
-                print("[chat_agent] deliverable gate satisfied; stopping for verifier")
-                break
 
         return {
             "messages": messages,
@@ -1107,12 +1103,6 @@ class LocalChatAgent:
         }
 
     # ── default tool set ──
-
-    def _should_stop_after_demo_delivery(self, turns: int, workspace: Path) -> bool:
-        threshold = self._env_int("GAME_LOOP_STOP_AFTER_GCB_DEMOS_TURN", 0)
-        if threshold <= 0 or turns < threshold:
-            return False
-        return self._demo_trace_count(workspace) >= 3
 
     @staticmethod
     def _default_tools() -> list[dict[str, Any]]:

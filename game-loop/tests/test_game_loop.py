@@ -2514,7 +2514,14 @@ class GameLoopTests(unittest.TestCase):
             original_gate = agent._demo_gate_message
             def gate_and_create(count):
                 for index in range(3):
-                    (demos / f"demo_{index}.json").write_text("{}", encoding="utf-8")
+                    (demos / f"demo_{index}.json").write_text(json.dumps({
+                        "duration_frames": 60,
+                        "events": [{
+                            "frame": 5,
+                            "type": "key_press",
+                            "key": "SPACE",
+                        }],
+                    }), encoding="utf-8")
                 return original_gate(count)
             agent._demo_gate_message = gate_and_create
             result = agent.run("build", workspace, tools=[], max_turns=3)
@@ -2845,13 +2852,22 @@ class GameLoopTests(unittest.TestCase):
         self.assertNotEqual(bounded[2]["role"], "tool")
         self.assertEqual([m["role"] for m in bounded], ["system", "user", "assistant", "user"])
 
-    def test_chat_agent_stops_after_required_demo_delivery(self):
+    def test_chat_agent_continues_after_required_demo_delivery(self):
         from game_loop.chat_agent import LocalChatAgent
 
         agent = LocalChatAgent.__new__(LocalChatAgent)
         agent.system_prompt = "test"
 
+        calls = 0
+
         def fake_call(_messages, _tools):
+            nonlocal calls
+            calls += 1
+            if calls > 1:
+                return {"choices": [{
+                    "message": {"role": "assistant", "content": "implementation verified"},
+                    "finish_reason": "stop",
+                }]}
             return {"choices": [{
                 "message": {
                     "role": "assistant",
@@ -2862,7 +2878,14 @@ class GameLoopTests(unittest.TestCase):
                             "name": "write_file",
                             "arguments": json.dumps({
                                 "path": "game/demo_outputs/demo_3.json",
-                                "content": "{}",
+                                "content": json.dumps({
+                                    "duration_frames": 60,
+                                    "events": [{
+                                        "frame": 5,
+                                        "type": "key_press",
+                                        "key": "SPACE",
+                                    }],
+                                }),
                             }),
                         },
                     }],
@@ -2874,8 +2897,12 @@ class GameLoopTests(unittest.TestCase):
             workspace = Path(raw)
             demo_dir = workspace / "game" / "demo_outputs"
             demo_dir.mkdir(parents=True)
-            (demo_dir / "demo_1.json").write_text("{}", encoding="utf-8")
-            (demo_dir / "demo_2.json").write_text("{}", encoding="utf-8")
+            trace = json.dumps({
+                "duration_frames": 60,
+                "events": [{"frame": 5, "type": "key_press", "key": "SPACE"}],
+            })
+            (demo_dir / "demo_1.json").write_text(trace, encoding="utf-8")
+            (demo_dir / "demo_2.json").write_text(trace, encoding="utf-8")
             with patch.dict(
                 os.environ,
                 {
@@ -2886,8 +2913,8 @@ class GameLoopTests(unittest.TestCase):
             ):
                 result = agent.run("write demo_outputs", workspace, tools=[], max_turns=5)
 
-        self.assertEqual(result["turns"], 1)
-        self.assertTrue(result["final_text"])
+        self.assertEqual(result["turns"], 2)
+        self.assertEqual(result["final_text"], "implementation verified")
 
     def test_command_backend_terminate_process_group_permission_error_is_best_effort(self):
         from game_loop.backends import command as command_backend

@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
+import subprocess
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -111,6 +113,39 @@ def _candidate_config(
     return DeepSeekHarnessRuntimeConfig.from_dict(value)
 
 
+def _fork_usage(submission: GameSubmission) -> dict[str, object]:
+    session_root = Path(str(submission.metadata.get("session_root", "")))
+    sessions = sorted(session_root.rglob("*.zstd")) if session_root.is_dir() else []
+    calls: list[dict[str, object]] = []
+    for session in sessions:
+        completed = subprocess.run(
+            ["zstdcat", str(session)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        for line in completed.stdout.splitlines():
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if event.get("type") != "tool/call":
+                continue
+            data = dict(event.get("data", {}))
+            name = str(data.get("name", ""))
+            if name == "subagent" or name.startswith("fork_agent_"):
+                calls.append({
+                    "name": name,
+                    "arguments": data.get("arguments"),
+                    "session": str(session),
+                })
+    return {
+        "fork_tool_calls": calls,
+        "fork_tool_call_count": len(calls),
+        "session_file_count": len(sessions),
+    }
+
+
 def run(args: argparse.Namespace) -> dict[str, object]:
     os.environ.update(StudioManager._runtime_environment())
     output = args.output_dir.resolve()
@@ -136,21 +171,24 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     )
 
     parent_submission = _load_submission(args.parent_submission)
-    config = _candidate_config(
-        runtime_profile=args.runtime_profile,
-        prototypes=prototypes,
-        snapshot_root=output / "candidate-profile-snapshot",
-        timeout_seconds=args.wall_timeout_seconds,
-    )
-    runtime = DeepSeekHarnessRuntime(config)
-    doctor = runtime.doctor()
-    atomic_write_json(output / "candidate-doctor.json", doctor)
-    if doctor.get("ok") is not True:
-        raise RuntimeError("dynamic-fork candidate doctor failed")
-    candidate_submission = runtime.run(
-        task,
-        episode_dir=output / "candidate-runtime",
-    )
+    if args.candidate_submission is not None:
+        candidate_submission = _load_submission(args.candidate_submission)
+    else:
+        config = _candidate_config(
+            runtime_profile=args.runtime_profile,
+            prototypes=prototypes,
+            snapshot_root=output / "candidate-profile-snapshot",
+            timeout_seconds=args.wall_timeout_seconds,
+        )
+        runtime = DeepSeekHarnessRuntime(config)
+        doctor = runtime.doctor()
+        atomic_write_json(output / "candidate-doctor.json", doctor)
+        if doctor.get("ok") is not True:
+            raise RuntimeError("dynamic-fork candidate doctor failed")
+        candidate_submission = runtime.run(
+            task,
+            episode_dir=output / "candidate-runtime",
+        )
     if candidate_submission.status != "completed":
         payload = {
             "schema": "v030-dynamic-fork-paired-proof.v1",
@@ -245,6 +283,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         "prototypes": prototypes,
         "parent": parent_submission.to_dict(),
         "candidate": candidate_submission.to_dict(),
+        "fork_usage": _fork_usage(candidate_submission),
         "rubric_validation": validation.to_dict(),
         "utility": {
             "quality_delta": quality_delta,
@@ -264,6 +303,7 @@ def main() -> int:
     parser.add_argument("--task-file", type=Path, default=DEFAULT_TASK)
     parser.add_argument("--seed", type=Path, default=DEFAULT_SEED)
     parser.add_argument("--runtime-profile", type=Path, default=DEFAULT_PROFILE)
+    parser.add_argument("--candidate-submission", type=Path)
     parser.add_argument("--inner-config", type=Path, default=DEFAULT_INNER)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--wall-timeout-seconds", type=int, default=600)

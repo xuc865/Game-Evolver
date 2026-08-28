@@ -25,6 +25,7 @@ from game_loop.core.harness_rubric_validator import (
     _gcbench_gameplay_replay_probe,
 )
 from game_loop.core.harness import HarnessEpochResult, HarnessProfile
+from game_loop.probe_tools import _load_demo_trace, load_demo_traces
 
 
 def _write_godot_artifact(root: Path) -> None:
@@ -36,6 +37,79 @@ def _write_godot_artifact(root: Path) -> None:
 
 
 class HarnessRubricValidatorTests(unittest.TestCase):
+    def test_demo_validation_rejects_partial_validity(self):
+        with tempfile.TemporaryDirectory() as td:
+            artifact = Path(td)
+            demos = artifact / "demo_outputs"
+            demos.mkdir()
+            (demos / "valid.json").write_text(json.dumps({
+                "duration_frames": 60,
+                "events": [{"frame": 5, "type": "key_press", "key": "SPACE"}],
+            }))
+            (demos / "invalid.json").write_text("{}")
+
+            valid, errors = load_demo_traces(artifact, max_frames=600)
+
+            self.assertEqual([path.name for path, _ in valid], ["valid.json"])
+            self.assertEqual(len(errors), 1)
+            self.assertIn("invalid.json", errors[0])
+
+    @patch("game_loop.core.harness_rubric_validator._run_probe")
+    def test_deep_evidence_replays_every_valid_trace(self, run_probe):
+        run_probe.return_value = {"result": {"passed": True, "score": 1.0}}
+        with tempfile.TemporaryDirectory() as td:
+            run_dir = Path(td) / "run"
+            artifact = run_dir / "artifacts" / "champion" / "artifact"
+            _write_godot_artifact(artifact)
+            demos = artifact / "demo_outputs"
+            demos.mkdir()
+            for name in ("one", "two"):
+                (demos / f"{name}.json").write_text(json.dumps({
+                    "duration_frames": 60,
+                    "events": [{"frame": 5, "type": "key_press", "key": "SPACE"}],
+                }))
+            (run_dir / "state.json").write_text(json.dumps({
+                "champion_artifact_id": "champion",
+            }))
+
+            evidence = collect_deep_playtest_evidence(case_id="case", run_dir=run_dir)
+
+            interaction_commands = [
+                call.args[0]
+                for call in run_probe.call_args_list
+                if "godot-interaction-replay" in call.args[0]
+            ]
+            self.assertEqual(len(interaction_commands), 2)
+            self.assertEqual(
+                {command[command.index("--trace-name") + 1] for command in interaction_commands},
+                {"one.json", "two.json"},
+            )
+            self.assertEqual(len(evidence.probes), 5)
+
+    def test_interaction_probe_selects_richest_actionable_trace(self):
+        with tempfile.TemporaryDirectory() as td:
+            artifact = Path(td)
+            demos = artifact / "demo_outputs"
+            demos.mkdir()
+            (demos / "00_title_intro.json").write_text(json.dumps({
+                "duration_frames": 600,
+                "events": [{"frame": 10, "type": "key_press", "key": "SPACE"}],
+            }))
+            (demos / "05_battle.json").write_text(json.dumps({
+                "duration_frames": 300,
+                "events": [
+                    {"frame": 10, "type": "mouse_click", "x": 10, "y": 10},
+                    {"frame": 20, "type": "key_press", "key": "SPACE"},
+                    {"frame": 30, "type": "mouse_move", "x": 20, "y": 20},
+                ],
+            }))
+
+            selected = _load_demo_trace(artifact, max_frames=600)
+
+            self.assertIsNotNone(selected)
+            assert selected is not None
+            self.assertEqual(selected[0].name, "05_battle.json")
+
     def test_gcbench_replay_probe_reads_champion_attempt_logs(self):
         with tempfile.TemporaryDirectory() as td:
             run_dir = Path(td) / "run"
@@ -43,7 +117,10 @@ class HarnessRubricValidatorTests(unittest.TestCase):
             demo_dir = artifact / "demo_outputs"
             demo_dir.mkdir(parents=True)
             (demo_dir / "demo.json").write_text(
-                json.dumps({"events": [{"type": "key_down", "key": "W"}]})
+                json.dumps({
+                    "duration_frames": 60,
+                    "events": [{"frame": 1, "type": "key_down", "key": "W"}],
+                })
             )
             attempt_dir = run_dir / "generation_001" / "candidate_01"
             log_dir = attempt_dir / "gcbench_verifier" / "demos" / "demo" / "logs"
@@ -74,6 +151,7 @@ class HarnessRubricValidatorTests(unittest.TestCase):
             demos.mkdir(parents=True)
             for name in ("one", "two"):
                 (demos / f"{name}.json").write_text(json.dumps({
+                    "duration_frames": 60,
                     "events": [{"frame": 1, "type": "key_press", "keycode": "A"}],
                 }))
             logs = root / "gcbench_verifier" / "demos" / "one" / "logs"
@@ -398,6 +476,49 @@ class HarnessRubricValidatorTests(unittest.TestCase):
         )
         self.assertTrue(comparison.passed)
         self.assertGreaterEqual(candidate.soft_total, parent.soft_total)
+
+    @patch("game_loop.core.harness_rubric_validator.collect_deep_playtest_evidence")
+    def test_validator_rejects_incomplete_candidate_probe_coverage(self, collect_mock):
+        collect_mock.side_effect = lambda *, case_id, run_dir: _synthetic_evidence(
+            passed="candidate" not in str(run_dir)
+        )
+        judge = unittest.mock.Mock()
+        score = RubricCaseScores(
+            case_id="case-a",
+            hard={DEFAULT_HARD_RUBRICS[0].rubric_id: 1.0},
+            soft={DEFAULT_SOFT_RUBRICS[0].rubric_id: 1.0},
+            soft_total=1.0,
+            judge="test",
+            evidence_ref="/tmp/evidence",
+        )
+        judge.score_pair.return_value = (score, score)
+        config = HarnessEvolutionConfig.from_dict({
+            "modules": [{"id": "a", "instruction": "a", "tags": []}],
+            "seed_modules": ["a"],
+            "max_active_modules": 1,
+            "max_active_tool_interfaces": 0,
+            "mutation_width": 1,
+            "replay_min_cases": 1,
+            "rubric_validation_sample_size": 1,
+            "require_rubric_validation": True,
+            "hard_rubrics": [DEFAULT_HARD_RUBRICS[0].to_dict()],
+            "soft_rubrics": [DEFAULT_SOFT_RUBRICS[0].to_dict()],
+        })
+        parent = HarnessEpisodeOutcome(
+            "case-a", "parent", 0.5, True, 1, 1, run_ref="/tmp/parent"
+        )
+        candidate = HarnessEpisodeOutcome(
+            "case-a", "candidate", 0.5, True, 1, 1, run_ref="/tmp/candidate"
+        )
+
+        result = HarnessRubricValidator(config, judge=judge).validate_paired_outcomes(
+            parent_outcomes=[parent],
+            candidate_outcomes=[candidate],
+        )
+
+        self.assertFalse(result.accepted)
+        self.assertTrue(result.infrastructure_ok)
+        self.assertIn("candidate deep probe coverage incomplete", " ".join(result.reasons))
 
     @patch("game_loop.core.harness_rubric_validator.collect_deep_playtest_evidence")
     def test_validator_allows_per_case_soft_regression_when_suite_sum_improves(

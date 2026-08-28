@@ -31,6 +31,29 @@ _FINALIZATION_PROMPT = (
 )
 
 
+def _finalization_prompt(cwd: Path, *, session_restarted: bool) -> str:
+    if not session_restarted:
+        return _FINALIZATION_PROMPT
+    ignored = {".git", ".godot", ".circuit_home", ".circuit_sessions", "node_modules"}
+    files = sorted(
+        path.relative_to(cwd).as_posix()
+        for path in cwd.rglob("*")
+        if path.is_file() and not any(part in ignored for part in path.relative_to(cwd).parts)
+    )
+    inventory = "\n".join(f"- {path}" for path in files[:200]) or "- (no files)"
+    if len(files) > 200:
+        inventory += f"\n- ... {len(files) - 200} additional files"
+    return (
+        _FINALIZATION_PROMPT
+        + "\n\nThe original session was cancelled and this replacement session does not "
+        "have its transcript. Do not interpret missing conversation history as a missing "
+        "artifact. The runtime directly inspected the shared workspace and found "
+        f"{len(files)} artifact files:\n{inventory}\n"
+        "Base the summary on this concrete inventory. Do not claim that no artifact was "
+        "written when files are listed above."
+    )
+
+
 @dataclass(frozen=True)
 class DeepSeekHarnessRuntimeConfig:
     """Frozen settings for one DeepSeek Harness SDK episode."""
@@ -354,7 +377,9 @@ class PythonSDKRunner:
 
             def finalize() -> None:
                 try:
-                    final_outcome["result"] = session.run(_FINALIZATION_PROMPT)
+                    final_outcome["result"] = session.run(
+                        _finalization_prompt(cwd, session_restarted=finalization_restarted)
+                    )
                 except BaseException as exc:  # noqa: BLE001 - cross-thread transport outcome.
                     final_outcome["error"] = exc
 

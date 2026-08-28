@@ -150,38 +150,99 @@ def cmd_godot_playtest(args: argparse.Namespace) -> int:
     return 0 if passed else 1
 
 
-def _load_demo_trace(artifact: Path, *, max_frames: int) -> tuple[Path, dict] | None:
+_ACTIONABLE_DEMO_EVENT_TYPES = {
+    "mouse_click",
+    "mouse_down",
+    "mouse_up",
+    "mouse_move",
+    "key_press",
+    "key_down",
+    "key_up",
+}
+
+
+def load_demo_traces(
+    artifact: Path,
+    *,
+    max_frames: int,
+) -> tuple[list[tuple[Path, dict]], list[str]]:
+    """Load every formal demo trace and report every invalid file."""
+
     demo_dir = artifact / "demo_outputs"
     traces = sorted(demo_dir.glob("*.json")) if demo_dir.is_dir() else []
-    traces.sort(key=lambda path: (path.name == "_example_trace.json", path.name))
+    traces = [path for path in traces if path.name != "_example_trace.json"]
+    valid: list[tuple[Path, dict]] = []
+    errors: list[str] = []
     for path in traces:
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError) as exc:
+            errors.append(f"{path.name}: invalid JSON ({type(exc).__name__})")
             continue
         events = value.get("events") if isinstance(value, dict) else None
         if not isinstance(events, list) or not events:
+            errors.append(f"{path.name}: events must be a non-empty list")
             continue
-        duration = int(value.get("duration_frames", 0))
+        try:
+            duration = int(value.get("duration_frames", 0))
+        except (TypeError, ValueError):
+            errors.append(f"{path.name}: duration_frames must be an integer")
+            continue
         if not 1 <= duration <= max_frames:
+            errors.append(
+                f"{path.name}: duration_frames must be within [1, {max_frames}]"
+            )
             continue
-        if not any(
-            isinstance(event, dict)
-            and str(event.get("type", ""))
-            in {
-                "mouse_click",
-                "mouse_down",
-                "mouse_up",
-                "mouse_move",
-                "key_press",
-                "key_down",
-                "key_up",
-            }
+        actionable = [
+            event
             for event in events
-        ):
+            if isinstance(event, dict)
+            and str(event.get("type", ""))
+            in _ACTIONABLE_DEMO_EVENT_TYPES
+        ]
+        if not actionable:
+            errors.append(f"{path.name}: no actionable input events")
             continue
-        return path, value
-    return None
+        valid.append((path, value))
+    if not traces:
+        errors.append("no formal demo_outputs/*.json traces")
+    return valid, errors
+
+
+def _load_demo_trace(
+    artifact: Path,
+    *,
+    max_frames: int,
+    trace_name: str | None = None,
+) -> tuple[Path, dict] | None:
+    candidates, _ = load_demo_traces(artifact, max_frames=max_frames)
+    if trace_name is not None:
+        return next(
+            (item for item in candidates if item[0].name == trace_name),
+            None,
+        )
+    if not candidates:
+        return None
+    path, value = max(
+        candidates,
+        key=lambda item: (
+            sum(
+                1
+                for event in item[1]["events"]
+                if isinstance(event, dict)
+                and str(event.get("type", "")) in _ACTIONABLE_DEMO_EVENT_TYPES
+            ),
+            len({
+                str(event.get("type", ""))
+                for event in item[1]["events"]
+                if isinstance(event, dict)
+                and str(event.get("type", "")) in _ACTIONABLE_DEMO_EVENT_TYPES
+            }),
+            int(item[1]["duration_frames"]),
+            item[0].name,
+        ),
+    )
+    return path, value
 
 
 def _sha256_file(path: Path) -> str | None:
@@ -199,7 +260,11 @@ def cmd_godot_interaction_replay(args: argparse.Namespace) -> int:
     if not (artifact / "project.godot").is_file():
         _emit({"passed": False, "score": 0.0, "diagnostics": ["project.godot missing"]})
         return 1
-    selected = _load_demo_trace(artifact, max_frames=args.max_frames)
+    selected = _load_demo_trace(
+        artifact,
+        max_frames=args.max_frames,
+        trace_name=args.trace_name,
+    )
     if selected is None:
         _emit({
             "passed": False,
@@ -213,6 +278,7 @@ def cmd_godot_interaction_replay(args: argparse.Namespace) -> int:
         return 1
     trace_path, trace = selected
     duration = int(trace["duration_frames"])
+    scenario = str(trace.get("scenario", "")).strip()
     actionable = sum(
         1
         for event in trace["events"]
@@ -302,15 +368,18 @@ func _snapshot_node(node: Node, rows: Array[String]) -> void:
             encoding="utf-8",
         )
         try:
+            command = [
+                godot,
+                "--headless",
+                "--path",
+                str(workspace),
+                "--script",
+                str(script),
+            ]
+            if scenario:
+                command.extend(["--", "--scenario", scenario])
             proc = subprocess.run(
-                [
-                    godot,
-                    "--headless",
-                    "--path",
-                    str(workspace),
-                    "--script",
-                    str(script),
-                ],
+                command,
                 env=_godot_runtime_env(),
                 capture_output=True,
                 text=True,
@@ -331,11 +400,6 @@ func _snapshot_node(node: Node, rows: Array[String]) -> void:
         before_state_hash = _sha256_file(workspace / "before.state")
         after_state_hash = _sha256_file(workspace / "after.state")
         completed = "GAME_LOOP_REPLAY_COMPLETED" in proc.stdout
-        passed = (
-            proc.returncode == 0
-            and completed
-            and bool(before_state_hash and after_state_hash)
-        )
         visual_changed = bool(
             before_hash and after_hash and before_hash != after_hash
         )
@@ -344,14 +408,17 @@ func _snapshot_node(node: Node, rows: Array[String]) -> void:
             and after_state_hash
             and before_state_hash != after_state_hash
         )
+        passed = (
+            proc.returncode == 0
+            and completed
+            and bool(before_state_hash and after_state_hash)
+            and (visual_changed or observable_changed)
+        )
         _emit({
             "passed": passed,
-            "score": (
-                1.0
-                if passed and (visual_changed or observable_changed)
-                else (0.5 if passed else 0.0)
-            ),
+            "score": 1.0 if passed else 0.0,
             "trace": trace_path.name,
+            "scenario": scenario or None,
             "duration_frames": duration,
             "actionable_events": actionable,
             "completed": completed,
@@ -375,15 +442,17 @@ func _snapshot_node(node: Node, rows: Array[String]) -> void:
 
 def cmd_gcbench_demo_evidence(args: argparse.Namespace) -> int:
     artifact = _artifact_root(Path(args.artifact))
-    demo_dir = artifact / "demo_outputs"
-    demos = sorted(demo_dir.glob("*.json")) if demo_dir.is_dir() else []
-    demos = demos[: args.max_demos]
-    passed = bool(demos)
+    demos, errors = load_demo_traces(artifact, max_frames=args.max_frames)
+    passed = bool(demos) and not errors
+    total = len(demos) + len(errors)
     _emit(
         {
             "passed": passed,
-            "score": min(1.0, len(demos) / max(args.max_demos, 1)),
-            "diagnostics": [str(item.name) for item in demos[:5]],
+            "score": len(demos) / total if total else 0.0,
+            "valid_trace_count": len(demos),
+            "invalid_trace_count": len(errors),
+            "validated_traces": [path.name for path, _ in demos],
+            "diagnostics": errors,
         }
     )
     return 0 if passed else 1
@@ -552,6 +621,7 @@ def build_parser() -> argparse.ArgumentParser:
     interaction.add_argument("--artifact", required=True)
     interaction.add_argument("--godot-bin", default=None)
     interaction.add_argument("--max-frames", type=int, default=600)
+    interaction.add_argument("--trace-name", default=None)
     interaction.add_argument("--timeout", type=int, default=120)
     interaction.set_defaults(func=cmd_godot_interaction_replay)
 

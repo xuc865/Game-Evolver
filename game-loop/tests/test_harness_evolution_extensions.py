@@ -362,6 +362,15 @@ def _epoch_result(epoch: int = 1) -> HarnessEpochResult:
 
 
 class OuterHarnessLibraryTests(unittest.TestCase):
+    def test_unwrapped_object_content_requires_an_explicit_action(self):
+        with self.assertRaisesRegex(ValueError, "without an add/modify"):
+            _normalize_outer_plan({
+                "mode": "subagent_prototype_synthesis",
+                "required_fields": ["persona", "definition_of_done"],
+                "operations": [],
+                "additions": [],
+            })
+
     def test_root_element_plan_without_evidence_is_not_silently_unchanged(self):
         with self.assertRaisesRegex(ValueError, "root-level element addition"):
             _normalize_outer_plan({
