@@ -109,7 +109,10 @@ that plugin changes occur only through the declared outer harness evolution.
 
 Subagent prototypes evolve child behavior, not the delegation mechanism. HPA may
 add, modify, or merge a prototype `persona` from epoch evidence. The normal HPA
-contract exposes no fork configuration fields. Every prototype in the current
+contract requires `Use when:`, `Scope:`, `Deliverable:`, `Done when:`, and
+`Return:` inside that single field so the target is reusable, bounded, and
+verifiable without becoming benchmark-, game-, task-, file-, role-, or
+topology-specific. It exposes no fork configuration fields. Every prototype in the current
 audited HPA library is compiled into its own DSH subagent tool; GOA does not
 evolve a redundant enablement bit.
 The root agent still chooses a tool and creates the concrete task at call time. Provider choice,

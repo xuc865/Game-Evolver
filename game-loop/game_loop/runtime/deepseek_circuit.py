@@ -20,6 +20,8 @@ from game_loop.runtime.deepseek_harness import (
     _deadline_contract,
     _load_system_prompt,
     _runtime_base_environment,
+    _polaris_retry_environment,
+    _provider_failure_is_recoverable,
 )
 from game_loop.runtime.providers import load_provider
 from game_loop.runtime_profile_snapshot import hash_path, materialize_role_cordis
@@ -112,20 +114,59 @@ class DeepSeekCircuitRoleRunner:
                 environment=environment,
             )
         except Exception as exc:  # noqa: BLE001 - preserve route evidence on infra failure.
-            return CircuitRoleResult(
-                role_id=request.role.role_id,
-                status="failed",
-                summary="",
-                error=f"runner exception: {type(exc).__name__}: {exc}",
-                infrastructure_ok=False,
-                effective_harness_hash=resolved_harness.effective_hash,
-                effective_cordis_hash=(
-                    None if config.cordis is None else hash_path(Path(config.cordis))
-                ),
-                provider_route=environment.get("GAME_LOOP_RESOLVED_PROVIDER_ROUTE"),
-                provider_base_url=environment.get("DEEPSEEK_BASE_URL"),
-                provider_model=config.model,
-            )
+            fallback = _polaris_retry_environment(environment)
+            if (
+                environment.get("GAME_LOOP_RESOLVED_PROVIDER_ROUTE") == "official"
+                and fallback is not None
+                and _provider_failure_is_recoverable(exc)
+            ):
+                fallback_environment, fallback_model = fallback
+                fallback_config = replace(config, model=fallback_model)
+                fallback_session_root = session_root / "provider-fallback-polaris"
+                fallback_session_root.mkdir(parents=True, exist_ok=True)
+                try:
+                    result = self.runner.run(
+                        self._prompt(request, fallback_config, resolved_harness=resolved_harness),
+                        cwd=request.workspace,
+                        session_root=fallback_session_root,
+                        config=fallback_config,
+                        environment=fallback_environment,
+                    )
+                    config = fallback_config
+                    environment = fallback_environment
+                except Exception as fallback_exc:  # noqa: BLE001 - preserve both failures.
+                    return CircuitRoleResult(
+                        role_id=request.role.role_id,
+                        status="failed",
+                        summary="",
+                        error=(
+                            f"primary {type(exc).__name__}: {exc}; "
+                            f"fallback {type(fallback_exc).__name__}: {fallback_exc}"
+                        ),
+                        infrastructure_ok=False,
+                        effective_harness_hash=resolved_harness.effective_hash,
+                        effective_cordis_hash=(
+                            None if config.cordis is None else hash_path(Path(config.cordis))
+                        ),
+                        provider_route="polaris",
+                        provider_base_url=fallback_environment.get("DEEPSEEK_BASE_URL"),
+                        provider_model=fallback_model,
+                    )
+            else:
+                return CircuitRoleResult(
+                    role_id=request.role.role_id,
+                    status="failed",
+                    summary="",
+                    error=f"runner exception: {type(exc).__name__}: {exc}",
+                    infrastructure_ok=False,
+                    effective_harness_hash=resolved_harness.effective_hash,
+                    effective_cordis_hash=(
+                        None if config.cordis is None else hash_path(Path(config.cordis))
+                    ),
+                    provider_route=environment.get("GAME_LOOP_RESOLVED_PROVIDER_ROUTE"),
+                    provider_base_url=environment.get("DEEPSEEK_BASE_URL"),
+                    provider_model=config.model,
+                )
         usage = _collect_usage(result.events, result.notifications)
         tokens = int(usage.get("totalTokens", 0))
         if not tokens:
@@ -372,6 +413,13 @@ class DeepSeekCircuitRoleRunner:
                         "GAME_LOOP_RESOLVED_PROVIDER_MODEL": resolved.model,
                     }
                 )
+                for key in (
+                    "DEEPSEEK_POLARIS_BASE_URL",
+                    "DEEPSEEK_POLARIS_API_KEY",
+                    "DEEPSEEK_POLARIS_MODEL",
+                ):
+                    if provider_environment.get(key):
+                        environment[key] = provider_environment[key]
             else:
                 environment = resolved.inject(environment)
         return environment

@@ -1,0 +1,12 @@
+{
+  "scenario": "combat",
+  "duration_frames": 360,
+  "events": [
+    {"frame": 0, "type": "key_press", "keycode": "ENTER"},
+    {"frame": 5, "type": "key_down", "keycode": "D"},
+    {"frame": 40, "type": "mouse_click", "button": "left", "x": 1000, "y": 360},
+    {"frame": 80, "type": "key_press", "keycode": "Q"},
+    {"frame": 150, "type": "key_press", "keycode": "E"},
+    {"frame": 240, "type": "key_up", "keycode": "D"}
+  ]
+}

@@ -255,6 +255,99 @@ def _sha256_file(path: Path) -> str | None:
     return digest.hexdigest()
 
 
+def _godot_interaction_probe_script(relative_trace: str, duration: int) -> str:
+    return """extends SceneTree
+
+const TRACE_PATH := %s
+const END_FRAME := %d
+var frame := 0
+var trace: Dictionary
+
+func _initialize() -> void:
+    trace = JSON.parse_string(FileAccess.get_file_as_string(TRACE_PATH))
+    var scene_path := str(ProjectSettings.get_setting("application/run/main_scene", ""))
+    var packed := load(scene_path) as PackedScene
+    if packed == null:
+        push_error("GAME_LOOP_REPLAY_MAIN_SCENE_MISSING")
+        quit(2)
+        return
+    root.add_child(packed.instantiate())
+    process_frame.connect(_on_frame)
+
+func _on_frame() -> void:
+    if frame == 0:
+        _save_state("before.state")
+    for raw in trace.get("events", []):
+        if raw is Dictionary and int(raw.get("frame", -1)) == frame:
+            _dispatch(raw)
+    if frame >= END_FRAME:
+        _save_state("after.state")
+        print("GAME_LOOP_REPLAY_COMPLETED frame=%%d events=%%d" %% [frame, trace.get("events", []).size()])
+        quit()
+        return
+    frame += 1
+
+func _dispatch(event: Dictionary) -> void:
+    var kind := str(event.get("type", ""))
+    if kind == "mouse_move":
+        var motion := InputEventMouseMotion.new()
+        motion.position = Vector2(float(event.get("x", 0)), float(event.get("y", 0)))
+        motion.relative = Vector2(float(event.get("dx", 0)), float(event.get("dy", 0)))
+        root.push_input(motion)
+    elif kind.begins_with("mouse_"):
+        var mouse := InputEventMouseButton.new()
+        mouse.button_index = MOUSE_BUTTON_RIGHT if str(event.get("button", "left")) == "right" else MOUSE_BUTTON_LEFT
+        mouse.position = Vector2(float(event.get("x", 0)), float(event.get("y", 0)))
+        mouse.pressed = kind != "mouse_up"
+        root.push_input(mouse)
+        if kind == "mouse_click":
+            mouse.pressed = false
+            root.push_input(mouse)
+    elif kind.begins_with("key_"):
+        var key := InputEventKey.new()
+        var raw_keycode: Variant = event.get("keycode", event.get("key", ""))
+        if raw_keycode is int or raw_keycode is float:
+            key.keycode = int(raw_keycode)
+        else:
+            key.keycode = OS.find_keycode_from_string(str(raw_keycode))
+        key.pressed = kind != "key_up"
+        root.push_input(key)
+        if kind == "key_press":
+            key.pressed = false
+            root.push_input(key)
+
+func _save_state(name: String) -> void:
+    var rows: Array[String] = []
+    _snapshot_node(root, rows)
+    var file := FileAccess.open("res://" + name, FileAccess.WRITE)
+    file.store_string("\n".join(rows))
+    if DisplayServer.get_name() != "headless":
+        var image := root.get_viewport().get_texture().get_image()
+        if image != null and not image.is_empty():
+            image.save_png("res://" + name.trim_suffix(".state") + ".png")
+
+func _snapshot_node(node: Node, rows: Array[String]) -> void:
+    var row := str(node.get_path()) + "|" + node.get_class()
+    if node is CanvasItem:
+        row += "|visible=" + str(node.visible)
+    if node is Label:
+        row += "|text=" + node.text
+    if node is Control:
+        row += "|position=" + str(node.position) + "|size=" + str(node.size)
+    for property in node.get_property_list():
+        if int(property.get("usage", 0)) & PROPERTY_USAGE_SCRIPT_VARIABLE == 0:
+            continue
+        var property_name := StringName(property.get("name", ""))
+        var value: Variant = node.get(property_name)
+        if value is Object or value is Callable or value is Signal:
+            continue
+        row += "|" + str(property_name) + "=" + var_to_str(value)
+    rows.append(row)
+    for child in node.get_children():
+        _snapshot_node(child, rows)
+""" % (json.dumps("res://" + relative_trace), duration)
+
+
 def cmd_godot_interaction_replay(args: argparse.Namespace) -> int:
     artifact = _artifact_root(Path(args.artifact))
     if not (artifact / "project.godot").is_file():
@@ -297,74 +390,7 @@ def cmd_godot_interaction_replay(args: argparse.Namespace) -> int:
         relative_trace = trace_path.relative_to(artifact).as_posix()
         script = workspace / "__game_loop_interaction_probe.gd"
         script.write_text(
-            """extends SceneTree
-
-const TRACE_PATH := %s
-const END_FRAME := %d
-var frame := 0
-var trace: Dictionary
-
-func _initialize() -> void:
-    trace = JSON.parse_string(FileAccess.get_file_as_string(TRACE_PATH))
-    var scene_path := str(ProjectSettings.get_setting("application/run/main_scene", ""))
-    var packed := load(scene_path) as PackedScene
-    if packed == null:
-        push_error("GAME_LOOP_REPLAY_MAIN_SCENE_MISSING")
-        quit(2)
-        return
-    root.add_child(packed.instantiate())
-    process_frame.connect(_on_frame)
-
-func _on_frame() -> void:
-    frame += 1
-    if frame == 3:
-        _save_state("before.state")
-    for raw in trace.get("events", []):
-        if raw is Dictionary and int(raw.get("frame", -1)) == frame:
-            _dispatch(raw)
-    if frame >= END_FRAME:
-        _save_state("after.state")
-        print("GAME_LOOP_REPLAY_COMPLETED frame=%%d events=%%d" %% [frame, trace.get("events", []).size()])
-        quit()
-
-func _dispatch(event: Dictionary) -> void:
-    var kind := str(event.get("type", ""))
-    if kind.begins_with("mouse_"):
-        var mouse := InputEventMouseButton.new()
-        mouse.button_index = MOUSE_BUTTON_RIGHT if str(event.get("button", "left")) == "right" else MOUSE_BUTTON_LEFT
-        mouse.position = Vector2(float(event.get("x", 0)), float(event.get("y", 0)))
-        mouse.pressed = kind != "mouse_up"
-        root.push_input(mouse)
-        if kind == "mouse_click":
-            mouse.pressed = false
-            root.push_input(mouse)
-    elif kind.begins_with("key_"):
-        var key := InputEventKey.new()
-        key.keycode = OS.find_keycode_from_string(str(event.get("key", event.get("keycode", ""))))
-        key.pressed = kind != "key_up"
-        root.push_input(key)
-        if kind == "key_press":
-            key.pressed = false
-            root.push_input(key)
-
-func _save_state(name: String) -> void:
-    var rows: Array[String] = []
-    _snapshot_node(root, rows)
-    var file := FileAccess.open("res://" + name, FileAccess.WRITE)
-    file.store_string("\n".join(rows))
-
-func _snapshot_node(node: Node, rows: Array[String]) -> void:
-    var row := str(node.get_path()) + "|" + node.get_class()
-    if node is CanvasItem:
-        row += "|visible=" + str(node.visible)
-    if node is Label:
-        row += "|text=" + node.text
-    if node is Control:
-        row += "|position=" + str(node.position) + "|size=" + str(node.size)
-    rows.append(row)
-    for child in node.get_children():
-        _snapshot_node(child, rows)
-""" % (json.dumps("res://" + relative_trace), duration),
+            _godot_interaction_probe_script(relative_trace, duration),
             encoding="utf-8",
         )
         try:
@@ -443,16 +469,39 @@ func _snapshot_node(node: Node, rows: Array[String]) -> void:
 def cmd_gcbench_demo_evidence(args: argparse.Namespace) -> int:
     artifact = _artifact_root(Path(args.artifact))
     demos, errors = load_demo_traces(artifact, max_frames=args.max_frames)
-    passed = bool(demos) and not errors
-    total = len(demos) + len(errors)
+    # A task may include a deliberately invalid replay to prove that the
+    # runtime rejects malformed input.  That negative fixture must declare its
+    # intent; otherwise an accidental broken delivery remains a quality fail.
+    expected_rejections: list[str] = []
+    unexpected_errors: list[str] = []
+    for error in errors:
+        name = error.split(":", 1)[0].strip()
+        path = artifact / "demo_outputs" / name
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            value = None
+        if isinstance(value, dict) and value.get("expected_rejection") is True:
+            expected_rejections.append(name)
+        else:
+            unexpected_errors.append(error)
+    passed = bool(demos) and not unexpected_errors
+    total = len(demos) + len(unexpected_errors)
     _emit(
         {
             "passed": passed,
             "score": len(demos) / total if total else 0.0,
             "valid_trace_count": len(demos),
             "invalid_trace_count": len(errors),
+            "expected_rejection_count": len(expected_rejections),
             "validated_traces": [path.name for path, _ in demos],
-            "diagnostics": errors,
+            "diagnostics": [
+                *unexpected_errors,
+                *[
+                    f"accepted expected rejection fixture: {name}"
+                    for name in expected_rejections
+                ],
+            ],
         }
     )
     return 0 if passed else 1

@@ -1,0 +1,10 @@
+{
+  "scenario": "core",
+  "duration_frames": 600,
+  "events": [
+    {"frame": 0, "type": "key_press", "keycode": "ENTER"},
+    {"frame": 5, "type": "mouse_click", "button": "left", "x": 1180, "y": 360},
+    {"frame": 30, "type": "key_press", "keycode": "Q"},
+    {"frame": 90, "type": "key_press", "keycode": "E"}
+  ]
+}

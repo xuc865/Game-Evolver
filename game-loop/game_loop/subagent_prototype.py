@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from pathlib import Path
 from typing import Any, Mapping
 
 
@@ -28,6 +29,54 @@ _ALLOWED_FIELDS = frozenset({
     "variant",
     "inner_tags",
 })
+
+
+def tool_name_for_subagent_prototype(prototype_id: str) -> str:
+    """Return the stable runtime tool name for one evolved child prototype."""
+
+    if _PROTOTYPE_ID.fullmatch(prototype_id) is None:
+        raise ValueError(f"invalid subagent prototype id: {prototype_id!r}")
+    digest = hashlib.sha256(prototype_id.encode("utf-8")).hexdigest()[:10]
+    tool_slug = prototype_id[:40].rstrip("_")
+    return f"fork_agent_{tool_slug}_{digest}"
+
+
+def tool_description_for_subagent_prototype(
+    prototype_id: str,
+    persona: str,
+    description: str = "",
+) -> str:
+    """Project a full persona into a concise root tool-choice description."""
+
+    tool_name_for_subagent_prototype(prototype_id)
+    if not persona.strip():
+        raise ValueError("subagent prototype persona is required")
+    capability = " ".join(description.split())
+    if len(capability) > 360:
+        capability = capability[:357].rstrip() + "..."
+    prefix = (
+        f"Evolved child `{prototype_id}`"
+        + (f": {capability}" if capability else "")
+        + ". "
+    )
+    return prefix + (
+        "Delegate one explicit artifact or module slice only when it has local checks "
+        "and other independent required work exists. The child owns and implements only "
+        "that slice, may use existing shared interfaces, and returns the artifact, every "
+        "changed file, and check results. It runs in the background and reports completion "
+        "while the root continues other work. The root adapts shared interfaces, integrates "
+        "the result, verifies the whole artifact, and delivers."
+    )
+
+
+def evolved_subagent_tool_plugin_uri() -> str:
+    plugin = (
+        Path(__file__).resolve().parent
+        / "product_assets/runtime_plugins/evolved_subagent_tool.mjs"
+    )
+    if not plugin.is_file():
+        raise FileNotFoundError(f"evolved subagent tool plugin is missing: {plugin}")
+    return plugin.as_uri()
 
 
 def validate_subagent_prototype_spec(
@@ -132,13 +181,19 @@ def cordis_rows_for_subagent_prototypes(
         digest = hashlib.sha256(prototype_id.encode("utf-8")).hexdigest()[:10]
         slug = prototype_id.replace("_", "-")[:32].rstrip("-")
         row_suffix = f"{slug}-{digest}"
-        tool_slug = prototype_id[:40].rstrip("_")
         config: dict[str, Any] = {
             "provider": "fork",
-            "toolName": f"fork_agent_{tool_slug}_{digest}",
-            "enableRunInBackground": False,
+            "toolName": tool_name_for_subagent_prototype(prototype_id),
+            "toolDescription": tool_description_for_subagent_prototype(
+                prototype_id,
+                spec["persona"],
+                str(prototype.get("description", "")),
+            ),
             "maxDepth": 2,
             "persona": spec["persona"],
+            # Keep a child focused on one slice and its handoff. HPA still evolves
+            # behavior/persona; this is a runtime guard against unbounded exploration.
+            "agentOptions": {"maxTokens": 16_384},
         }
         if "tool_filter" in spec:
             config["toolFilter"] = spec["tool_filter"]
@@ -146,7 +201,7 @@ def cordis_rows_for_subagent_prototypes(
             config["agentOptions"] = {"maxTokens": spec["max_tokens"]}
         rows.append({
             "id": f"evolved-fork-prototype-{row_suffix}",
-            "name": "@deepseek-ai/dsh-tool-subagent",
+            "name": evolved_subagent_tool_plugin_uri(),
             "config": config,
         })
     return tuple(rows)

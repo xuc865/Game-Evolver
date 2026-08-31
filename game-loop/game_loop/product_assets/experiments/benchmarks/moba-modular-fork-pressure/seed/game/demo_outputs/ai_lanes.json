@@ -1,0 +1,7 @@
+{
+  "scenario": "ai",
+  "duration_frames": 600,
+  "events": [
+    {"frame": 0, "type": "key_press", "keycode": "ENTER"}
+  ]
+}

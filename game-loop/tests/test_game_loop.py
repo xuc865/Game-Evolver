@@ -2204,6 +2204,45 @@ class GameLoopTests(unittest.TestCase):
         self.assertEqual(agent.api_base, "https://api.deepseek.com")
         self.assertEqual(agent.model, "deepseek-v4-flash")
 
+    def test_deepseek_mixed_fallback_uses_polaris_after_primary_capacity_error(self):
+        from game_loop.chat_agent import LocalChatAgent
+
+        agent = LocalChatAgent.__new__(LocalChatAgent)
+        agent.provider = "deepseek"
+        agent.api_base = "https://api.deepseek.com"
+        agent.model = "deepseek-v4-flash"
+        agent.api_key = "primary-key"
+        agent.api_keys = ["primary-key"]
+        agent._api_key_index = 0
+        calls = []
+
+        def fake_call(messages, tools=None):
+            calls.append((agent.api_base, agent.model, agent.api_key))
+            if len(calls) == 1:
+                raise RuntimeError("API error 402: insufficient balance")
+            return {"choices": []}
+
+        agent._call_api_primary = fake_call
+        environment = {
+            "GAME_LOOP_BACKBONE_PROVIDER": "deepseek",
+            "DEEPSEEK_POLARIS_BASE_URL": "http://polaris.test/v1/chat/completions",
+            "DEEPSEEK_POLARIS_MODEL": "kaiwu-llm-model",
+            "DEEPSEEK_POLARIS_API_KEY": "polaris-key",
+        }
+        with patch.dict(os.environ, environment, clear=False):
+            result = agent._call_api([{"role": "user", "content": "hello"}])
+
+        self.assertEqual(result, {"choices": []})
+        self.assertEqual(
+            calls,
+            [
+                ("https://api.deepseek.com", "deepseek-v4-flash", "primary-key"),
+                ("http://polaris.test/v1", "kaiwu-llm-model", "polaris-key"),
+            ],
+        )
+        self.assertEqual(agent.api_base, "https://api.deepseek.com")
+        self.assertEqual(agent.model, "deepseek-v4-flash")
+
     def test_chat_agent_retry_budget_and_timeout_are_runtime_configurable(self):
         import urllib.error
         from game_loop.chat_agent import LocalChatAgent

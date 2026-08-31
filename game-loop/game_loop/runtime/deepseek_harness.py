@@ -19,21 +19,37 @@ from game_loop.runtime.isolation import EpisodeIsolation
 from game_loop.runtime.protocol import GameSubmission, GameTask
 from game_loop.runtime.providers import load_provider
 from game_loop.runtime.trajectory import TrajectoryRecorder
+from game_loop.subagent_prototype import (
+    tool_description_for_subagent_prototype,
+    tool_name_for_subagent_prototype,
+    validate_subagent_prototype_spec,
+)
 from game_loop.utils import atomic_write_json, sha256_json
 
 
 _PROCESS_ENVIRONMENT_LOCK = threading.Lock()
 _FINALIZATION_PROMPT = (
     "The runtime soft deadline has been reached. Stop all implementation, inspection, "
-    "and verification now. Do not call any tool. Briefly summarize the artifact already "
-    "written in the workspace, any verification already completed, and any known "
-    "limitations, then end this turn immediately."
+    "and verification now. Do not call any tool for a summary. If the required artifact "
+    "has not yet received a meaningful implementation change, make exactly one immediate "
+    "write/edit to the smallest launchable production baseline before ending; do not "
+    "continue exploration. Otherwise briefly summarize the artifact already written, "
+    "any verification already completed, and any known limitations, then end this turn."
 )
 
 
-def _finalization_prompt(cwd: Path, *, session_restarted: bool) -> str:
+def _finalization_prompt(
+    cwd: Path,
+    *,
+    session_restarted: bool,
+    artifact_relpath: str | None = None,
+) -> str:
     if not session_restarted:
-        return _FINALIZATION_PROMPT
+        return _FINALIZATION_PROMPT + (
+            f" The required artifact path is `{artifact_relpath}`."
+            if artifact_relpath
+            else ""
+        )
     ignored = {".git", ".godot", ".circuit_home", ".circuit_sessions", "node_modules"}
     files = sorted(
         path.relative_to(cwd).as_posix()
@@ -45,6 +61,11 @@ def _finalization_prompt(cwd: Path, *, session_restarted: bool) -> str:
         inventory += f"\n- ... {len(files) - 200} additional files"
     return (
         _FINALIZATION_PROMPT
+        + (
+            f" The required artifact path is `{artifact_relpath}`."
+            if artifact_relpath
+            else ""
+        )
         + "\n\nThe original session was cancelled and this replacement session does not "
         "have its transcript. Do not interpret missing conversation history as a missing "
         "artifact. The runtime directly inspected the shared workspace and found "
@@ -54,6 +75,59 @@ def _finalization_prompt(cwd: Path, *, session_restarted: bool) -> str:
     )
 
 
+def _max_tokens_recovery_prompt(cwd: Path) -> str:
+    ignored = {".git", ".godot", ".circuit_home", ".circuit_sessions", "node_modules"}
+    files = sorted(
+        path.relative_to(cwd).as_posix()
+        for path in cwd.rglob("*")
+        if path.is_file() and not any(
+            part in ignored for part in path.relative_to(cwd).parts
+        )
+    )
+    inventory = "\n".join(f"- {path}" for path in files[:200]) or "- (no files)"
+    return (
+        "Your previous turn exhausted its output budget before completing the task. "
+        "Do not repeat the plan and do not draft implementation code in reasoning. "
+        "Continue the same task now, beginning with filesystem write/edit tool calls. "
+        "Implement the smallest integrated runnable artifact first, then complete the "
+        "remaining requirements and run bounded verification. End with a concise final "
+        "response only after the workspace artifact is changed. The runtime currently "
+        f"observes {len(files)} files in the shared workspace:\n{inventory}"
+    )
+
+
+def _provider_failure_is_recoverable(error: BaseException) -> bool:
+    text = str(error).casefold()
+    return (
+        any(token in text for token in (
+            "api error 402", "api error 403", "api error 408", "api error 429",
+            "api error 500", "api error 502", "api error 503", "api error 504",
+            "api error 524", "timeout", "stream error", "connection error",
+            "url error", "temporarily unavailable",
+        ))
+    )
+
+
+def _polaris_retry_environment(
+    environment: Mapping[str, str],
+) -> tuple[dict[str, str], str] | None:
+    """Build a second provider route without changing the evolution genome."""
+
+    base = str(environment.get("DEEPSEEK_POLARIS_BASE_URL", "")).strip().rstrip("/")
+    key = str(environment.get("DEEPSEEK_POLARIS_API_KEY", "")).strip()
+    model = str(environment.get("DEEPSEEK_POLARIS_MODEL", "")).strip()
+    if base.endswith("/chat/completions"):
+        base = base[: -len("/chat/completions")]
+    if not all((base, key, model)):
+        return None
+    retry = dict(environment)
+    retry.update({
+        "DEEPSEEK_BASE_URL": base,
+        "DEEPSEEK_API_KEY": key,
+        "GAME_LOOP_RESOLVED_PROVIDER_ROUTE": "polaris",
+        "GAME_LOOP_RESOLVED_PROVIDER_MODEL": model,
+    })
+    return retry, model
 @dataclass(frozen=True)
 class DeepSeekHarnessRuntimeConfig:
     """Frozen settings for one DeepSeek Harness SDK episode."""
@@ -86,6 +160,7 @@ class DeepSeekHarnessRuntimeConfig:
     successful_finish_reasons: tuple[str, ...] = ("completed",)
     runtime_id: str = "deepseek-harness-sdk-v1"
     runtime_type: str = "deepseek-harness"
+    artifact_relpath: str | None = None
     agent_circuit: AgentCircuit | None = None
 
     def __post_init__(self) -> None:
@@ -244,6 +319,11 @@ class DeepSeekHarnessRuntimeConfig:
             ),
             runtime_id=str(value.get("runtime_id", "deepseek-harness-sdk-v1")),
             runtime_type=str(value.get("runtime_type", "deepseek-harness")),
+            artifact_relpath=(
+                None
+                if value.get("artifact_relpath") is None
+                else str(value["artifact_relpath"])
+            ),
             agent_circuit=(
                 None
                 if value.get("agent_circuit") is None
@@ -263,6 +343,8 @@ class DeepSeekHarnessRunnerResult:
     finalization_attempted: bool = False
     finalization_completed: bool = False
     finalization_restarted: bool = False
+    recovery_attempted: bool = False
+    recovery_completed: bool = False
 
 
 class DeepSeekHarnessRunner(Protocol):
@@ -302,6 +384,14 @@ class PythonSDKRunner:
         outcome: dict[str, Any] = {}
         observed_notifications: list[dict[str, Any]] = []
         started = time.monotonic()
+        initial_artifact_digest = (
+            None
+            if config.artifact_relpath is None
+            else _artifact_digest(
+                _workspace_artifact(cwd, config.artifact_relpath)
+            )
+        )
+        progress = {"tool_results": 0, "cancel_sent": False}
 
         def execute() -> None:
             try:
@@ -313,11 +403,38 @@ class PythonSDKRunner:
                     harness.start()
                 session = harness.start_session()
                 outcome["session"] = session
+
+                def on_notification(item: Any) -> None:
+                    notification = _notification_dict(item)
+                    observed_notifications.append(notification)
+                    payload = notification.get("payload")
+                    event = payload.get("event") if isinstance(payload, Mapping) else None
+                    event_type = event.get("type") if isinstance(event, Mapping) else None
+                    if event_type not in {"tool/result", "tool_result", "tool.result"}:
+                        return
+                    progress["tool_results"] += 1
+                    if (
+                        progress["tool_results"] >= 6
+                        and not progress["cancel_sent"]
+                        and initial_artifact_digest is not None
+                        and _artifact_digest(
+                            _workspace_artifact(cwd, config.artifact_relpath)
+                        ) == initial_artifact_digest
+                    ):
+                        # A long read-only preamble is a known failure mode for
+                        # large game tasks. Give the same session its emergency
+                        # write opportunity while preserving the normal gate.
+                        progress["cancel_sent"] = True
+                        try:
+                            harness.client.notify(
+                                "session/cancel", {"sessionId": session.id}
+                            )
+                        except BaseException:
+                            progress["cancel_sent"] = False
+
                 outcome["result"] = session.run(
                     prompt,
-                    on_notification=lambda item: observed_notifications.append(
-                        _notification_dict(item)
-                    ),
+                    on_notification=on_notification,
                 )
             except BaseException as exc:  # noqa: BLE001 - cross-thread transport outcome.
                 outcome["error"] = exc
@@ -378,7 +495,11 @@ class PythonSDKRunner:
             def finalize() -> None:
                 try:
                     final_outcome["result"] = session.run(
-                        _finalization_prompt(cwd, session_restarted=finalization_restarted)
+                        _finalization_prompt(
+                            cwd,
+                            session_restarted=finalization_restarted,
+                            artifact_relpath=config.artifact_relpath,
+                        )
                     )
                 except BaseException as exc:  # noqa: BLE001 - cross-thread transport outcome.
                     final_outcome["error"] = exc
@@ -451,18 +572,85 @@ class PythonSDKRunner:
             if "error" in outcome:
                 _close_harness(harness)
                 raise outcome["error"]
+            session = outcome["session"]
             sdk_result = outcome["result"]
-            result = DeepSeekHarnessRunnerResult(
-                finish_reason=sdk_result.finish_reason,
-                final_response=sdk_result.final_response,
-                events=tuple(dict(item) for item in sdk_result.events),
-                notifications=tuple(
-                    _notification_dict(item) for item in sdk_result.notifications
-                ),
-                session_root=(
-                    None if sdk_result.session_root is None else str(sdk_result.session_root)
-                ),
-            )
+            if sdk_result.finish_reason == "max-tokens":
+                recovery_outcome: dict[str, Any] = {}
+
+                def recover() -> None:
+                    try:
+                        recovery_outcome["result"] = session.run(
+                            _max_tokens_recovery_prompt(cwd)
+                        )
+                    except BaseException as exc:  # noqa: BLE001 - owned transport.
+                        recovery_outcome["error"] = exc
+
+                recovery_worker = threading.Thread(
+                    target=recover,
+                    name="dsh-owned-max-token-recovery",
+                    daemon=True,
+                )
+                recovery_worker.start()
+                remaining = max(
+                    0.0, config.timeout_seconds - (time.monotonic() - started)
+                )
+                recovery_worker.join(remaining)
+                if recovery_worker.is_alive():
+                    _close_harness(harness)
+                    recovery_worker.join(config.shutdown_timeout_seconds)
+                    raise TimeoutError(
+                        "DeepSeek Harness max-token recovery exceeded the hard runtime deadline"
+                    )
+                if "error" in recovery_outcome:
+                    _close_harness(harness)
+                    raise recovery_outcome["error"]
+                recovery_result = recovery_outcome["result"]
+                result = DeepSeekHarnessRunnerResult(
+                    finish_reason=recovery_result.finish_reason,
+                    final_response=recovery_result.final_response,
+                    events=tuple(dict(item) for item in sdk_result.events)
+                    + tuple(dict(item) for item in recovery_result.events),
+                    notifications=tuple(
+                        _notification_dict(item) for item in sdk_result.notifications
+                    )
+                    + ({
+                        "method": "game-loop.max-token-recovery",
+                        "payload": {
+                            "trigger": "max-tokens",
+                            "initial_finish_reason": sdk_result.finish_reason,
+                        },
+                    },)
+                    + tuple(
+                        _notification_dict(item)
+                        for item in recovery_result.notifications
+                    ),
+                    session_root=(
+                        str(recovery_result.session_root)
+                        if recovery_result.session_root is not None
+                        else (
+                            None
+                            if sdk_result.session_root is None
+                            else str(sdk_result.session_root)
+                        )
+                    ),
+                    model_calls=2,
+                    recovery_attempted=True,
+                    recovery_completed=recovery_result.finish_reason == "completed",
+                )
+            else:
+                result = DeepSeekHarnessRunnerResult(
+                    finish_reason=sdk_result.finish_reason,
+                    final_response=sdk_result.final_response,
+                    events=tuple(dict(item) for item in sdk_result.events),
+                    notifications=tuple(
+                        _notification_dict(item) for item in sdk_result.notifications
+                    ),
+                    session_root=(
+                        None
+                        if sdk_result.session_root is None
+                        else str(sdk_result.session_root)
+                    ),
+                )
         try:
             return result
         finally:
@@ -586,7 +774,15 @@ class DeepSeekHarnessRuntime:
 
     def run(self, task: GameTask, *, episode_dir: Path) -> GameSubmission:
         system_prompt = _load_system_prompt(self.config)
-        run_config = self.config
+        subagent_contract_prompt = _subagent_prototype_contract_prompt(
+            self.config.active_subagent_prototypes
+        )
+        # Carry the task contract into the frozen per-episode config so retries,
+        # manifests, and model prompts all agree on the required output path.
+        run_config = replace(
+            self.config,
+            artifact_relpath=task.artifact_relpath,
+        )
         isolation = EpisodeIsolation.create(
             episode_dir,
             workspace_seed=(
@@ -605,7 +801,14 @@ class DeepSeekHarnessRuntime:
             _runtime_base_environment(), inherit_process=False
         )
         environment.update(self.config.environment)
-        environment.setdefault("GAME_LOOP_PROVIDER_KEY_SALT", task.task_id)
+        environment.setdefault(
+            "GAME_LOOP_PROVIDER_KEY_SALT",
+            str(
+                self.config.environment.get("GAME_LOOP_PROVIDER_KEY_SALT")
+                or os.environ.get("GAME_LOOP_PROVIDER_KEY_SALT", "")
+                or task.task_id
+            ),
+        )
         environment.update({
             "DSH_HOME": str(dsh_home),
             "DSH_SESSION_ROOT": str(sessions),
@@ -614,7 +817,9 @@ class DeepSeekHarnessRuntime:
             provider = load_provider(self.config.backbone_provider)
             provider_environment = dict(os.environ)
             provider_environment.update(self.config.environment)
-            provider_environment["GAME_LOOP_PROVIDER_KEY_SALT"] = task.task_id
+            provider_environment["GAME_LOOP_PROVIDER_KEY_SALT"] = environment[
+                "GAME_LOOP_PROVIDER_KEY_SALT"
+            ]
             resolved = provider.resolve(provider_environment)
             if resolved.api_key is None and resolved.requires_credential:
                 expected = ", ".join(
@@ -627,7 +832,19 @@ class DeepSeekHarnessRuntime:
                 environment.update({
                     "DEEPSEEK_BASE_URL": resolved.base_url,
                     "DEEPSEEK_API_KEY": resolved.api_key or "EMPTY",
+                    "GAME_LOOP_RESOLVED_PROVIDER_ROUTE": resolved.route_id,
+                    "GAME_LOOP_RESOLVED_PROVIDER_MODEL": resolved.model,
                 })
+                # Keep the alternate route available inside the isolated episode;
+                # provider credentials are already allowlisted and are never written
+                # into manifests or prompts.
+                for key in (
+                    "DEEPSEEK_POLARIS_BASE_URL",
+                    "DEEPSEEK_POLARIS_API_KEY",
+                    "DEEPSEEK_POLARIS_MODEL",
+                ):
+                    if provider_environment.get(key):
+                        environment[key] = provider_environment[key]
                 if resolved.route_id == "polaris":
                     run_config = replace(self.config, model=resolved.model)
             else:
@@ -636,7 +853,12 @@ class DeepSeekHarnessRuntime:
         prompt = task.prompt
         if system_prompt:
             prompt = f"{system_prompt.rstrip()}\n\n## Task\n\n{task.prompt}"
-        prompt = f"{_deadline_contract(run_config.timeout_seconds)}\n\n{prompt}"
+        if subagent_contract_prompt:
+            prompt = f"{subagent_contract_prompt}\n\n{prompt}"
+        prompt = (
+            f"{_deadline_contract(run_config.timeout_seconds, task.artifact_relpath)}"
+            f"\n\n{prompt}"
+        )
         prompt = (
             "## Runtime workspace authority\n\n"
             f"Your only writable workspace for this episode is `{isolation.workspace}`. "
@@ -646,6 +868,13 @@ class DeepSeekHarnessRuntime:
             "task text; those paths identify an earlier environment and are not submission "
             "output. The required artifact must be changed inside this workspace before you "
             "finish.\n\n"
+            "## One-time delegation checkpoint\n\n"
+            "Before broad implementation, briefly classify the required deliverables. If "
+            "there are two or more independently owned slices with a local check and one "
+            "active evolved child contract matches one slice, start that one child now and "
+            "then continue useful root work. If no such slice is evident, continue alone. "
+            "This is a conditional dispatch decision, not a requirement to fork, a quota, "
+            "or a fixed team design.\n\n"
             f"{prompt}"
         )
         trajectory = TrajectoryRecorder(isolation.root / "trajectory.jsonl")
@@ -657,17 +886,72 @@ class DeepSeekHarnessRuntime:
         artifact = _workspace_artifact(isolation.workspace, task.artifact_relpath)
         artifact_before = _artifact_digest(artifact)
         error: str | None = None
+        provider_route = environment.get("GAME_LOOP_RESOLVED_PROVIDER_ROUTE")
+        provider_base_url = environment.get("DEEPSEEK_BASE_URL")
+        fallback_notice: dict[str, Any] | None = None
+        workspace_backup: Path | None = None
+        if (
+            self.config.backbone_provider == "deepseek"
+            and provider_route == "official"
+            and _polaris_retry_environment(environment) is not None
+        ):
+            workspace_backup = Path(tempfile.mkdtemp(prefix="game-loop-dsh-retry-")) / "workspace"
+            shutil.copytree(isolation.workspace, workspace_backup, symlinks=True)
         try:
-            result = self.runner.run(
-                prompt,
-                cwd=isolation.workspace,
-                session_root=sessions,
-                config=run_config,
-                environment=environment,
-            )
+            try:
+                result = self.runner.run(
+                    prompt,
+                    cwd=isolation.workspace,
+                    session_root=sessions,
+                    config=run_config,
+                    environment=environment,
+                )
+            except Exception as primary_exc:  # noqa: BLE001 - provider failover.
+                fallback = _polaris_retry_environment(environment)
+                if provider_route != "official" or fallback is None or workspace_backup is None:
+                    raise
+                for child in isolation.workspace.iterdir():
+                    if child.is_dir() and not child.is_symlink():
+                        shutil.rmtree(child)
+                    else:
+                        child.unlink()
+                shutil.copytree(workspace_backup, isolation.workspace, symlinks=True, dirs_exist_ok=True)
+                fallback_environment, fallback_model = fallback
+                fallback_config = replace(run_config, model=fallback_model)
+                fallback_session_root = sessions / "provider-fallback-polaris"
+                fallback_session_root.mkdir(parents=True, exist_ok=True)
+                if not _provider_failure_is_recoverable(primary_exc):
+                    raise
+                result = self.runner.run(
+                    prompt,
+                    cwd=isolation.workspace,
+                    session_root=fallback_session_root,
+                    config=fallback_config,
+                    environment=fallback_environment,
+                )
+                run_config = fallback_config
+                environment = fallback_environment
+                provider_route = "polaris"
+                provider_base_url = fallback_environment.get("DEEPSEEK_BASE_URL")
+                fallback_notice = {
+                    "method": "game-loop.provider-fallback",
+                    "payload": {
+                        "from": "official",
+                        "to": "polaris",
+                        "reason": type(primary_exc).__name__,
+                    },
+                }
         except Exception as exc:  # noqa: BLE001 - normalize runtime failures.
             error = f"DeepSeek Harness failed: {exc}"
             result = DeepSeekHarnessRunnerResult("error", "")
+        finally:
+            if workspace_backup is not None:
+                shutil.rmtree(workspace_backup.parent, ignore_errors=True)
+        if fallback_notice is not None:
+            result = replace(
+                result,
+                notifications=tuple(result.notifications) + (fallback_notice,),
+            )
         for event in result.events:
             trajectory.record("session_event", "deepseek-harness", event)
         for notification in result.notifications:
@@ -693,7 +977,10 @@ class DeepSeekHarnessRuntime:
             "diagnostics": diagnostics,
         })
         usage = _collect_usage(result.events, result.notifications)
-        usage["modelCalls"] = result.model_calls
+        usage["modelCalls"] = max(
+            result.model_calls,
+            _collect_model_calls(result.events, result.notifications),
+        )
         submission = GameSubmission.create(
             task_id=task.task_id,
             runtime_id=self.config.runtime_id,
@@ -708,12 +995,25 @@ class DeepSeekHarnessRuntime:
                 "runtime_config_hash": sha256_json(run_config.to_dict()),
                 "finish_reason": result.finish_reason,
                 "session_root": result.session_root or str(sessions),
-                "provider_route": None if self.config.backbone_provider is None else resolved.route_id,
-                "provider_base_url": None if self.config.backbone_provider is None else resolved.base_url,
+                "provider_route": None if self.config.backbone_provider is None else provider_route,
+                "provider_base_url": None if self.config.backbone_provider is None else provider_base_url,
                 "provider_model": run_config.model,
                 "finalization_attempted": result.finalization_attempted,
                 "finalization_completed": result.finalization_completed,
                 "finalization_restarted": result.finalization_restarted,
+                "recovery_attempted": result.recovery_attempted,
+                "recovery_completed": result.recovery_completed,
+                "root_visible_subagent_tools": [
+                    tool_name_for_subagent_prototype(str(item["id"]))
+                    for item in self.config.active_subagent_prototypes
+                ],
+                "subagent_contract_prompt_sha256": (
+                    None
+                    if subagent_contract_prompt is None
+                    else hashlib.sha256(
+                        subagent_contract_prompt.encode("utf-8")
+                    ).hexdigest()
+                ),
             },
         )
         atomic_write_json(isolation.root / "submission.json", submission.to_dict())
@@ -727,18 +1027,27 @@ class DeepSeekHarnessRuntime:
         return submission
 
 
-def _deadline_contract(timeout_seconds: int) -> str:
+def _deadline_contract(
+    timeout_seconds: int,
+    artifact_relpath: str | None = None,
+) -> str:
     reserve_seconds = max(15, min(90, timeout_seconds // 10))
     inspection_seconds = max(15, timeout_seconds // 5)
+    target = artifact_relpath or "the required artifact"
     return (
         "## Hard runtime deadline\n\n"
         f"This session has a hard {timeout_seconds}-second wall-clock limit. "
         f"Finish tool use and send the final response at least {reserve_seconds} seconds "
         "before that limit; work lost to timeout is an infrastructure failure. "
-        f"Limit initial inspection and planning to about {inspection_seconds} seconds, "
-        "then implement the smallest complete solution that satisfies the task. "
-        "Avoid exhaustive asset enumeration and repeated long tests. Prioritize a "
-        "launchable, changed artifact, then use remaining time for bounded verification."
+        f"Limit initial inspection and planning to about {inspection_seconds} seconds. "
+        f"Before the third read-only tool call, make a meaningful implementation write "
+        f"to `{target}` (or its production files), even if it is only the smallest "
+        "launchable baseline. Do not spend the first phase cataloging assets, searching "
+        "outside the workspace, or writing a long plan. Use the provided seed and existing "
+        "assets first, then implement the remaining requirements incrementally. "
+        "A session that ends without changing the required artifact is a failed episode, "
+        "even when the model reports completion. Reserve the final portion for bounded "
+        "verification and a concise response."
     )
 
 
@@ -753,6 +1062,64 @@ def _load_system_prompt(config: DeepSeekHarnessRuntimeConfig) -> str | None:
         for placeholder, replacement in config.system_prompt_variables.items():
             prompt = prompt.replace(placeholder, replacement)
     return prompt
+
+
+def _subagent_prototype_contract_prompt(
+    prototypes: Sequence[Mapping[str, Any]],
+) -> str | None:
+    """Expose HPA-evolved child contracts to the root's delegation decision."""
+
+    if not prototypes:
+        return None
+    targets: list[str] = []
+    for prototype in prototypes:
+        prototype_id = str(prototype.get("id", ""))
+        spec = validate_subagent_prototype_spec(
+            {
+                key: value
+                for key, value in prototype.items()
+                if key not in {"id", "description"}
+            },
+            prototype_id=prototype_id,
+        )
+        heading = (
+            f"### `{tool_name_for_subagent_prototype(prototype_id)}` "
+            f"(prototype `{prototype_id}`)"
+        )
+        targets.append(
+            f"{heading}\n\n"
+            + tool_description_for_subagent_prototype(
+                prototype_id,
+                spec["persona"],
+                "",
+            )
+        )
+    return (
+        "## Optional evolved delegation targets\n\n"
+        "The fork tools below are active child prototypes evolved by the harness. "
+        "Their contracts are capabilities, not extra task requirements. Delegate only "
+        "when a prototype's evolved use condition matches a bounded slice that can be "
+        "completed independently. Evaluate that match as soon as an existing module or "
+        "artifact contract exposes ownership and local checks; a full read or implementation "
+        "of every independent slice is not a prerequisite for choosing the tool. "
+        "If the task already exposes multiple independent required slices, start one "
+        "matching child before beginning broad root-side implementation during a short "
+        "dispatch check; this is a conditional sequencing rule, not a fork quota. If no "
+        "bounded independently checkable slice is evident, continue as the root without "
+        "delegating. "
+        "Evolved child runs start in the background and report "
+        "completion while the root continues other useful work. Do not fork merely because "
+        "a target exists. Prefer the smallest number of child runs that covers the "
+        "independent slices with clear ownership. Start with one child and inspect its "
+        "completion before launching another; use parallel children only when their "
+        "boundaries are already clear and parallelism materially reduces the work. "
+        "Then stop delegating and finish "
+        "integration and verification. The root "
+        "retains workspace ownership, integration, verification, and final delivery. "
+        "After a child returns, inspect its result and incorporate any useful artifact "
+        "or evidence before claiming that the delegation contributed.\n\n"
+        + "\n\n".join(targets)
+    )
 
 
 def _install_skills(source: Path, destination: Path) -> None:
@@ -867,6 +1234,60 @@ def _collect_usage(
         key: int(value) if value.is_integer() else value
         for key, value in totals.items()
     }
+
+
+def _collect_model_calls(
+    events: Sequence[Mapping[str, Any]],
+    notifications: Sequence[Mapping[str, Any]] = (),
+) -> int:
+    """Count distinct root and descendant model steps without double-counting mirrors."""
+
+    notification_signatures: set[str] = set()
+    steps: set[tuple[str, int, int]] = set()
+    for notification in notifications:
+        if notification.get("method") != "session.event":
+            continue
+        payload = notification.get("payload")
+        if not isinstance(payload, Mapping):
+            payload = notification.get("params")
+        if not isinstance(payload, Mapping):
+            continue
+        event = payload.get("event")
+        if not isinstance(event, Mapping):
+            continue
+        signature = json.dumps(
+            event, sort_keys=True, separators=(",", ":"), default=str
+        )
+        notification_signatures.add(signature)
+        if event.get("type") != "assistant/message":
+            continue
+        data = event.get("data")
+        if not isinstance(data, Mapping):
+            continue
+        message = data.get("message")
+        source = message.get("source") if isinstance(message, Mapping) else None
+        if not isinstance(source, Mapping) or source.get("kind") != "model":
+            continue
+        turn, step = data.get("turn"), data.get("step")
+        if isinstance(turn, int) and isinstance(step, int):
+            steps.add((str(payload.get("sessionId", "notification-session")), turn, step))
+    for event in events:
+        signature = json.dumps(
+            event, sort_keys=True, separators=(",", ":"), default=str
+        )
+        if signature in notification_signatures or event.get("type") != "assistant/message":
+            continue
+        data = event.get("data")
+        if not isinstance(data, Mapping):
+            continue
+        message = data.get("message")
+        source = message.get("source") if isinstance(message, Mapping) else None
+        if not isinstance(source, Mapping) or source.get("kind") != "model":
+            continue
+        turn, step = data.get("turn"), data.get("step")
+        if isinstance(turn, int) and isinstance(step, int):
+            steps.add(("root-session", turn, step))
+    return len(steps)
 
 
 def _workspace_artifact(workspace: Path, relative: str) -> Path:

@@ -121,6 +121,7 @@ class ProviderLaunchTests(unittest.TestCase):
             tools = root / "gcbench" / "tools"
             tools.mkdir(parents=True)
             (tools / "screenshot.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+            (tools / "screenshot.gd").write_text("extends SceneTree\n", encoding="utf-8")
             with patch.dict(os.environ, {"GAME_LOOP_TEXT_ONLY": "1"}, clear=False):
                 with patch(
                     "game_loop.gcbench_runtime.resolve_godot_executable",
@@ -132,6 +133,7 @@ class ProviderLaunchTests(unittest.TestCase):
                     )
                 sanitized = sanitize_public_instruction(instruction)
             self.assertFalse((root / "workspace/tools/screenshot.sh").exists())
+            self.assertFalse((root / "workspace/tools/screenshot.gd").exists())
             self.assertNotIn("screenshot", sanitized.casefold())
             self.assertIn("Keep authored visuals", sanitized)
             self.assertIn("Ship deterministic traces", sanitized)

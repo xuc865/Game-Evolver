@@ -1,0 +1,12 @@
+{
+  "scenario": "hud",
+  "duration_frames": 320,
+  "events": [
+    {"frame": 0, "type": "key_press", "keycode": "ENTER"},
+    {"frame": 20, "type": "key_press", "keycode": "P"},
+    {"frame": 60, "type": "key_press", "keycode": "H"},
+    {"frame": 120, "type": "key_press", "keycode": "H"},
+    {"frame": 160, "type": "key_press", "keycode": "P"},
+    {"frame": 180, "type": "key_press", "keycode": "1"}
+  ]
+}

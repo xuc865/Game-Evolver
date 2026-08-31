@@ -420,9 +420,26 @@ class LocalChatAgent:
             "GAME_LOOP_CHAT_FALLBACK_API_KEY_ENV", "OPENROUTER_API_KEY"
         ).strip()
         api_key = os.environ.get(key_env, "").strip()
-        if not all((base_url, model, api_key)):
+        if all((base_url, model, api_key)):
+            return base_url, model, api_key
+
+        # Keep the HPA/local-agent path consistent with DeepSeek Harness: when
+        # the official account is exhausted, the explicitly configured Polaris
+        # route is a provider fallback rather than a second credential pool.
+        provider = os.environ.get(
+            "CODEX_PROVIDER",
+            os.environ.get("GAME_LOOP_BACKBONE_PROVIDER", ""),
+        ).strip().casefold()
+        if provider not in {"deepseek", "deepseek_v4"}:
             return None
-        return base_url, model, api_key
+        polaris_base = os.environ.get("DEEPSEEK_POLARIS_BASE_URL", "").strip()
+        polaris_model = os.environ.get("DEEPSEEK_POLARIS_MODEL", "").strip()
+        polaris_key = os.environ.get("DEEPSEEK_POLARIS_API_KEY", "").strip()
+        if not all((polaris_base, polaris_model, polaris_key)):
+            return None
+        if polaris_base.endswith("/chat/completions"):
+            polaris_base = polaris_base[: -len("/chat/completions")]
+        return polaris_base.rstrip("/"), polaris_model, polaris_key
 
     def _qwen_timeout_fallback(self) -> tuple[str, str, str] | None:
         if getattr(self, "provider", "") != "qwen":

@@ -43,9 +43,13 @@ HPA owns a library of behavior-only child prototypes. Every prototype in its
 current audited library is automatically exposed by DSH as a separate fork
 tool; per-prototype enablement is not an evolutionary gene. The root chooses
 which tool to call for each concrete task at runtime.
-The normal HPA contract asks only for the child `persona`: one bounded reusable
-job. Fork creation, mounting, communication, and lifecycle remain invisible
-runtime policy.
+The normal HPA contract asks only for the child `persona`. New HPA proposals
+write five labeled clauses inside that one string: `Use when:`, `Scope:`,
+`Deliverable:`, `Done when:`, and `Return:`. This makes a child job legible and
+independently verifiable while keeping it reusable across tasks; proposals must
+not name a benchmark, product, game, task instance, source file, fixed team role,
+or topology. Fork creation, mounting, communication, and lifecycle remain
+invisible runtime policy.
 The parent generates the actual child task dynamically and remains responsible
 for workspace ownership and delivery. Mechanism switches such as fork enablement,
 communication mode, context inheritance, and recursion depth are deliberately

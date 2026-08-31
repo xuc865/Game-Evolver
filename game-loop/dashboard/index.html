@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>game-evolver dashboard</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div>
+        <div class="eyebrow">game-evolver</div>
+        <h1>演化实验控制台</h1>
+        <p>启动 bench 级自动演化，实时查看 GOA、验证、proposal 和下一轮任务。</p>
+      </div>
+      <div class="topbar-actions">
+        <div class="status-pill" id="runStatus">未连接</div>
+        <button class="ghost" id="stopBtn" disabled>停止</button>
+      </div>
+    </header>
+
+    <section class="launch-band">
+      <div class="launch-grid">
+        <label>
+          <span>Bench</span>
+          <select id="benchSelect"></select>
+        </label>
+        <label>
+          <span>Model</span>
+          <select id="modelSelect"></select>
+        </label>
+        <label>
+          <span>时长</span>
+          <input id="hoursInput" type="number" min="1" max="72" step="1" value="24" />
+        </label>
+        <label>
+          <span>Epoch 上限</span>
+          <input id="epochsInput" type="number" min="1" max="2000" step="1" value="200" />
+        </label>
+        <label>
+          <span>每轮 case</span>
+          <input id="casesInput" type="number" min="1" max="16" step="1" value="3" />
+        </label>
+        <button class="primary" id="startBtn">启动演化</button>
+      </div>
+      <div class="launch-detail">
+        <div>
+          <span>Config</span>
+          <strong id="configPath">-</strong>
+        </div>
+        <div>
+          <span>Task Source</span>
+          <strong id="taskSource">-</strong>
+        </div>
+        <div>
+          <span>Seed Artifact</span>
+          <strong id="seedArtifact">-</strong>
+        </div>
+      </div>
+    </section>
+
+    <main class="grid">
+      <aside class="panel rail">
+        <div class="panel-title">流程</div>
+        <div id="stageRail" class="stage-rail"></div>
+      </aside>
+
+      <section class="panel stream">
+        <div class="panel-head">
+          <div>
+            <div class="panel-kicker">Live Trace</div>
+          <h2>GOA Live Conversation</h2>
+          </div>
+          <div class="meter">
+            <span>24h loop</span>
+            <div class="meter-bar"><span id="timeMeter"></span></div>
+          </div>
+        </div>
+        <div id="conversationList" class="conversation-list"></div>
+      </section>
+
+      <section class="panel inspector">
+        <div class="panel-title">当前状态</div>
+        <div class="stats-grid">
+          <div><span>Phase</span><strong id="phaseValue">-</strong></div>
+          <div><span>Epoch</span><strong id="epochValue">-</strong></div>
+          <div><span>Elapsed</span><strong id="elapsedValue">-</strong></div>
+          <div><span>Progress</span><strong id="progressValue">-</strong></div>
+        </div>
+        <div class="mini-card">
+          <h3>Proposal Agent</h3>
+          <div id="proposalView" class="mini-body"></div>
+        </div>
+        <div class="mini-card">
+          <h3>Verification</h3>
+          <div id="verificationView" class="mini-body"></div>
+        </div>
+      </section>
+    </main>
+
+    <section class="panel hga-panel">
+      <div class="panel-head">
+        <div>
+          <div class="panel-kicker">Harness Generation Agent</div>
+          <h2>HGA / Outer Element Library</h2>
+        </div>
+        <div class="chip-row" id="hgaSummary"></div>
+      </div>
+      <div id="hgaView" class="hga-layout"></div>
+    </section>
+
+    <section class="panel lower">
+      <div class="panel-head">
+        <div>
+          <div class="panel-kicker">Rubrics</div>
+          <h2>Hard / Soft 评分</h2>
+        </div>
+        <div class="chip-row" id="validationSummary"></div>
+      </div>
+      <div class="rubric-wrap">
+        <div class="rubric-box">
+          <h3>Hard Rubrics</h3>
+          <div id="hardRubrics"></div>
+        </div>
+        <div class="rubric-box">
+          <h3>Soft Rubrics</h3>
+          <div id="softRubrics"></div>
+        </div>
+        <div class="rubric-box wide">
+          <h3>Case Review</h3>
+          <div id="caseReview"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel lower">
+      <div class="panel-head">
+        <div>
+          <div class="panel-kicker">Logs</div>
+          <h2>Supervisor / GOA Output</h2>
+        </div>
+      </div>
+      <pre id="logTail" class="log-tail">暂无日志</pre>
+    </section>
+  </div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

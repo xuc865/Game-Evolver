@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import argparse
+import io
 import json
 import tempfile
 import urllib.error
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -25,7 +28,12 @@ from game_loop.core.harness_rubric_validator import (
     _gcbench_gameplay_replay_probe,
 )
 from game_loop.core.harness import HarnessEpochResult, HarnessProfile
-from game_loop.probe_tools import _load_demo_trace, load_demo_traces
+from game_loop.probe_tools import (
+    _godot_interaction_probe_script,
+    cmd_gcbench_demo_evidence,
+    _load_demo_trace,
+    load_demo_traces,
+)
 
 
 def _write_godot_artifact(root: Path) -> None:
@@ -109,6 +117,19 @@ class HarnessRubricValidatorTests(unittest.TestCase):
             self.assertIsNotNone(selected)
             assert selected is not None
             self.assertEqual(selected[0].name, "05_battle.json")
+
+    def test_interaction_probe_covers_frame_zero_numeric_keys_and_script_state(self):
+        script = _godot_interaction_probe_script("demo_outputs/demo.json", 60)
+
+        self.assertIn('if frame == 0:', script)
+        self.assertLess(
+            script.index('_save_state("before.state")'),
+            script.index('int(raw.get("frame", -1)) == frame'),
+        )
+        self.assertIn("raw_keycode is int or raw_keycode is float", script)
+        self.assertIn('kind == "mouse_move"', script)
+        self.assertIn("PROPERTY_USAGE_SCRIPT_VARIABLE", script)
+        self.assertIn('image.save_png("res://"', script)
 
     def test_gcbench_replay_probe_reads_champion_attempt_logs(self):
         with tempfile.TemporaryDirectory() as td:
@@ -986,6 +1007,39 @@ class HarnessRubricValidatorTests(unittest.TestCase):
             (logs / "fatal.log").write_text("SCRIPT ERROR: fatal\n", encoding="utf-8")
             failed = _gcbench_gameplay_replay_probe(artifact=artifact, run_dir=root)
             self.assertFalse(failed["passed"])
+
+    def test_demo_evidence_accepts_declared_negative_fixture_only(self):
+        with tempfile.TemporaryDirectory() as td:
+            artifact = Path(td)
+            demo_dir = artifact / "demo_outputs"
+            demo_dir.mkdir()
+            (demo_dir / "play.json").write_text(
+                json.dumps({"duration_frames": 2, "events": [{"type": "key_press"}]}),
+                encoding="utf-8",
+            )
+            (demo_dir / "negative.json").write_text(
+                json.dumps({"expected_rejection": True, "events": "invalid"}),
+                encoding="utf-8",
+            )
+            output = io.StringIO()
+            with redirect_stdout(output):
+                return_code = cmd_gcbench_demo_evidence(
+                    argparse.Namespace(artifact=str(artifact), max_frames=600)
+                )
+            report = json.loads(output.getvalue())
+            self.assertEqual(return_code, 0)
+            self.assertTrue(report["passed"])
+            self.assertEqual(report["expected_rejection_count"], 1)
+
+            (demo_dir / "accidental.json").write_text(
+                json.dumps({"events": "invalid"}), encoding="utf-8"
+            )
+            with redirect_stdout(output := io.StringIO()):
+                return_code = cmd_gcbench_demo_evidence(
+                    argparse.Namespace(artifact=str(artifact), max_frames=600)
+                )
+            self.assertEqual(return_code, 1)
+            self.assertFalse(json.loads(output.getvalue())["passed"])
 
     def test_rejection_memory_is_reused_in_proposer_context(self):
         with tempfile.TemporaryDirectory() as td:

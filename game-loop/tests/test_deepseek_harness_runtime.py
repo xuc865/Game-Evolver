@@ -33,7 +33,15 @@ from game_loop.runtime_profile_snapshot import (
     capture_runtime_profile,
     materialize_runtime_profile,
 )
-from game_loop.runtime.deepseek_harness import _collect_usage, _finalization_prompt
+from game_loop.runtime.trajectory import TrajectoryRecorder
+from game_loop.runtime.deepseek_harness import (
+    _collect_model_calls,
+    _collect_usage,
+    _deadline_contract,
+    _finalization_prompt,
+    _max_tokens_recovery_prompt,
+    _subagent_prototype_contract_prompt,
+)
 
 
 class FakeDeepSeekHarnessRunner:
@@ -94,6 +102,108 @@ class FakeDeepSeekHarnessRunner:
 
 
 class DeepSeekHarnessRuntimeTests(unittest.TestCase):
+    def test_deadline_contract_requires_early_artifact_write(self):
+        prompt = _deadline_contract(1200, "game")
+
+        self.assertIn("Before the third read-only tool call", prompt)
+        self.assertIn("`game`", prompt)
+        self.assertIn("provided seed and existing assets first", prompt)
+        self.assertIn("artifact is a failed episode", prompt)
+
+    def test_finalization_can_rescue_zero_write_episode(self):
+        prompt = _finalization_prompt(
+            Path("/tmp/episode"),
+            session_restarted=False,
+            artifact_relpath="game",
+        )
+
+        self.assertIn("exactly one immediate write/edit", prompt)
+        self.assertIn("`game`", prompt)
+
+    def test_official_provider_failure_retries_on_configured_polaris(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            seed = root / "seed"
+            seed.mkdir()
+
+            class FailThenSucceed(FakeDeepSeekHarnessRunner):
+                def run(self, prompt, *, cwd, session_root, config, environment):
+                    self.calls.append({
+                        "prompt": prompt,
+                        "cwd": cwd,
+                        "session_root": session_root,
+                        "config": config,
+                        "environment": dict(environment),
+                    })
+                    if len(self.calls) == 1:
+                        raise RuntimeError("DeepSeek API error 402: insufficient balance")
+                    (cwd / "game.txt").write_text("built by polaris\n", encoding="utf-8")
+                    return DeepSeekHarnessRunnerResult(
+                        finish_reason="completed",
+                        final_response="done",
+                        session_root=str(session_root),
+                    )
+
+            runner = FailThenSucceed()
+            config = DeepSeekHarnessRuntimeConfig()
+            task = GameTask(
+                task_id="provider-fallback-4",
+                benchmark_id="provider-test",
+                prompt="Build.",
+                task_source_ref=str(root),
+                workspace_seed_ref=str(seed),
+                artifact_relpath="game.txt",
+            )
+            environment = {
+                "DEEPSEEK_API_KEY": "official-secret",
+                "DEEPSEEK_API_BASE": "https://api.deepseek.com",
+                "DEEPSEEK_ROUTE_MODE": "mixed",
+                "DEEPSEEK_POLARIS_BASE_URL": "http://polaris.invalid/v1",
+                "DEEPSEEK_POLARIS_API_KEY": "polaris-secret",
+                "DEEPSEEK_POLARIS_MODEL": "kaiwu-llm-model",
+            }
+            with patch.dict(os.environ, environment, clear=False):
+                submission = DeepSeekHarnessRuntime(config, runner=runner).run(
+                    task, episode_dir=root / "episode"
+                )
+            self.assertEqual(submission.status, "completed")
+            self.assertEqual(len(runner.calls), 2)
+            self.assertEqual(runner.calls[0]["config"].model, "deepseek-v4-flash")
+            self.assertEqual(runner.calls[1]["config"].model, "kaiwu-llm-model")
+            self.assertEqual(submission.metadata["provider_route"], "polaris")
+            self.assertIn("provider-fallback-polaris", submission.metadata["session_root"])
+
+    def test_root_prompt_exposes_concise_evolved_subagent_contract(self):
+        persona = (
+            "Use when: one independent artifact slice is isolated. "
+            "Scope: implement only that slice. "
+            "Deliverable: return one useful artifact and evidence. "
+            "Done when: concrete validation passes. "
+            "Return: artifact, evidence, and completion status."
+        )
+
+        prompt = _subagent_prototype_contract_prompt(({
+            "id": "bounded_worker",
+            "description": "Produce one bounded artifact slice.",
+            "persona": persona,
+        },))
+
+        self.assertIsNotNone(prompt)
+        assert prompt is not None
+        self.assertIn("fork_agent_bounded_worker_", prompt)
+        self.assertIn("Delegate one explicit artifact or module slice", prompt)
+        self.assertIn("full read or implementation", prompt)
+        self.assertNotIn(persona, prompt)
+        self.assertIn("Do not fork merely because a target exists", prompt)
+        self.assertIn(
+            "start one matching child before beginning broad root-side implementation",
+            prompt,
+        )
+        self.assertNotIn("MOBA", prompt)
+
+    def test_root_prompt_omits_subagent_section_without_active_prototypes(self):
+        self.assertIsNone(_subagent_prototype_contract_prompt(()))
+
     def test_restarted_finalizer_receives_real_workspace_inventory(self):
         with tempfile.TemporaryDirectory() as td:
             workspace = Path(td)
@@ -108,6 +218,17 @@ class DeepSeekHarnessRuntimeTests(unittest.TestCase):
             self.assertIn("project.godot", prompt)
             self.assertIn("scripts/Main.gd", prompt)
             self.assertIn("Do not claim that no artifact was written", prompt)
+
+    def test_max_token_recovery_requires_immediate_workspace_edits(self):
+        with tempfile.TemporaryDirectory() as td:
+            workspace = Path(td)
+            (workspace / "project.godot").write_text("[application]\n")
+
+            prompt = _max_tokens_recovery_prompt(workspace)
+
+            self.assertIn("filesystem write/edit tool calls", prompt)
+            self.assertIn("Do not repeat the plan", prompt)
+            self.assertIn("project.godot", prompt)
 
     def test_frozen_episode_propagates_dsh_plugin_genome(self):
         with tempfile.TemporaryDirectory() as td:
@@ -275,7 +396,15 @@ class DeepSeekHarnessRuntimeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             cordis = root / "seed.cordis.yml"
-            cordis.write_text("- id: seed\n  name: '@deepseek-ai/dsh-seed'\n")
+            cordis.write_text(
+                "- id: seed\n"
+                "  name: '@deepseek-ai/dsh-seed'\n"
+                "- id: tool-subagent\n"
+                "  name: '@deepseek-ai/dsh-tool-subagent'\n"
+                "  config:\n"
+                "    provider: spawn\n"
+                "    toolName: subagent\n"
+            )
             profile = root / "runtime.json"
             profile.write_text(json.dumps({
                 "runtime_type": "deepseek-harness",
@@ -314,9 +443,40 @@ class DeepSeekHarnessRuntimeTests(unittest.TestCase):
             self.assertIn("fork_agent_evidence_mapper", effective)
             self.assertIn("fork_agent_artifact_refiner", effective)
             self.assertIn("Map evidence and return one concrete recommendation.", effective)
+            self.assertIn("evolved_subagent_tool.mjs", effective)
+            self.assertIn('"toolDescription":', effective)
             self.assertIn('\"maxTokens\":4096', effective)
-            self.assertIn('\"enableRunInBackground\":false', effective)
             self.assertIn('\"maxDepth\":2', effective)
+            self.assertNotIn("@deepseek-ai/dsh-tool-subagent", effective)
+
+    def test_runtime_profile_keeps_generic_subagent_without_evolved_targets(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cordis = root / "seed.cordis.yml"
+            cordis.write_text(
+                "- id: tool-subagent\n"
+                "  name: '@deepseek-ai/dsh-tool-subagent'\n"
+                "  config:\n"
+                "    provider: spawn\n"
+                "    toolName: subagent\n"
+            )
+            profile = root / "runtime.json"
+            profile.write_text(json.dumps({
+                "runtime_type": "deepseek-harness",
+                "cordis": str(cordis),
+                "cordis_plugin_catalog": {},
+                "active_cordis_plugins": [],
+            }))
+
+            captured, _, assets = capture_runtime_profile(profile)
+            materialized, _ = materialize_runtime_profile(
+                profile=captured,
+                assets=assets,
+                destination=root / "snapshot",
+            )
+
+            effective = Path(json.loads(materialized.read_text())["cordis"]).read_text()
+            self.assertIn("@deepseek-ai/dsh-tool-subagent", effective)
 
     def test_subagent_prototype_rejects_fork_policy_genes(self):
         with self.assertRaisesRegex(ValueError, "not fork policy"):
@@ -372,6 +532,17 @@ class DeepSeekHarnessRuntimeTests(unittest.TestCase):
                 skills_source=str(skills),
                 backbone_provider=None,
                 timeout_seconds=600,
+                active_subagent_prototypes=({
+                    "id": "bounded_worker",
+                    "description": "Stale catalog summary must not enter the root prompt.",
+                    "persona": (
+                        "Use when: one bounded slice is independent. "
+                        "Scope: own only that delegated slice. "
+                        "Deliverable: one consumable artifact. "
+                        "Done when: scoped validation passes. "
+                        "Return: artifact and evidence to the root."
+                    ),
+                },),
             )
             runtime = DeepSeekHarnessRuntime(config, runner=runner)
             task = GameTask(
@@ -395,6 +566,15 @@ class DeepSeekHarnessRuntimeTests(unittest.TestCase):
                 "modelCalls": 1,
             })
             self.assertIn("Harness evolution", runner.calls[0]["prompt"])
+            self.assertIn(
+                "Delegate one explicit artifact or module slice",
+                runner.calls[0]["prompt"],
+            )
+            self.assertNotIn(
+                "Use when: one bounded slice is independent",
+                runner.calls[0]["prompt"],
+            )
+            self.assertNotIn("Stale catalog summary", runner.calls[0]["prompt"])
             self.assertIn("## Hard runtime deadline", runner.calls[0]["prompt"])
             self.assertIn("hard 600-second wall-clock limit", runner.calls[0]["prompt"])
             isolated_workspace = (root / "episode" / "workspace").resolve()
@@ -415,6 +595,18 @@ class DeepSeekHarnessRuntimeTests(unittest.TestCase):
                 (root / "episode" / "workspace" / ".agents" / "skills" / "probe-first" / "SKILL.md").is_file()
             )
             self.assertFalse((root / "episode" / "workspace" / ".qwen").exists())
+            self.assertEqual(
+                submission.metadata["root_visible_subagent_tools"],
+                [next(
+                    line.split("`")[1]
+                    for line in runner.calls[0]["prompt"].splitlines()
+                    if line.startswith("### `fork_agent_bounded_worker_")
+                )],
+            )
+            self.assertEqual(
+                len(submission.metadata["subagent_contract_prompt_sha256"]),
+                64,
+            )
             trajectory = [
                 json.loads(line)
                 for line in (root / "episode" / "trajectory.jsonl").read_text(encoding="utf-8").splitlines()
@@ -430,6 +622,17 @@ class DeepSeekHarnessRuntimeTests(unittest.TestCase):
             self.assertEqual(
                 manifest["isolation"]["runtime_layout"], "deepseek-harness"
             )
+
+    def test_trajectory_serialization_is_cycle_safe(self):
+        with tempfile.TemporaryDirectory() as td:
+            payload: dict[str, object] = {}
+            payload["self"] = payload
+            recorder = TrajectoryRecorder(Path(td) / "trajectory.jsonl")
+            recorder.record("notification", "test", payload)
+            event = json.loads(
+                (Path(td) / "trajectory.jsonl").read_text(encoding="utf-8")
+            )
+            self.assertEqual(event["payload"]["self"], "<cycle>")
 
     def test_nested_awesome_skills_are_materialized_for_dsh_discovery(self):
         with tempfile.TemporaryDirectory() as td:
@@ -513,6 +716,37 @@ class DeepSeekHarnessRuntimeTests(unittest.TestCase):
                 "GAME_LOOP_PROVIDER_KEY_SALT",
                 runner.calls[0]["config"].environment,
             )
+
+    def test_explicit_route_salt_overrides_task_identity(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            seed = root / "seed"
+            seed.mkdir()
+            runner = FakeDeepSeekHarnessRunner()
+            runtime = DeepSeekHarnessRuntime(
+                DeepSeekHarnessRuntimeConfig(), runner=runner
+            )
+            environment = {
+                "DEEPSEEK_API_KEY": "official-secret",
+                "DEEPSEEK_API_BASE": "https://api.deepseek.com",
+                "DEEPSEEK_ROUTE_MODE": "mixed",
+                "DEEPSEEK_POLARIS_BASE_URL": "http://polaris.invalid/v1",
+                "DEEPSEEK_POLARIS_API_KEY": "polaris-secret",
+                "DEEPSEEK_POLARIS_MODEL": "kaiwu-llm-model",
+                "GAME_LOOP_PROVIDER_KEY_SALT": "polaris-route",
+            }
+            task = GameTask(
+                task_id="a-task-id-that-maps-official",
+                benchmark_id="provider-test",
+                prompt="Build.",
+                task_source_ref=str(root),
+                workspace_seed_ref=str(seed),
+                artifact_relpath="game.txt",
+            )
+            with patch.dict(os.environ, environment, clear=False):
+                submission = runtime.run(task, episode_dir=root / "episode")
+            self.assertEqual(runner.calls[0]["config"].model, "kaiwu-llm-model")
+            self.assertEqual(submission.metadata["provider_route"], "polaris")
 
     def test_existing_seed_artifact_must_be_changed_by_the_agent(self):
         with tempfile.TemporaryDirectory() as td:
@@ -639,6 +873,44 @@ class DeepSeekHarnessRuntimeTests(unittest.TestCase):
             )
             self.assertEqual(submission.usage["inputTokens"], 12)
             self.assertEqual(submission.usage["outputTokens"], 5)
+
+    def test_model_call_count_includes_distinct_descendant_steps(self):
+        root = {
+            "type": "assistant/message",
+            "data": {
+                "turn": 1,
+                "step": 1,
+                "message": {"source": {"kind": "model"}},
+            },
+        }
+        child_one = {
+            "type": "assistant/message",
+            "data": {
+                "turn": 1,
+                "step": 1,
+                "message": {"source": {"kind": "model"}},
+            },
+        }
+        child_two = {
+            "type": "assistant/message",
+            "data": {
+                "turn": 1,
+                "step": 2,
+                "message": {"source": {"kind": "model"}},
+            },
+        }
+        notifications = (
+            {"method": "session.event", "payload": {
+                "sessionId": "root", "event": root,
+            }},
+            {"method": "session.event", "payload": {
+                "sessionId": "child", "event": child_one,
+            }},
+            {"method": "session.event", "payload": {
+                "sessionId": "child", "event": child_two,
+            }},
+        )
+        self.assertEqual(_collect_model_calls((root,), notifications), 3)
 
     def test_profile_rejects_embedded_credentials(self):
         with self.assertRaisesRegex(ValueError, "cannot contain credentials"):
@@ -872,6 +1144,79 @@ class DeepSeekHarnessRuntimeTests(unittest.TestCase):
             self.assertTrue(closed.is_set())
             self.assertNotIn("AWS_SECRET_ACCESS_KEY", started_environment)
             self.assertEqual(os.environ["AWS_SECRET_ACCESS_KEY"], "must-not-leak")
+
+    def test_python_sdk_runner_recovers_once_after_max_tokens(self):
+        prompts = []
+
+        class Result:
+            def __init__(self, reason, turn):
+                self.finish_reason = reason
+                self.final_response = f"turn-{turn}"
+                self.events = ({
+                    "type": "assistant/message",
+                    "data": {
+                        "turn": turn,
+                        "step": 1,
+                        "usage": {"inputTokens": 10, "outputTokens": 5},
+                    },
+                },)
+                self.notifications = ()
+                self.session_root = "/fake/session"
+
+        class Session:
+            id = "shared-session"
+
+            def run(self, prompt, on_notification=None):
+                prompts.append(prompt)
+                if len(prompts) == 1:
+                    return Result("max-tokens", 1)
+                return Result("completed", 2)
+
+        class Harness:
+            def __init__(self, **kwargs):
+                self.client = self
+
+            def start(self):
+                pass
+
+            def start_session(self):
+                return Session()
+
+            def close(self):
+                pass
+
+        fake_module = types.ModuleType("deepseek_harness")
+        fake_module.DeepSeekHarness = Harness
+        with tempfile.TemporaryDirectory() as td, patch.dict(
+            sys.modules, {"deepseek_harness": fake_module}
+        ):
+            root = Path(td)
+            result = PythonSDKRunner().run(
+                "build",
+                cwd=root,
+                session_root=root / "sessions",
+                config=DeepSeekHarnessRuntimeConfig(
+                    backbone_provider=None,
+                    timeout_seconds=5,
+                    finalization_reserve_seconds=1,
+                ),
+                environment={},
+            )
+
+        self.assertEqual(result.finish_reason, "completed")
+        self.assertEqual(result.model_calls, 2)
+        self.assertTrue(result.recovery_attempted)
+        self.assertTrue(result.recovery_completed)
+        self.assertEqual(len(prompts), 2)
+        self.assertIn("filesystem write/edit tool calls", prompts[1])
+        self.assertIn(
+            "game-loop.max-token-recovery",
+            [item["method"] for item in result.notifications],
+        )
+        self.assertEqual(
+            _collect_usage(result.events, result.notifications),
+            {"inputTokens": 20, "outputTokens": 10},
+        )
 
     def test_python_sdk_runner_cancels_and_finishes_in_same_session(self):
         cancelled = threading.Event()

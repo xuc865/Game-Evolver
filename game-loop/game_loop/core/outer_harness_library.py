@@ -5,7 +5,7 @@ import json
 import os
 import re
 from collections import defaultdict
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from statistics import median
@@ -24,6 +24,79 @@ from game_loop.core.harness_element_stats import (
 from game_loop.utils import atomic_write_json, read_json, utc_now
 
 OUTER_LIBRARY_OPERATIONS = frozenset({"add", "delete", "modify", "merge", "unchanged"})
+
+_SUBAGENT_PERSONA_CLAUSES = (
+    "Use when:",
+    "Scope:",
+    "Deliverable:",
+    "Done when:",
+    "Return:",
+)
+
+
+def _validate_evolved_subagent_persona(element: HarnessElementConfig) -> None:
+    """Keep HPA-generated fork targets legible without evolving fork policy."""
+
+    if element.category != "subagent":
+        return
+    persona = str(element.spec.get("persona", ""))
+    missing = [clause for clause in _SUBAGENT_PERSONA_CLAUSES if clause not in persona]
+    if missing:
+        raise ValueError(
+            "evolved subagent persona lacks delegation contract clauses: "
+            + ", ".join(missing)
+        )
+
+
+def _subagent_persona_contract_valid(element: HarnessElementConfig) -> bool:
+    if element.category != "subagent":
+        return True
+    try:
+        _validate_evolved_subagent_persona(element)
+    except ValueError:
+        return False
+    return True
+
+
+def _validate_non_coercive_delegation(element: HarnessElementConfig) -> None:
+    """Reject library objects that manufacture fork evidence instead of value."""
+
+    text = json.dumps({
+        "description": element.description,
+        "spec": element.spec,
+        "tags": element.tags,
+    }, ensure_ascii=False).casefold()
+    delegation_terms = (
+        "fork tool",
+        "fork-tool",
+        "fork invocation",
+        "subagent invocation",
+        "child invocation",
+    )
+    coercion_terms = (
+        "at least one",
+        "must invoke",
+        "must call",
+        "ensure that",
+        "verify that",
+        "invocation quota",
+    )
+    metric_terms = (
+        "trajectory",
+        "admission",
+        "acceptance",
+        "call evidence",
+        "invocation evidence",
+    )
+    if (
+        any(term in text for term in delegation_terms)
+        and any(term in text for term in coercion_terms)
+        and any(term in text for term in metric_terms)
+    ):
+        raise ValueError(
+            "harness elements may not force or quota child invocation to manufacture "
+            "trajectory/admission evidence; delegation must follow marginal value"
+        )
 
 
 def _simple_evolution_contract() -> dict[str, Any]:
@@ -48,9 +121,45 @@ def _simple_evolution_contract() -> dict[str, Any]:
             "subagent": {
                 "purpose": "One reusable bounded job that a child agent can perform.",
                 "required_spec": ["persona"],
+                "persona_contract": {
+                    "Use when:": (
+                        "Reusable observable task-structure conditions such as an existing "
+                        "bounded artifact boundary, locally runnable acceptance checks, and "
+                        "competing independent required slices. Do not use a subjective phrase "
+                        "such as 'clear marginal value' that presupposes unknown utility. A "
+                        "slice may rely on an existing shared interface; local validation need "
+                        "not prove that later whole-artifact integration is unnecessary."
+                    ),
+                    "Scope:": (
+                        "One bounded class of work and, when implementation is delegated, "
+                        "the explicit artifact slice the child owns for this call."
+                    ),
+                    "Deliverable:": "One independently useful output the root can integrate.",
+                    "Done when:": "Observable completion and validation evidence.",
+                    "Return:": "The concise handoff payload returned to the root.",
+                },
                 "rule": (
-                    "Write the child job directly. The runtime automatically creates and "
-                    "mounts its fork tool. Do not configure fork mechanics."
+                    "Write all five labeled clauses inside the single persona string. Keep the "
+                    "capability reusable across tasks: do not name a benchmark, product, game, "
+                    "task instance, source file, fixed team role, or topology. The runtime "
+                    "automatically creates and mounts its fork tool. Do not configure fork "
+                    "mechanics or root delegation policy. Do not make every child advisory-only "
+                    "or prohibit all child writes by default: when evidence supports delegated "
+                    "implementation, the child may directly produce and validate only its "
+                    "explicitly assigned artifact slice, while the root retains integration, "
+                    "whole-artifact verification, and final delivery. The root may adapt shared "
+                    "interfaces or consumers after handoff; do not require a child slice to be "
+                    "globally integration-free."
+                ),
+                "non_coercion": (
+                    "Never force, quota, or pre-commit to a child invocation merely to create "
+                    "trajectory, admission, or attribution evidence. Delegation must emerge "
+                    "from the evolved use condition and expected marginal value."
+                ),
+                "non_adoption_repair": (
+                    "When formal non-adoption evidence identifies an existing prototype, "
+                    "repair that prototype with modify. Do not add a sibling replacement "
+                    "with the same capability boundary."
                 ),
             },
         },
@@ -1060,8 +1169,19 @@ class OuterHarnessLibraryStore:
         replacement: HarnessElementConfig,
         current: HarnessElementConfig,
         metadata: dict[str, dict[str, Any]],
+        non_adoption_repair: bool = False,
     ) -> None:
         stat = metadata[element_id]
+        _validate_evolved_subagent_persona(replacement)
+        _validate_non_coercive_delegation(replacement)
+        if replacement == current:
+            raise ValueError(f"modify replacement must change the element: {element_id}")
+        if not str(decision.get("correction_hypothesis", "")).strip():
+            raise ValueError(f"modify requires a correction hypothesis: {element_id}")
+        if not _subagent_persona_contract_valid(current):
+            return
+        if current.category == "subagent" and non_adoption_repair:
+            return
         if _outer_dynamics_mode():
             min_usage = _outer_dynamics_int(
                 "GAME_LOOP_OUTER_LIBRARY_DYNAMICS_MODIFY_MIN_USAGE",
@@ -1069,10 +1189,6 @@ class OuterHarnessLibraryStore:
             )
             if int(stat.get("usage_count", 0)) < min_usage:
                 raise ValueError(f"modify requires at least {min_usage} uses: {element_id}")
-            if replacement == current:
-                raise ValueError(f"modify replacement must change the element: {element_id}")
-            if not str(decision.get("correction_hypothesis", "")).strip():
-                raise ValueError(f"modify requires a correction hypothesis: {element_id}")
             return
         if int(stat.get("usage_count", 0)) < 3:
             raise ValueError(f"modify requires at least 3 uses: {element_id}")
@@ -1081,10 +1197,6 @@ class OuterHarnessLibraryStore:
             and stat.get("hard_regression_ever") is not True
         ):
             raise ValueError(f"modify lacks near-deletion evidence: {element_id}")
-        if replacement == current:
-            raise ValueError(f"modify replacement must change the element: {element_id}")
-        if not str(decision.get("correction_hypothesis", "")).strip():
-            raise ValueError(f"modify requires a correction hypothesis: {element_id}")
 
     def _dynamics_next_inner_ids(
         self,
@@ -1136,6 +1248,7 @@ class OuterHarnessLibraryStore:
         failed_outer_library_epochs: Iterable[int] = (),
         imperfect_score_epochs: Iterable[int] = (),
         current_inner_element_ids: Iterable[str] = (),
+        non_adopted_element_ids: Iterable[str] = (),
     ) -> OuterLibraryUpdate:
         catalog = self.catalog()
         plan = _normalize_outer_plan(plan)
@@ -1143,6 +1256,15 @@ class OuterHarnessLibraryStore:
         current_inner_ids = tuple(dict.fromkeys(
             str(item) for item in current_inner_element_ids
         ))
+        non_adopted_ids = frozenset(
+            str(item) for item in non_adopted_element_ids
+        )
+        unknown_non_adopted = sorted(non_adopted_ids - set(catalog))
+        if unknown_non_adopted:
+            raise ValueError(
+                "non-adoption evidence contains unknown element ids: "
+                f"{unknown_non_adopted}"
+            )
         unknown_current = sorted(set(current_inner_ids) - set(catalog))
         if unknown_current:
             raise ValueError(
@@ -1211,6 +1333,7 @@ class OuterHarnessLibraryStore:
                     replacement=replacement,
                     current=current,
                     metadata=metadata,
+                    non_adoption_repair=element_id in non_adopted_ids,
                 )
                 next_catalog[element_id] = replacement
                 continue
@@ -1243,6 +1366,7 @@ class OuterHarnessLibraryStore:
                 merged = HarnessElementConfig.from_dict(
                     dict(decision.get("merged_element", {}))
                 )
+                _validate_non_coercive_delegation(merged)
                 if merged.category != left.category or merged.category != right.category:
                     raise ValueError("merged element must preserve the source category")
                 if merged.element_id in catalog and merged.element_id not in pair:
@@ -1285,6 +1409,24 @@ class OuterHarnessLibraryStore:
                     "add requires supporting failed or imperfect-score epoch ids"
                 )
             spec = HarnessElementConfig.from_dict(dict(addition.get("element", {})))
+            _validate_non_coercive_delegation(spec)
+            addition_evidence = str(
+                addition.get("capability_boundary_evidence", "")
+            ).casefold()
+            for non_adopted_id in non_adopted_ids:
+                existing = next_catalog.get(non_adopted_id)
+                if existing is None or spec.category != existing.category:
+                    continue
+                evidence_names_existing = non_adopted_id.casefold() in addition_evidence
+                overlapping_replacement = (
+                    element_similarity(spec, existing) >= 0.75
+                    and _element_content_similarity(spec, existing) >= 0.50
+                )
+                if evidence_names_existing or overlapping_replacement:
+                    raise ValueError(
+                        "addition duplicates a formally non-adopted existing element; "
+                        f"repair it with modify instead: {non_adopted_id}"
+                    )
             if spec.category not in ELEMENT_CATEGORIES:
                 raise ValueError(f"invalid added element category {spec.category}")
             if spec.element_id in next_catalog:
@@ -1488,26 +1630,39 @@ class OuterHarnessLibraryAgent:
     def _operation_eligibility(
         self,
         element_ids: Iterable[str],
+        *,
+        non_adopted_element_ids: Iterable[str] = (),
     ) -> dict[str, dict[str, Any]]:
         catalog = self.store.catalog()
         metadata = self.store.metadata()
         requested = tuple(dict.fromkeys(str(item) for item in element_ids))
+        non_adopted = frozenset(str(item) for item in non_adopted_element_ids)
         result: dict[str, dict[str, Any]] = {}
         for element_id in requested:
             stat = metadata[element_id]
             usage_count = int(stat.get("usage_count", 0))
+            contract_repair = not _subagent_persona_contract_valid(catalog[element_id])
+            non_adoption_repair = (
+                catalog[element_id].category == "subagent"
+                and element_id in non_adopted
+            )
             if _outer_dynamics_mode():
                 modify_min = _outer_dynamics_int(
                     "GAME_LOOP_OUTER_LIBRARY_DYNAMICS_MODIFY_MIN_USAGE", 0
                 )
-                modify_allowed = usage_count >= modify_min
+                modify_allowed = (
+                    contract_repair or non_adoption_repair or usage_count >= modify_min
+                )
                 delete_allowed = usage_count == 0 or (
                     usage_count >= 5 and self.store._is_low_score(element_id, metadata)
                 )
             else:
-                modify_allowed = usage_count >= 3 and (
-                    self.store._is_low_score(element_id, metadata)
-                    or stat.get("hard_regression_ever") is True
+                modify_allowed = contract_repair or non_adoption_repair or (
+                    usage_count >= 3
+                    and (
+                        self.store._is_low_score(element_id, metadata)
+                        or stat.get("hard_regression_ever") is True
+                    )
                 )
                 delete_allowed = usage_count >= 5 and self.store._is_low_score(
                     element_id, metadata
@@ -1524,6 +1679,8 @@ class OuterHarnessLibraryAgent:
             ]
             result[element_id] = {
                 "usage_count": usage_count,
+                "contract_repair": contract_repair,
+                "non_adoption_repair": non_adoption_repair,
                 "unchanged": True,
                 "modify": modify_allowed,
                 "delete": delete_allowed,
@@ -1531,8 +1688,16 @@ class OuterHarnessLibraryAgent:
             }
         return result
 
-    def _validate_plan_throughput(self, plan: dict[str, Any]) -> dict[str, Any]:
+    def _validate_plan_throughput(
+        self,
+        plan: dict[str, Any],
+        *,
+        non_adopted_element_ids: Iterable[str] = (),
+    ) -> dict[str, Any]:
         normalized = _normalize_outer_plan(plan)
+        non_adopted_ids = frozenset(
+            str(item) for item in non_adopted_element_ids
+        )
         additions = normalized.get("additions", [])
         if not isinstance(additions, list):
             raise ValueError("outer plan additions must be a list")
@@ -1585,7 +1750,8 @@ class OuterHarnessLibraryAgent:
                     raise ValueError(
                         f"merge requires a complete merged_element: {element_id}"
                     )
-                HarnessElementConfig.from_dict(merged_element)
+                merged = HarnessElementConfig.from_dict(merged_element)
+                _validate_evolved_subagent_persona(merged)
             if kind == "modify" and not str(
                 operation.get("correction_hypothesis", "")
             ).strip():
@@ -1600,7 +1766,16 @@ class OuterHarnessLibraryAgent:
                         "modify requires a complete replacement element: "
                         f"{operation.get('element_id', '')}"
                     )
-                HarnessElementConfig.from_dict(replacement)
+                replacement_element = HarnessElementConfig.from_dict(replacement)
+                _validate_evolved_subagent_persona(replacement_element)
+        for addition in additions:
+            if not isinstance(addition, dict):
+                continue
+            raw_element = addition.get("element")
+            if not isinstance(raw_element, dict) or not raw_element:
+                continue
+            added_element = HarnessElementConfig.from_dict(raw_element)
+            _validate_evolved_subagent_persona(added_element)
         if not self.store.catalog_path.is_file():
             return normalized
         catalog = self.store.catalog()
@@ -1660,6 +1835,7 @@ class OuterHarnessLibraryAgent:
                 replacement=replacement,
                 current=catalog[element_id],
                 metadata=metadata,
+                non_adoption_repair=element_id in non_adopted_ids,
             )
         return normalized
 
@@ -1690,6 +1866,47 @@ class OuterHarnessLibraryAgent:
                     "add cites unavailable supporting failed or imperfect-score epoch ids"
                 )
             HarnessElementConfig.from_dict(dict(addition.get("element", {})))
+
+    def _fallback_non_adoption_repair_plan(
+        self,
+        *,
+        shortlist: tuple[str, ...],
+        required_ids: tuple[str, ...],
+    ) -> dict[str, Any] | None:
+        """Make one evidence-scoped repair when the model repeats an identical plan."""
+
+        if not required_ids or not set(required_ids).issubset(shortlist):
+            return None
+        catalog = self.store.catalog()
+        operations: list[dict[str, Any]] = []
+        for element_id in required_ids:
+            current = catalog.get(element_id)
+            if current is None or current.category != "subagent":
+                return None
+            replacement = _element_payload(current)
+            persona = str(replacement["spec"].get("persona", "")).rstrip()
+            marker = (
+                " Observable delegation evidence is limited to a bounded artifact slice, "
+                "independent local checks, and a concrete handoff; it does not require a "
+                "fork call or presume a fixed role or topology."
+            )
+            if marker.strip() in persona:
+                return None
+            replacement["spec"]["persona"] = persona + marker
+            operations.append({
+                "element_id": element_id,
+                "operation": "modify",
+                "reason": (
+                    "Formal zero-invocation evidence requires a concrete observable trigger "
+                    "repair on the existing prototype."
+                ),
+                "correction_hypothesis": (
+                    "Making delegation evidence observable and bounded may improve child-job "
+                    "selection without requiring invocation."
+                ),
+                "replacement": replacement,
+            })
+        return {"operations": operations, "additions": []}
 
     @staticmethod
     def _request_with_configured_backbone(
@@ -1744,10 +1961,26 @@ class OuterHarnessLibraryAgent:
         inner_history: list[dict[str, Any]],
         latest_inner_result: HarnessEpochResult,
         current_inner_element_ids: Iterable[str] = (),
+        non_adopted_element_ids: Iterable[str] = (),
+        required_non_adoption_repair_ids: Iterable[str] = (),
+        prototype_evidence: Iterable[Mapping[str, Any]] = (),
     ) -> OuterLibraryUpdate:
         current_inner_ids = tuple(dict.fromkeys(
             str(item) for item in current_inner_element_ids
         ))
+        non_adopted_ids = tuple(dict.fromkeys(
+            str(item) for item in non_adopted_element_ids
+        ))
+        required_non_adoption_repairs = tuple(dict.fromkeys(
+            str(item) for item in required_non_adoption_repair_ids
+        ))
+        prototype_evidence_rows = [
+            dict(item) for item in prototype_evidence if isinstance(item, Mapping)
+        ]
+        if not set(required_non_adoption_repairs).issubset(non_adopted_ids):
+            raise ValueError(
+                "required non-adoption repairs must have formal non-adoption evidence"
+            )
         revision = self.store.revision()
         record: dict[str, Any] = {
             "schema_version": "outer-library-evolution.v1",
@@ -1760,11 +1993,24 @@ class OuterHarnessLibraryAgent:
             "disclosed_elements": [],
             "plan": None,
             "current_inner_element_ids": list(current_inner_ids),
+            "non_adopted_element_ids": list(non_adopted_ids),
+            "required_non_adoption_repair_ids": list(
+                required_non_adoption_repairs
+            ),
+            "prototype_evidence": prototype_evidence_rows,
             "created_at": utc_now(),
         }
         self.store.write_epoch_record(epoch, record)
         try:
             catalog_ids = {str(item["id"]) for item in record["catalog_index"]}
+            unknown_required_repairs = sorted(
+                set(required_non_adoption_repairs) - catalog_ids
+            )
+            if unknown_required_repairs:
+                raise ValueError(
+                    "required non-adoption repair contains unknown element ids: "
+                    f"{unknown_required_repairs}"
+                )
             if _outer_dynamics_mode():
                 shortlist_limit = min(
                     len(catalog_ids),
@@ -1784,6 +2030,11 @@ class OuterHarnessLibraryAgent:
                 "rationale:string}. You have index metadata only, so do not infer hidden "
                 "details. A valid rubric score below 1.0 may justify addition_needed=true."
             )
+            if required_non_adoption_repairs:
+                shortlist_task += (
+                    " Include every id in required_non_adoption_repair_ids because each has "
+                    "a concrete audited mismatch that requires progressive disclosure."
+                )
             if _outer_dynamics_mode():
                 shortlist_task += (
                     " Dynamics-study mode is active: prefer a diverse shortlist that exposes "
@@ -1819,6 +2070,15 @@ class OuterHarnessLibraryAgent:
                         raise ValueError(
                             "outer shortlist exceeds progressive disclosure limit "
                             f"{shortlist_limit}: {len(raw_value)}"
+                        )
+                    missing_required = sorted(
+                        set(required_non_adoption_repairs)
+                        - {str(item) for item in raw_value}
+                    )
+                    if missing_required:
+                        raise ValueError(
+                            "outer shortlist omitted required non-adoption repairs: "
+                            f"{missing_required}"
                         )
                     shortlist_raw = raw_value
                     break
@@ -1856,7 +2116,10 @@ class OuterHarnessLibraryAgent:
                 "Schema: {operations:[{element_id,operation,reason,...}], additions:[...]}. "
                 f"Use at most {self.max_structural_actions} structural actions and "
                 f"{self.max_additions} additions. For category=subagent, write one bounded child "
-                "job in persona; the system handles fork automatically."
+                "job in persona using the exact labels Use when:, Scope:, Deliverable:, "
+                "Done when:, and Return:. Make the capability reusable across tasks; do not "
+                "name a benchmark, product, game, task instance, source file, fixed team role, "
+                "or topology. The system handles fork automatically."
             )
             if _outer_dynamics_mode():
                 plan_task = (
@@ -1881,7 +2144,10 @@ class OuterHarnessLibraryAgent:
                     "modification_inadequate_reason."
                 )
             element_metadata = self.store.metadata()
-            operation_eligibility = self._operation_eligibility(shortlist)
+            operation_eligibility = self._operation_eligibility(
+                shortlist,
+                non_adopted_element_ids=non_adopted_ids,
+            )
             plan_payload = {
                     "all_element_ids": sorted(catalog_ids),
                     "shortlist": list(shortlist),
@@ -1896,6 +2162,11 @@ class OuterHarnessLibraryAgent:
                         latest_inner_result
                     ),
                     "current_inner_element_ids": list(current_inner_ids),
+                    "non_adopted_element_ids": list(non_adopted_ids),
+                    "required_non_adoption_repair_ids": list(
+                        required_non_adoption_repairs
+                    ),
+                    "prototype_evidence": prototype_evidence_rows,
                     "operations": ["add", "delete", "modify", "merge"],
                     "evolution_contract": _simple_evolution_contract(),
                     "task": plan_task,
@@ -1903,6 +2174,10 @@ class OuterHarnessLibraryAgent:
             plan_payload["task"] += (
                 " element_operation_eligibility is authoritative. Never emit modify or "
                 "delete when its value is false, and only merge with a listed partner. "
+                "When non_adopted_element_ids names an existing prototype, repair that "
+                "object with modify instead of adding a sibling replacement. "
+                "Every id in required_non_adoption_repair_ids has a concrete audited "
+                "contract mismatch and must receive one modify operation in this plan. "
                 "When all existing-object structural actions are ineligible, use additions "
                 "for a genuinely distinct evidence-backed object or return empty arrays."
             )
@@ -1923,7 +2198,27 @@ class OuterHarnessLibraryAgent:
             for semantic_attempt in range(4):
                 plan = self.request_json("plan", plan_payload)
                 try:
-                    plan = self._validate_plan_throughput(plan)
+                    plan = self._validate_plan_throughput(
+                        plan,
+                        non_adopted_element_ids=non_adopted_ids,
+                    )
+                    operations_by_id = {
+                        str(item.get("element_id", "")): str(
+                            item.get("operation", "")
+                        ).casefold()
+                        for item in plan.get("operations", [])
+                        if isinstance(item, dict)
+                    }
+                    missing_repairs = [
+                        element_id
+                        for element_id in required_non_adoption_repairs
+                        if operations_by_id.get(element_id) != "modify"
+                    ]
+                    if missing_repairs:
+                        raise ValueError(
+                            "formal non-adoption diagnostics require modify operations for: "
+                            + ", ".join(missing_repairs)
+                        )
                     self._validate_plan_evidence(
                         plan,
                         available_epochs=available_evidence_epochs,
@@ -1933,7 +2228,30 @@ class OuterHarnessLibraryAgent:
                     record.update(status="planning", plan=plan)
                     self.store.write_epoch_record(epoch, record)
                     if semantic_attempt == 3:
-                        raise
+                        fallback_plan = self._fallback_non_adoption_repair_plan(
+                            shortlist=shortlist,
+                            required_ids=required_non_adoption_repairs,
+                        )
+                        if (
+                            fallback_plan is None
+                            and not required_non_adoption_repairs
+                            and any(item in non_adopted_ids for item in shortlist)
+                        ):
+                            fallback_plan = {"operations": [], "additions": []}
+                        if fallback_plan is None:
+                            raise
+                        # Keep the normal validators as the final authority. This
+                        # fallback only prevents a repeated no-op model response
+                        # from deadlocking an evidence-backed repair.
+                        plan = self._validate_plan_throughput(
+                            fallback_plan,
+                            non_adopted_element_ids=non_adopted_ids,
+                        )
+                        self._validate_plan_evidence(
+                            plan,
+                            available_epochs=available_evidence_epochs,
+                        )
+                        break
                     plan_payload = {
                         **plan_payload,
                         "previous_invalid_response": plan,
@@ -1948,7 +2266,17 @@ class OuterHarnessLibraryAgent:
                             " Obey element_operation_eligibility exactly. If the validation "
                             "error says an operation lacks enough uses or evidence, remove that "
                             "operation; add a distinct boundary object instead only when the "
-                            "available evidence supports it."
+                            "available evidence supports it. For every category=subagent result, "
+                            "put the exact labels Use when:, Scope:, Deliverable:, Done when:, "
+                            "and Return: inside its single persona string and keep it reusable "
+                            "rather than task-, game-, file-, role-, or topology-specific. "
+                            "If the validation error says 'modify replacement must change the "
+                            "element', do not copy the disclosed element: make a concrete "
+                            "behavior-level change to its description or persona/spec while "
+                            "preserving id and category. For a formally uninvoked child, make "
+                            "the Use when clause observable and bounded (for example, an "
+                            "independent artifact boundary plus local checks), and never add "
+                            "an invocation quota or require a fork call."
                         ),
                     }
             record.update(status="applying", plan=plan)
@@ -2028,15 +2356,59 @@ class OuterHarnessLibraryAgent:
                     and update_status == "failed_infrastructure_or_validation"
                 ):
                     failed_outer_library_epochs.add(raw_epoch)
-            update = self.store.apply_plan(
-                epoch=epoch,
-                shortlist=shortlist,
-                plan=plan,
-                failed_history_epochs=failed_history_epochs,
-                failed_outer_library_epochs=failed_outer_library_epochs,
-                imperfect_score_epochs=imperfect_score_epochs,
-                current_inner_element_ids=current_inner_ids,
-            )
+            try:
+                update = self.store.apply_plan(
+                    epoch=epoch,
+                    shortlist=shortlist,
+                    plan=plan,
+                    failed_history_epochs=failed_history_epochs,
+                    failed_outer_library_epochs=failed_outer_library_epochs,
+                    imperfect_score_epochs=imperfect_score_epochs,
+                    current_inner_element_ids=current_inner_ids,
+                    non_adopted_element_ids=non_adopted_ids,
+                )
+            except ValueError as exc:
+                fallback_plan = self._fallback_non_adoption_repair_plan(
+                    shortlist=shortlist,
+                    required_ids=required_non_adoption_repairs,
+                )
+                if (
+                    fallback_plan is None
+                    and not required_non_adoption_repairs
+                    and any(item in non_adopted_ids for item in shortlist)
+                ):
+                    # An equivalent modify without an audited defect is not a
+                    # reason to mutate the library. Preserve the catalog and
+                    # let the epoch commit as an explicit no-op.
+                    fallback_plan = {"operations": [], "additions": []}
+                if (
+                    "modify replacement must change the element" not in str(exc)
+                    or fallback_plan is None
+                ):
+                    raise
+                plan = self._validate_plan_throughput(
+                    fallback_plan,
+                    non_adopted_element_ids=non_adopted_ids,
+                )
+                self._validate_plan_evidence(
+                    plan,
+                    available_epochs=available_evidence_epochs,
+                )
+                record["fallback_repair"] = (
+                    "repeated equivalent model replacement; committed no-op"
+                    if not required_non_adoption_repairs
+                    else "repeated equivalent model replacement"
+                )
+                update = self.store.apply_plan(
+                    epoch=epoch,
+                    shortlist=shortlist,
+                    plan=plan,
+                    failed_history_epochs=failed_history_epochs,
+                    failed_outer_library_epochs=failed_outer_library_epochs,
+                    imperfect_score_epochs=imperfect_score_epochs,
+                    current_inner_element_ids=current_inner_ids,
+                    non_adopted_element_ids=non_adopted_ids,
+                )
             record.update(status=update.status, plan=plan, update=update.to_dict())
             try:
                 self.store.write_epoch_record(epoch, record)

@@ -47,9 +47,11 @@ def stage_local_runtime_overlay(
     # Text-only is a capability boundary, not merely a prompt preference.  Do
     # not stage an executable that can capture pixels for a text-only model.
     if text_only_mode():
-        screenshot = tools_dst / "screenshot.sh"
-        if screenshot.exists():
-            screenshot.unlink()
+        for screenshot in tools_dst.glob("screenshot*"):
+            if screenshot.is_dir():
+                shutil.rmtree(screenshot)
+            else:
+                screenshot.unlink()
 
     wrapper = tools_dst / "godot"
     wrapper.write_text(

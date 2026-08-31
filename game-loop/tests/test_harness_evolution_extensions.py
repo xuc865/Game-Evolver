@@ -34,9 +34,73 @@ from game_loop.core.outer_harness_library import (
     OuterHarnessLibraryStore,
     _extract_json_object,
     _normalize_outer_plan,
+    _simple_evolution_contract,
 )
 from game_loop.harness_element_catalog import INNER_ELEMENT_CATALOG
+from game_loop.subagent_prototype import tool_description_for_subagent_prototype
 from game_loop.utils import atomic_write_json, read_json
+from scripts.evaluate_v030_dynamic_fork_pair import (
+    _background_child_id,
+    _background_report_child_id,
+    _default_task_identity,
+    _fork_usage_from_events,
+    _relative_fork_cost_penalty,
+    _parent_capability_failure,
+    _root_contract_visibility,
+    _session_completed,
+    _session_lineage,
+)
+from game_loop.runtime.protocol import GameSubmission
+
+
+class DynamicForkTaskIdentityTests(unittest.TestCase):
+    def test_identity_comes_from_case_directory_not_old_benchmark_default(self) -> None:
+        task = Path("/fixtures/complex-moba/task/instruction.md")
+        self.assertEqual(_default_task_identity(task), "complex-moba")
+
+    def test_standalone_task_uses_parent_directory(self) -> None:
+        task = Path("/fixtures/strategy-task.md")
+        self.assertEqual(_default_task_identity(task), "fixtures")
+
+    def test_parent_artifact_failure_is_zero_score_candidate_baseline(self) -> None:
+        failed = GameSubmission.create(
+            task_id="case",
+            runtime_id="dsh",
+            status="failed",
+            artifact_ref=None,
+            trajectory_ref=Path("/tmp/trajectory.jsonl"),
+            result_text="completed turn",
+            diagnostics=("expected artifact was not changed by this episode: game",),
+            metadata={"finish_reason": "completed"},
+        )
+        self.assertTrue(_parent_capability_failure(failed))
+
+    def test_parent_runtime_failure_still_blocks_candidate(self) -> None:
+        failed = GameSubmission.create(
+            task_id="case",
+            runtime_id="dsh",
+            status="failed",
+            artifact_ref=None,
+            trajectory_ref=Path("/tmp/trajectory.jsonl"),
+            result_text="",
+            diagnostics=("DeepSeek Harness finish reason: error",),
+            metadata={"finish_reason": "error"},
+        )
+        self.assertFalse(_parent_capability_failure(failed))
+
+
+class DynamicForkUtilityTests(unittest.TestCase):
+    def test_cost_penalty_is_relative_and_bounded(self) -> None:
+        self.assertAlmostEqual(_relative_fork_cost_penalty(54, 151), 97 / 205)
+        self.assertAlmostEqual(_relative_fork_cost_penalty(1, 100), 99 / 101)
+        self.assertEqual(_relative_fork_cost_penalty(100, 100), 0.0)
+from scripts.evolve_v030_subagent_prototypes import (
+    _current_element_ids,
+    _non_adopted_prototype_ids,
+    _prototype_non_adoption_diagnostics,
+    _rejection_result,
+    _required_non_adoption_repair_ids,
+)
 
 
 def _profile(*, elements: tuple[HarnessActiveElement, ...] = ()) -> HarnessProfile:
@@ -116,6 +180,93 @@ class DynamicRubricGeneratorTests(unittest.TestCase):
 
 
 class ElementStatsMutationTests(unittest.TestCase):
+    def test_subagent_evolution_contract_allows_only_bounded_slice_ownership(self):
+        subagent = _simple_evolution_contract()["categories"]["subagent"]
+
+        self.assertIn("explicit artifact slice", subagent["persona_contract"]["Scope:"])
+        self.assertIn("may directly produce and validate", subagent["rule"])
+        self.assertIn("root retains integration", subagent["rule"])
+        self.assertIn("do not name a benchmark", subagent["rule"])
+        self.assertIn("Never force, quota", subagent["non_coercion"])
+        self.assertIn("repair that prototype with modify", subagent["non_adoption_repair"])
+
+    def test_outer_library_rejects_fork_invocation_metric_gaming(self):
+        with tempfile.TemporaryDirectory() as td:
+            store = OuterHarnessLibraryStore(Path(td) / "library")
+            store.initialize((_outer_element("current"),))
+            with self.assertRaisesRegex(ValueError, "may not force or quota"):
+                store.apply_plan(
+                    epoch=2,
+                    shortlist=(),
+                    plan={
+                        "operations": [],
+                        "additions": [{
+                            "operation": "add",
+                            "capability_boundary_evidence": "zero calls were observed",
+                            "supporting_epoch_ids": [1],
+                            "element": {
+                                "id": "fork_quota",
+                                "category": "context",
+                                "description": (
+                                    "Verify that the trajectory has at least one fork-tool "
+                                    "invocation so call evidence is present."
+                                ),
+                                "spec": {"window": "before_submission"},
+                                "tags": ["subagent"],
+                            },
+                        }],
+                    },
+                    failed_history_epochs=(1,),
+                )
+
+    def test_non_adopted_prototype_cannot_be_replaced_by_sibling_addition(self):
+        with tempfile.TemporaryDirectory() as td:
+            store = OuterHarnessLibraryStore(Path(td) / "library")
+            current = HarnessElementConfig.from_dict({
+                "id": "artifact_worker",
+                "category": "subagent",
+                "description": "Produce one bounded artifact slice.",
+                "spec": {"persona": (
+                    "Use when: one artifact slice is independent. "
+                    "Scope: analyze only that slice. "
+                    "Deliverable: one artifact recommendation. "
+                    "Done when: evidence is available. "
+                    "Return: the recommendation to the root."
+                )},
+                "tags": ["subagent"],
+            })
+            store.initialize((current,))
+            with self.assertRaisesRegex(ValueError, "repair it with modify"):
+                store.apply_plan(
+                    epoch=2,
+                    shortlist=("artifact_worker",),
+                    plan={
+                        "operations": [],
+                        "additions": [{
+                            "operation": "add",
+                            "capability_boundary_evidence": (
+                                "artifact_worker was formally exposed but not adopted"
+                            ),
+                            "supporting_epoch_ids": [1],
+                            "element": {
+                                "id": "owned_artifact_worker",
+                                "category": "subagent",
+                                "description": "Own one bounded artifact slice.",
+                                "spec": {"persona": (
+                                    "Use when: one artifact slice is independent. "
+                                    "Scope: own only that assigned slice. "
+                                    "Deliverable: one directly consumable artifact. "
+                                    "Done when: scoped checks pass. "
+                                    "Return: the artifact and evidence to the root."
+                                )},
+                                "tags": ["subagent"],
+                            },
+                        }],
+                    },
+                    failed_history_epochs=(1,),
+                    non_adopted_element_ids=("artifact_worker",),
+                )
+
     def test_bundle_mutation_schedules_leave_one_out_ablation(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -397,7 +548,13 @@ class OuterHarnessLibraryTests(unittest.TestCase):
                             "id": "adaptive_child",
                             "category": "subagent",
                             "description": "Evidence-derived fork target.",
-                            "spec": {"persona": "Resolve the delegated task."},
+                            "spec": {"persona": (
+                                "Use when: a bounded independent task has clear marginal value. "
+                                "Scope: resolve one delegated uncertainty. "
+                                "Deliverable: one actionable resolution. "
+                                "Done when: the resolution has observable supporting evidence. "
+                                "Return: the resolution and its evidence to the root."
+                            )},
                             "tags": ["subagent"],
                         },
                     }],
@@ -412,7 +569,13 @@ class OuterHarnessLibraryTests(unittest.TestCase):
                             "id": "adaptive_child",
                             "category": "subagent",
                             "description": "Evidence-derived fork target.",
-                            "spec": {"persona": "Resolve the delegated task."},
+                            "spec": {"persona": (
+                                "Use when: a bounded independent task has clear marginal value. "
+                                "Scope: resolve one delegated uncertainty. "
+                                "Deliverable: one actionable resolution. "
+                                "Done when: the resolution has observable supporting evidence. "
+                                "Return: the resolution and its evidence to the root."
+                            )},
                             "tags": ["subagent"],
                         },
                     }],
@@ -443,7 +606,7 @@ class OuterHarnessLibraryTests(unittest.TestCase):
                 latest_inner_result=failed,
                 current_inner_element_ids=("prototype_synthesis",),
             )
-            self.assertEqual(update.status, "applied")
+            self.assertEqual(update.status, "applied", update.error)
             self.assertIn("adaptive_child", store.catalog())
             self.assertEqual(plans, [])
 
@@ -481,7 +644,13 @@ class OuterHarnessLibraryTests(unittest.TestCase):
                             "id": "probe_worker",
                             "category": "subagent",
                             "description": "Validate every named probe.",
-                            "spec": {"persona": "Validate every delegated probe and report each result."},
+                            "spec": {"persona": (
+                                "Use when: an independent validation slice can reduce uncertainty. "
+                                "Scope: validate one bounded set of delegated requirements. "
+                                "Deliverable: a result for every delegated requirement. "
+                                "Done when: each result has observable evidence. "
+                                "Return: the result matrix and evidence to the root."
+                            )},
                             "tags": ["subagent"],
                         },
                     }],
@@ -517,6 +686,256 @@ class OuterHarnessLibraryTests(unittest.TestCase):
             )
             self.assertIn("probe_worker", store.catalog())
             self.assertEqual(plans, [])
+
+    def test_outer_agent_retries_vague_subagent_persona(self):
+        with tempfile.TemporaryDirectory() as td:
+            store = OuterHarnessLibraryStore(Path(td) / "library")
+            store.initialize((_outer_element("prototype_synthesis", "skill"),))
+            personas = [
+                "Do one delegated task.",
+                (
+                    "Use when: an independent bounded investigation can reduce uncertainty. "
+                    "Scope: investigate one delegated question without expanding its boundary. "
+                    "Deliverable: one actionable finding with supporting evidence. "
+                    "Done when: the finding is checked against observable evidence. "
+                    "Return: the finding, evidence, and residual uncertainty to the root."
+                ),
+            ]
+            plan_payloads = []
+
+            def request(stage, payload):
+                if stage == "shortlist":
+                    return {
+                        "shortlist": ["prototype_synthesis"],
+                        "addition_needed": True,
+                        "rationale": "a bounded investigation is missing",
+                    }
+                plan_payloads.append(payload)
+                return {
+                    "operations": [],
+                    "additions": [{
+                        "operation": "add",
+                        "capability_boundary_evidence": "epoch 1 exposed unresolved uncertainty",
+                        "supporting_epoch_ids": [1],
+                        "element": {
+                            "id": "bounded_investigation",
+                            "category": "subagent",
+                            "description": "Resolve one independently testable uncertainty.",
+                            "spec": {"persona": personas.pop(0)},
+                            "tags": ["subagent", "evidence"],
+                        },
+                    }],
+                }
+
+            failed = replace(
+                _epoch_result(),
+                accepted=False,
+                rubric_validation={"infrastructure_ok": True, "case_results": []},
+            )
+            update = OuterHarnessLibraryAgent(store, request).evolve(
+                epoch=2,
+                inner_history=[],
+                latest_inner_result=failed,
+                current_inner_element_ids=("prototype_synthesis",),
+            )
+
+            self.assertEqual(update.status, "applied", update.error)
+            self.assertEqual(len(plan_payloads), 2)
+            self.assertIn(
+                "lacks delegation contract clauses",
+                plan_payloads[1]["validation_error"],
+            )
+            persona = store.catalog()["bounded_investigation"].spec["persona"]
+            for clause in (
+                "Use when:", "Scope:", "Deliverable:", "Done when:", "Return:",
+            ):
+                self.assertIn(clause, persona)
+
+    def test_invalid_subagent_contract_can_be_repaired_before_usage(self):
+        with tempfile.TemporaryDirectory() as td:
+            store = OuterHarnessLibraryStore(Path(td) / "library")
+            current = HarnessElementConfig.from_dict({
+                "id": "bounded_worker",
+                "category": "subagent",
+                "description": "Perform a bounded delegated slice.",
+                "spec": {"persona": "Perform one bounded delegated slice."},
+                "tags": ["subagent"],
+            })
+            store.initialize((current,))
+            agent = OuterHarnessLibraryAgent(store, lambda *_args: {})
+
+            eligibility = agent._operation_eligibility(("bounded_worker",))
+            self.assertTrue(eligibility["bounded_worker"]["contract_repair"])
+            self.assertTrue(eligibility["bounded_worker"]["modify"])
+
+            replacement = {
+                "id": "bounded_worker",
+                "category": "subagent",
+                "description": "Perform one independently verifiable delegated slice.",
+                "spec": {"persona": (
+                    "Use when: an independent slice can reduce root uncertainty. "
+                    "Scope: complete only the delegated bounded slice. "
+                    "Deliverable: one independently useful artifact. "
+                    "Done when: the artifact passes the delegated completion check. "
+                    "Return: the artifact and concise evidence to the root."
+                )},
+                "tags": ["subagent"],
+            }
+            update = store.apply_plan(
+                epoch=1,
+                shortlist=("bounded_worker",),
+                plan={
+                    "operations": [{
+                        "element_id": "bounded_worker",
+                        "operation": "modify",
+                        "reason": "the existing persona lacks a legible delegation contract",
+                        "correction_hypothesis": "explicit boundaries make the job callable",
+                        "replacement": replacement,
+                    }],
+                    "additions": [],
+                },
+                failed_history_epochs=(1,),
+            )
+
+            self.assertEqual(update.status, "applied")
+            self.assertEqual(
+                store.catalog()["bounded_worker"].spec["persona"],
+                replacement["spec"]["persona"],
+            )
+
+    def test_formally_non_adopted_subagent_can_be_repaired_before_usage(self):
+        with tempfile.TemporaryDirectory() as td:
+            store = OuterHarnessLibraryStore(Path(td) / "library")
+            current = HarnessElementConfig.from_dict({
+                "id": "bounded_worker",
+                "category": "subagent",
+                "description": "Return one advisory slice.",
+                "spec": {"persona": (
+                    "Use when: one question is independent. "
+                    "Scope: analyze only that question. "
+                    "Deliverable: one recommendation. "
+                    "Done when: evidence is cited. "
+                    "Return: the recommendation to the root."
+                )},
+                "tags": ["subagent"],
+            })
+            store.initialize((current,))
+            agent = OuterHarnessLibraryAgent(store, lambda *_args: {})
+
+            ordinary = agent._operation_eligibility(("bounded_worker",))
+            repaired = agent._operation_eligibility(
+                ("bounded_worker",),
+                non_adopted_element_ids=("bounded_worker",),
+            )
+
+            self.assertFalse(ordinary["bounded_worker"]["modify"])
+            self.assertTrue(repaired["bounded_worker"]["modify"])
+            self.assertTrue(repaired["bounded_worker"]["non_adoption_repair"])
+            replacement = {
+                "id": "bounded_worker",
+                "category": "subagent",
+                "description": "Own one explicitly delegated artifact slice.",
+                "spec": {"persona": (
+                    "Use when: one artifact slice can be independently completed. "
+                    "Scope: own only the explicitly delegated slice. "
+                    "Deliverable: a directly consumable artifact and validation evidence. "
+                    "Done when: scoped checks pass. "
+                    "Return: the artifact and evidence to the root for integration."
+                )},
+                "tags": ["subagent"],
+            }
+            update = store.apply_plan(
+                epoch=1,
+                shortlist=("bounded_worker",),
+                plan={
+                    "operations": [{
+                        "element_id": "bounded_worker",
+                        "operation": "modify",
+                        "reason": "formal exposure produced zero invocation",
+                        "correction_hypothesis": "direct slice ownership improves marginal value",
+                        "replacement": replacement,
+                    }],
+                    "additions": [],
+                },
+                failed_history_epochs=(1,),
+                non_adopted_element_ids=("bounded_worker",),
+            )
+            self.assertEqual(update.status, "applied")
+
+    def test_required_non_adoption_repair_retries_empty_hpa_plan(self):
+        with tempfile.TemporaryDirectory() as td:
+            store = OuterHarnessLibraryStore(Path(td) / "library")
+            current = HarnessElementConfig.from_dict({
+                "id": "bounded_worker",
+                "category": "subagent",
+                "description": "Produce an artifact while root retains all writes.",
+                "spec": {"persona": (
+                    "Use when: one artifact slice is independent. "
+                    "Scope: analyze it without workspace ownership. "
+                    "Deliverable: one artifact recommendation. "
+                    "Done when: evidence is cited. "
+                    "Return: the recommendation to the root."
+                )},
+                "tags": ["subagent"],
+            })
+            store.initialize((current,))
+            plans = [
+                {"operations": [], "additions": []},
+                {
+                    "operations": [{
+                        "element_id": "bounded_worker",
+                        "operation": "modify",
+                        "reason": "repair the audited artifact ownership mismatch",
+                        "correction_hypothesis": "bounded ownership makes output consumable",
+                        "replacement": {
+                            "id": "bounded_worker",
+                            "category": "subagent",
+                            "description": "Own one explicitly assigned artifact slice.",
+                            "spec": {"persona": (
+                                "Use when: one artifact slice is independently delegable. "
+                                "Scope: own only the explicitly assigned artifact slice. "
+                                "Deliverable: one consumable artifact and evidence. "
+                                "Done when: scoped validation passes. "
+                                "Return: artifact and evidence to the root for integration."
+                            )},
+                            "tags": ["subagent"],
+                        },
+                    }],
+                    "additions": [],
+                },
+            ]
+            plan_payloads = []
+
+            def request(stage, payload):
+                if stage == "shortlist":
+                    return {
+                        "shortlist": ["bounded_worker"],
+                        "addition_needed": False,
+                        "rationale": "repair the diagnosed object",
+                    }
+                plan_payloads.append(payload)
+                return plans.pop(0) if len(plans) > 1 else plans[0]
+
+            failed = replace(
+                _epoch_result(),
+                accepted=False,
+                rubric_validation={"infrastructure_ok": True, "case_results": []},
+            )
+            update = OuterHarnessLibraryAgent(store, request).evolve(
+                epoch=2,
+                inner_history=[],
+                latest_inner_result=failed,
+                current_inner_element_ids=("bounded_worker",),
+                non_adopted_element_ids=("bounded_worker",),
+                required_non_adoption_repair_ids=("bounded_worker",),
+            )
+
+            self.assertEqual(update.status, "applied", update.error)
+            self.assertEqual(len(plan_payloads), 2)
+            self.assertIn(
+                "require modify operations",
+                plan_payloads[1]["validation_error"],
+            )
 
     def test_outer_plan_throughput_counts_symmetric_merge_once(self):
         with tempfile.TemporaryDirectory() as td:
@@ -1790,6 +2209,315 @@ class CircuitHarnessRenderingTests(unittest.TestCase):
             self.assertIn("Agent Circuit harness profile", rendered)
             self.assertNotIn("PRIVATE MODULE INSTRUCTION", rendered)
             self.assertIn("role-local harness manifest", rendered)
+
+
+class DynamicForkEvidenceTests(unittest.TestCase):
+    def test_root_tool_description_is_concise_without_dropping_ownership(self):
+        persona = (
+            "Use when: a bounded module has local checks. "
+            "Scope: own the assigned artifact slice. "
+            "Deliverable: one artifact and evidence. "
+            "Done when: all local checks pass. Return: artifact and evidence. "
+        ) * 12
+
+        description = tool_description_for_subagent_prototype(
+            "bounded_worker",
+            persona,
+            "Implement and validate one bounded artifact slice.",
+        )
+
+        self.assertLess(len(description), 900)
+        self.assertIn("local checks", description)
+        self.assertIn("existing shared interfaces", description)
+        self.assertIn("root adapts shared interfaces", description.casefold())
+        self.assertNotIn(persona, description)
+
+    def test_artifact_worker_without_bounded_write_ownership_is_diagnosed(self):
+        diagnostic = _prototype_non_adoption_diagnostics({
+            "id": "worker",
+            "description": "Implement one artifact; parent retains all workspace writing.",
+            "persona": "Return a patch without requiring workspace ownership.",
+        })
+        bounded = _prototype_non_adoption_diagnostics({
+            "id": "worker",
+            "description": "Implement one artifact slice.",
+            "persona": "Own only the assigned artifact slice and return it to the root.",
+        })
+
+        self.assertTrue(diagnostic["artifact_ownership_mismatch"])
+        self.assertFalse(bounded["artifact_ownership_mismatch"])
+
+    def test_zero_fork_formal_pairs_identify_non_adopted_prototypes(self):
+        pairs = [
+            {
+                "source_hpa_proof": "/proof.json",
+                "fork_usage": {"fork_tool_call_count": 0},
+                "prototypes": [{"id": "bounded_worker"}],
+            },
+            {
+                "source_hpa_proof": "/proof.json",
+                "fork_usage": {"fork_tool_call_count": 1},
+                "prototypes": [{"id": "used_worker"}],
+            },
+        ]
+
+        self.assertEqual(
+            _non_adopted_prototype_ids(pairs),
+            ("bounded_worker",),
+        )
+        pairs[0]["prototypes"][0].update({
+            "description": "Implement an artifact; parent retains all workspace writing.",
+            "persona": "Return a patch without requiring workspace ownership.",
+        })
+        self.assertEqual(
+            _required_non_adoption_repair_ids(pairs),
+            ("bounded_worker",),
+        )
+
+    def test_verified_single_surface_repairs_subjective_delegation_trigger(self):
+        pairs = [{
+            "source_hpa_proof": "/proof.json",
+            "fork_usage": {"fork_tool_call_count": 0},
+            "root_contract_visibility": {
+                "verified": True,
+                "generic_subagent_present": False,
+            },
+            "prototypes": [{
+                "id": "bounded_worker",
+                "description": "Own one delegated artifact slice.",
+                "persona": (
+                    "Use when: a bounded slice has clear marginal value. "
+                    "Scope: own the assigned artifact slice. "
+                    "Deliverable: one artifact. Done when: checks pass. "
+                    "Return: artifact and evidence."
+                ),
+            }],
+        }]
+
+        self.assertEqual(
+            _required_non_adoption_repair_ids(pairs),
+            ("bounded_worker",),
+        )
+
+    def test_verified_single_surface_repairs_integration_overconstraint(self):
+        pairs = [{
+            "source_hpa_proof": "/proof.json",
+            "fork_usage": {"fork_tool_call_count": 0},
+            "root_contract_visibility": {
+                "verified": True,
+                "generic_subagent_present": False,
+            },
+            "prototypes": [{
+                "id": "bounded_worker",
+                "description": "Implement one bounded artifact slice.",
+                "persona": (
+                    "Use when: local checks can pass without whole-artifact integration. "
+                    "Scope: own the assigned artifact slice. "
+                    "Deliverable: one artifact. Done when: checks pass. "
+                    "Return: artifact and evidence."
+                ),
+            }],
+        }]
+
+        diagnostic = _prototype_non_adoption_diagnostics(
+            pairs[0]["prototypes"][0]
+        )
+        self.assertTrue(diagnostic["integration_boundary_overconstraint"])
+        self.assertEqual(
+            _required_non_adoption_repair_ids(pairs),
+            ("bounded_worker",),
+        )
+
+        repaired = _prototype_non_adoption_diagnostics({
+            **pairs[0]["prototypes"][0],
+            "persona": (
+                "Use when: local checks can pass without whole-artifact integration. "
+                "Scope: own the assigned artifact slice against an existing interface; "
+                "the root retains later root-side adaptation and integration. "
+                "Deliverable: one artifact. Done when: checks pass. "
+                "Return: artifact and evidence."
+            ),
+        })
+        self.assertFalse(repaired["integration_boundary_overconstraint"])
+
+    def test_hpa_current_ids_include_runtime_active_subagent_prototypes(self):
+        outer = mock.Mock(
+            seed_elements={"context": ("ctx",)},
+            element_catalog=(
+                HarnessElementConfig(
+                    element_id="ctx",
+                    category="context",
+                    description="context",
+                ),
+                HarnessElementConfig(
+                    element_id="bounded_worker",
+                    category="subagent",
+                    description="worker",
+                ),
+            ),
+        )
+        seed_proof = {
+            "hpa_update": {"next_inner_element_ids": ["ctx"]},
+            "subagent_prototypes": [{"id": "bounded_worker"}],
+        }
+
+        self.assertEqual(
+            _current_element_ids(seed_proof, outer),
+            ("ctx", "bounded_worker"),
+        )
+
+    def test_hpa_current_ids_drop_stale_inner_elements_not_in_outer_catalog(self):
+        outer = mock.Mock(
+            seed_elements={"context": ("ctx",)},
+            element_catalog=(
+                HarnessElementConfig(
+                    element_id="ctx",
+                    category="context",
+                    description="context",
+                ),
+            ),
+        )
+        seed_proof = {
+            "hpa_update": {
+                "next_inner_element_ids": [
+                    "ctx", "tool_deep_probe_coverage_inspector"
+                ]
+            },
+            "subagent_prototypes": [{"id": "bounded_worker"}],
+        }
+
+        self.assertEqual(_current_element_ids(seed_proof, outer), ("ctx",))
+
+    def test_hpa_rejection_evidence_names_non_adopted_existing_prototype(self):
+        pair = {
+            "source_hpa_proof": "/proof.json",
+            "prototypes": [{"id": "bounded_worker"}],
+            "fork_usage": {"fork_tool_call_count": 0},
+            "utility": {"quality_delta": 0.02, "net_utility": 0.02},
+            "rubric_validation": {"infrastructure_ok": True, "case_results": []},
+        }
+
+        result, _usage = _rejection_result(
+            pair,
+            pair_path=Path("pair.json"),
+            epoch=1,
+        )
+
+        evidence = " ".join(result.reasons)
+        self.assertIn("bounded_worker", evidence)
+        self.assertIn("non-adoption evidence", evidence)
+        self.assertIn("Never force or quota fork calls", evidence)
+
+    def test_root_contract_visibility_matches_hpa_prototype_tools(self):
+        prototypes = [{"id": "bounded_worker", "persona": "bounded"}]
+        tool_name = "fork_agent_bounded_worker_036e196e39"
+        submission = mock.Mock(metadata={
+            "root_visible_subagent_tools": [tool_name],
+            "subagent_contract_prompt_sha256": "a" * 64,
+        })
+
+        audit = _root_contract_visibility(submission, prototypes, {
+            "request_header_count": 1,
+            "model_visible_tools": [tool_name],
+            "model_visible_tool_schemas": {},
+            "evolved_tool_contracts": {tool_name: True},
+            "generic_subagent_present": False,
+        })
+
+        self.assertEqual(audit["expected_tools"], [tool_name])
+        self.assertTrue(audit["verified"])
+
+    def test_fork_evidence_requires_child_result_and_later_root_mutation(self):
+        audit = _fork_usage_from_events(
+            [
+                {"type": "session", "data": {"delegationDepth": 0}},
+                {
+                    "type": "tool/call",
+                    "seq": 10,
+                    "data": {
+                        "name": "fork_agent_worker",
+                        "callId": "fork-1",
+                        "arguments": '{"prompt":"review this slice"}',
+                    },
+                },
+                {
+                    "type": "tool/result",
+                    "seq": 20,
+                    "data": {
+                        "message": {
+                            "source": {"callId": "fork-1"},
+                            "content": [{"type": "tool-result", "isError": False, "content": "patch"}],
+                        }
+                    },
+                },
+                {
+                    "type": "tool/call",
+                    "seq": 30,
+                    "data": {"name": "edit", "callId": "edit-1", "arguments": "{}"},
+                },
+            ],
+            session="root.zstd",
+        )
+
+        self.assertEqual(len(audit["fork_tool_calls"]), 1)
+        self.assertTrue(audit["fork_results"][0]["successful"])
+        self.assertEqual(audit["post_fork_root_actions"][0]["fork_call_id"], "fork-1")
+
+    def test_child_session_cannot_satisfy_root_fork_evidence(self):
+        audit = _fork_usage_from_events(
+            [
+                {"type": "session", "data": {"delegationDepth": 1}},
+                {
+                    "type": "tool/call",
+                    "seq": 1,
+                    "data": {"name": "fork_agent_worker", "callId": "nested"},
+                },
+            ],
+            session="child.zstd",
+        )
+
+        self.assertEqual(audit["fork_tool_calls"], [])
+
+    def test_background_fork_events_link_start_notice_and_child_lineage(self):
+        child_id = "1a26fac6-18d0-4659-8050-25bcc0450cbb"
+        self.assertEqual(
+            _background_child_id({
+                "serialized_content": "started background child " + child_id,
+            }),
+            child_id,
+        )
+        notice = {
+            "type": "agent/inbox/spliced",
+            "seq": 69,
+            "data": {"inserted": [{
+                "source": {
+                    "kind": "subagent-settled",
+                    "form": "notice",
+                    "senderSessionId": child_id,
+                },
+            }]},
+        }
+        self.assertEqual(_background_report_child_id(notice), child_id)
+        child_events = [
+            {
+                "type": "session",
+                "id": child_id,
+                "parentSession": "root-session",
+                "delegationDepth": 1,
+                "data": None,
+            },
+            {
+                "type": "turn/end",
+                "seq": 84,
+                "data": {"reason": {"kind": "completed"}},
+            },
+        ]
+        self.assertEqual(_session_lineage(child_events), {
+            "session_id": child_id,
+            "parent_session": "root-session",
+            "delegation_depth": 1,
+        })
+        self.assertTrue(_session_completed(child_events))
 
 
 if __name__ == "__main__":

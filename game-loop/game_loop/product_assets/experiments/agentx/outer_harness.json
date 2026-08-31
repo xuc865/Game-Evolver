@@ -144,10 +144,18 @@
     {
       "id": "skill_subagent_prototype_synthesis",
       "category": "skill",
-      "description": "Write one evidence-derived bounded child job; the runtime automatically turns every approved job into a fork target.",
+      "description": "Write one reusable evidence-derived child job with an explicit delegation condition, bounded scope, independent deliverable, observable completion evidence, and concise root handoff; the runtime automatically turns every approved job into a fork target.",
       "spec": {
         "mode": "subagent_prototype_synthesis",
-        "required_field": "persona"
+        "required_field": "persona",
+        "persona_contract": [
+          "Use when:",
+          "Scope:",
+          "Deliverable:",
+          "Done when:",
+          "Return:"
+        ],
+        "generality_rule": "Describe a reusable capability class, never a benchmark, product, game, task instance, source file, fixed team role, or topology. Use when must name observable task-structure conditions such as a bounded artifact boundary, locally runnable acceptance checks, and competing independent required slices; do not use subjective phrases such as clear marginal value that presuppose unknown utility."
       },
       "tags": [
         "skill",

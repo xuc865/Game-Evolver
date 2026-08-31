@@ -1,0 +1,7 @@
+{
+  "scenario": "neutral",
+  "duration_frames": 240,
+  "events": [
+    {"frame": 0, "type": "key_press", "keycode": "ENTER"}
+  ]
+}

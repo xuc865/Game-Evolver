@@ -81,9 +81,8 @@ def materialize_runtime_profile(
                 snapshot["cordis_seed"] = str(seed_target)
         snapshot[field] = str(target)
     active_rows = _validated_cordis_plugins(snapshot)
-    prototype_rows = cordis_rows_for_subagent_prototypes(
-        _validated_subagent_prototypes(snapshot)
-    )
+    prototypes = _validated_subagent_prototypes(snapshot)
+    prototype_rows = cordis_rows_for_subagent_prototypes(prototypes)
     if prototype_rows and "fork_context_subagent" not in set(
         snapshot.get("active_cordis_plugins", [])
     ):
@@ -95,6 +94,8 @@ def materialize_runtime_profile(
         if cordis is None:
             raise ValueError("active_cordis_plugins requires a cordis seed asset")
         cordis_path = Path(str(cordis))
+        if prototypes:
+            _remove_legacy_subagent_tool_rows(cordis_path)
         _append_cordis_rows(cordis_path, (*active_rows, *prototype_rows))
         snapshot["effective_cordis_sha256"] = hash_path(cordis_path)
     snapshot_hash = sha256_json(snapshot)
@@ -145,6 +146,37 @@ def _append_cordis_rows(
                     row["config"], sort_keys=True, separators=(",", ":")
                 )
                 handle.write(f"  config: {config_json}\n")
+
+
+def _remove_legacy_subagent_tool_rows(cordis_path: Path) -> None:
+    """Hide generic model-facing delegation when evolved targets are active."""
+
+    lines = cordis_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    blocks: list[list[str]] = []
+    prefix: list[str] = []
+    current: list[str] | None = None
+    for line in lines:
+        if line.startswith("- id:"):
+            if current is not None:
+                blocks.append(current)
+            current = [line]
+        elif current is None:
+            prefix.append(line)
+        else:
+            current.append(line)
+    if current is not None:
+        blocks.append(current)
+
+    retained: list[list[str]] = []
+    for block in blocks:
+        text = "".join(block)
+        if "@deepseek-ai/dsh-tool-subagent" in text:
+            continue
+        retained.append(block)
+    cordis_path.write_text(
+        "".join((*prefix, *(line for block in retained for line in block))),
+        encoding="utf-8",
+    )
 
 
 def _validated_cordis_plugins(profile: Mapping[str, Any]) -> tuple[dict[str, Any], ...]:

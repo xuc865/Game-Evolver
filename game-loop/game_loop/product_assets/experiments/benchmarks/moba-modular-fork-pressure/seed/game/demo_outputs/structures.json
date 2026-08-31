@@ -1,0 +1,9 @@
+{
+  "scenario": "structures",
+  "duration_frames": 600,
+  "events": [
+    {"frame": 0, "type": "key_press", "keycode": "ENTER"},
+    {"frame": 5, "type": "key_down", "keycode": "D"},
+    {"frame": 250, "type": "key_up", "keycode": "D"}
+  ]
+}
