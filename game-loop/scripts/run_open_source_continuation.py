@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -92,6 +93,27 @@ def main() -> int:
     state_path = root / "continuation-state.json"
     state = json.loads(state_path.read_text()) if state_path.is_file() else {"schema":"game-evolver.continuation.v1","next_epoch":1,"seed":str(args.seed.resolve()),"epochs":[]}
     seed = Path(state.get("seed", str(args.seed.resolve()))).resolve()
+    child: subprocess.Popen | None = None
+
+    def _stop_child(signum, _frame):
+        nonlocal child
+        if child is not None and child.poll() is None:
+            try:
+                os.killpg(child.pid, signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                child.terminate()
+            try:
+                child.wait(timeout=8)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(child.pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    child.kill()
+        raise SystemExit(128 + int(signum))
+
+    signal.signal(signal.SIGTERM, _stop_child)
+    signal.signal(signal.SIGINT, _stop_child)
+
     for epoch in range(int(state["next_epoch"]), args.epochs + 1):
         episode = root / f"epoch_{epoch:03d}"
         episode.mkdir(parents=True, exist_ok=True)
@@ -103,7 +125,10 @@ def main() -> int:
         prompt += "\n\n## Evolution goal\n\n" + GOAL
         command = [sys.executable, "-m", "game_loop.inner_loop", "run", "--benchmark", args.benchmark, "--task-source", str(args.task_file.resolve()), "--seed-artifact", str(seed), "--run-dir", str(episode), "--profile", str(profile_path), "--prompt", prompt, "--artifact-relpath", args.artifact_relpath]
         env = dict(os.environ); env.setdefault("DEEPSEEK_ROUTE_MODE", "mixed")
-        result = subprocess.run(command, cwd=ROOT, env=env)
+        child = subprocess.Popen(command, cwd=ROOT, env=env, start_new_session=True)
+        result_code = child.wait()
+        result = subprocess.CompletedProcess(command, result_code)
+        child = None
         submission_path = episode / "submission.json"
         row = {"epoch": epoch, "run_dir": str(episode), "exit_code": result.returncode}
         if submission_path.is_file():
