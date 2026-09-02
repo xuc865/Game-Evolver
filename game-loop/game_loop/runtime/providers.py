@@ -195,7 +195,7 @@ PROVIDERS: dict[str, BackboneProviderSpec] = {
         "https://openrouter.ai/api/v1", "z-ai/glm-5.2", ("OPENROUTER_API_KEY",),
     ),
     "qwen": BackboneProviderSpec(
-        "qwen", "http://29.163.228.59:8080/v1", "Qwen3.6-27B",
+        "qwen", "http://29.116.237.141:8080/v1", "Qwen3.8-27B",
         ("DASHSCOPE_API_KEY", "QWEN_API_KEY"), "QWEN_BASE_URL", "QWEN_MODEL",
         "deployment-provided OpenAI-compatible endpoint", False, True,
         "https://openrouter.ai/api/v1", "qwen/qwen3.6-27b", ("OPENROUTER_API_KEY",),

@@ -126,7 +126,7 @@ export function apply(ctx, config) {
             type: "string",
             description: (
               "The bounded task for the child. It inherits completed parent turns; "
-              + "state the exact owned slice, deliverable, validation, and return contract."
+              + "name the owned slice, runnable deliverable, and check to return."
             ),
           },
         },
@@ -157,13 +157,10 @@ export function apply(ctx, config) {
         const boundedRequest = [
           args.prompt,
           "\n\n## Bounded child completion contract\n",
-          "This is one bounded child run, not a new planning session. Work only on the "
-            + "owned slice named above. After the local check passes (or after one clear "
-            + "failure report), stop exploring immediately and return a concise handoff "
-            + "report with: status, changed paths, artifact summary, check output, and "
-            + "integration notes for the root. Do not inspect or edit unrelated files, "
-            + "do not start another child, and do not continue with broader cleanup after "
-            + "the handoff report.",
+          "Work on the owned slice only. Produce the smallest runnable result, run its "
+            + "local check, then return a concise handoff with status, changed paths, "
+            + "artifact summary, check evidence, and any integration note. Stop after the "
+            + "handoff; do not start another child or broaden the task.",
         ].join("");
         const child = await ctx.subagents.startContinuable({
           provider: config.provider,

@@ -60,12 +60,10 @@ def tool_description_for_subagent_prototype(
         + ". "
     )
     return prefix + (
-        "Delegate one explicit artifact or module slice only when it has local checks "
-        "and other independent required work exists. The child owns and implements only "
-        "that slice, may use existing shared interfaces, and returns the artifact, every "
-        "changed file, and check results. It runs in the background and reports completion "
-        "while the root continues other work. The root adapts shared interfaces, integrates "
-        "the result, verifies the whole artifact, and delivers."
+        "When a bounded independent slice is useful, delegate it. The child owns that "
+        "slice, may use existing shared interfaces, runs its local checks, produces a runnable result, and returns a short handoff with "
+        "changed paths and evidence. It runs in the background; the root adapts shared "
+        "interfaces, integrates, and verifies the delivered result."
     )
 
 

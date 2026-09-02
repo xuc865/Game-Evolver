@@ -44,6 +44,8 @@ from scripts.evaluate_v030_dynamic_fork_pair import (
     _background_report_child_id,
     _default_task_identity,
     _fork_usage_from_events,
+    _finalization_reserve_seconds,
+    _normalized_seed_project_root,
     _relative_fork_cost_penalty,
     _parent_capability_failure,
     _root_contract_visibility,
@@ -51,6 +53,7 @@ from scripts.evaluate_v030_dynamic_fork_pair import (
     _session_lineage,
 )
 from game_loop.runtime.protocol import GameSubmission
+from scripts.run_v030_complex_10_epochs import _epoch_provider_salt
 
 
 class DynamicForkTaskIdentityTests(unittest.TestCase):
@@ -88,11 +91,36 @@ class DynamicForkTaskIdentityTests(unittest.TestCase):
         )
         self.assertFalse(_parent_capability_failure(failed))
 
+    def test_seed_project_root_unwraps_workspace_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            wrapper = Path(td) / "artifact"
+            project = wrapper / "game"
+            project.mkdir(parents=True)
+            (project / "project.godot").write_text("[application]\n")
+            self.assertEqual(_normalized_seed_project_root(wrapper), project.resolve())
+
+    def test_seed_project_root_keeps_direct_project(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            project = Path(td) / "game"
+            project.mkdir()
+            (project / "project.godot").write_text("[application]\n")
+            self.assertEqual(_normalized_seed_project_root(project), project.resolve())
+
+    def test_polaris_finalization_reserve_covers_idle_window(self) -> None:
+        self.assertEqual(_finalization_reserve_seconds(120), 420)
+        self.assertEqual(_finalization_reserve_seconds(600), 600)
+
+    def test_multi_epoch_provider_salt_varies_without_splitting_pair(self) -> None:
+        self.assertEqual(_epoch_provider_salt("run", 3), "run-epoch-3")
+        self.assertNotEqual(
+            _epoch_provider_salt("run", 3), _epoch_provider_salt("run", 4)
+        )
+
 
 class DynamicForkUtilityTests(unittest.TestCase):
     def test_cost_penalty_is_relative_and_bounded(self) -> None:
-        self.assertAlmostEqual(_relative_fork_cost_penalty(54, 151), 97 / 205)
-        self.assertAlmostEqual(_relative_fork_cost_penalty(1, 100), 99 / 101)
+        self.assertAlmostEqual(_relative_fork_cost_penalty(54, 151), 1.0)
+        self.assertAlmostEqual(_relative_fork_cost_penalty(1, 100), 1.0)
         self.assertEqual(_relative_fork_cost_penalty(100, 100), 0.0)
 from scripts.evolve_v030_subagent_prototypes import (
     _current_element_ids,
@@ -2427,7 +2455,7 @@ class DynamicForkEvidenceTests(unittest.TestCase):
         self.assertEqual(audit["expected_tools"], [tool_name])
         self.assertTrue(audit["verified"])
 
-    def test_fork_evidence_requires_child_result_and_later_root_mutation(self):
+    def test_fork_evidence_records_later_root_mutation_when_present(self):
         audit = _fork_usage_from_events(
             [
                 {"type": "session", "data": {"delegationDepth": 0}},

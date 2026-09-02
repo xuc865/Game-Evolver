@@ -985,6 +985,9 @@ class LLMRubricJudge:
         prompt = (
             "Score parent and candidate together from their deep runtime evidence. "
             "Apply each rubric identically to both sides. Missing evidence means 0. "
+            "If the task excerpt contains a frozen Game Design Charter, treat it as public human design context: "
+            "use it to judge whether features belong in the correct game state and whether the core flow is preserved. "
+            "A charter violation is a quality regression even when the artifact launches and the screen changed. "
             "Score the delivered game's observable quality, not how polished the agent process looks. "
             "Tool calls, MCP use, skill loading, plans, file counts, and verbose logs are never quality "
             "evidence by themselves and must not compensate for weaker gameplay. Require successful "
@@ -998,6 +1001,7 @@ class LLMRubricJudge:
         )
         compact_prompt = (
             "Return only valid JSON. Score observable game quality consistently; missing evidence is 0. "
+            "Honor any frozen Game Design Charter in the task context, including state-correct UI placement and flow integrity. "
             "Do not reward tools, skills, plans, logs, or file counts without successful gameplay evidence.\n"
             f"Schema={json.dumps(schema)}\n"
             f"Rubrics={json.dumps(rubric_text, ensure_ascii=False)}\n"
@@ -1161,6 +1165,8 @@ class LLMRubricJudge:
         soft_template = {item.rubric_id: 0.0 for item in soft_rubrics}
         return (
             "Score this game using deep runtime evidence, not surface file presence alone.\n"
+            "If the task excerpt contains a frozen Game Design Charter, use it as public human design context, "
+            "especially for state-correct UI placement and preservation of the intended game flow.\n"
             "For gcbench, require official demo traces with real input events and completed verifier runtime logs as gameplay evidence. A project that merely launches, contains files, or has nominal demo JSON without replay evidence must not receive passing gameplay scores.\n"
             "Inspect whether the evidence demonstrates actual interaction and state progression: input was delivered, the game remained alive, and replay logs contain no fatal errors. Do not infer gameplay quality from filenames or descriptions.\n"
             "Score workflow, repair, exploration, skill, tool/MCP, and context soft rubrics only from Process evidence below. If the corresponding process evidence is absent, assign 0 rather than inferring behavior from the artifact.\n"

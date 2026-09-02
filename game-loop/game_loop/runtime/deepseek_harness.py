@@ -849,6 +849,20 @@ class DeepSeekHarnessRuntime:
                     run_config = replace(self.config, model=resolved.model)
             else:
                 environment = resolved.inject(environment)
+                # The DSH binary currently exposes only its
+                # ``deepseek-official`` adapter name, even when the backbone
+                # is an OpenAI-compatible GLM/Kimi/Qwen deployment. Keep the
+                # registered adapter but route its endpoint/model through the
+                # isolated DEEPSEEK_* variables. Deployment-provided backbones
+                # are keyless; the placeholder satisfies the adapter's
+                # presence check without persisting credentials in profiles.
+                environment.update({
+                    "DEEPSEEK_BASE_URL": resolved.base_url,
+                    "DEEPSEEK_API_KEY": resolved.api_key or "EMPTY",
+                    "DEEPSEEK_MODEL": resolved.model,
+                    "GAME_LOOP_RESOLVED_PROVIDER_ROUTE": resolved.route_id,
+                    "GAME_LOOP_RESOLVED_PROVIDER_MODEL": resolved.model,
+                })
 
         prompt = task.prompt
         if system_prompt:

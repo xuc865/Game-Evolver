@@ -191,7 +191,7 @@ class DeepSeekHarnessRuntimeTests(unittest.TestCase):
         self.assertIsNotNone(prompt)
         assert prompt is not None
         self.assertIn("fork_agent_bounded_worker_", prompt)
-        self.assertIn("Delegate one explicit artifact or module slice", prompt)
+        self.assertIn("When a bounded independent slice is useful", prompt)
         self.assertIn("full read or implementation", prompt)
         self.assertNotIn(persona, prompt)
         self.assertIn("Do not fork merely because a target exists", prompt)
@@ -567,7 +567,7 @@ class DeepSeekHarnessRuntimeTests(unittest.TestCase):
             })
             self.assertIn("Harness evolution", runner.calls[0]["prompt"])
             self.assertIn(
-                "Delegate one explicit artifact or module slice",
+                "When a bounded independent slice is useful",
                 runner.calls[0]["prompt"],
             )
             self.assertNotIn(

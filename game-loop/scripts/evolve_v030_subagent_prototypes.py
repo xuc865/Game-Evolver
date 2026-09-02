@@ -448,7 +448,12 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             lesson=(
                 "A fork was invoked and its result was followed by a root mutation."
                 if usage.get("post_fork_root_actions")
-                else "A fork was invoked, but no later root mutation was observed."
+                else (
+                    "A child completed and delivered a handoff; root-side editing was "
+                    "not needed to count the contribution."
+                    if usage.get("adopted_fork_count")
+                    else "A fork was invoked, but no completed child handoff was observed."
+                )
             ),
         )
     evidence_store.save()
@@ -477,6 +482,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         non_adopted_element_ids=non_adopted_ids,
         required_non_adoption_repair_ids=required_repair_ids,
         prototype_evidence=evidence_store.summary(),
+        evolution_goal=args.evolution_goal,
     )
     prototypes = [
         {
@@ -529,6 +535,7 @@ def main() -> int:
     parser.add_argument("--seed-library", type=Path)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--force", action="store_true")
+    parser.add_argument("--evolution-goal", default="")
     args = parser.parse_args()
     payload = run(args)
     update = dict(payload["hpa_update"])

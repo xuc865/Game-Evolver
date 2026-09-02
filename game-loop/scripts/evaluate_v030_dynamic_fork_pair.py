@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import sys
+from datetime import datetime
 from dataclasses import replace
 from pathlib import Path
 
@@ -21,6 +22,7 @@ if str(ROOT) not in sys.path:
 from game_loop.config import HarnessEvolutionConfig
 from game_loop.core.harness import HarnessEpisodeOutcome, HarnessProfile
 from game_loop.core.harness_rubric_validator import HarnessRubricValidator, _artifact_kind
+from game_loop.core.game_design_charter import charter_section, load_design_charter
 from game_loop.gcbench_runtime import (
     ensure_godot_env,
     render_runtime_instruction_block,
@@ -70,20 +72,51 @@ DEFAULT_GCBENCH_ROOT = ROOT.parent / "gcbench"
 
 
 def _relative_fork_cost_penalty(parent_calls: int, candidate_calls: int) -> float:
-    """Score extra inference as its share of the paired call volume.
-
-    Using the parent count as the denominator over-penalizes useful candidates
-    when the frozen parent happens to finish early.  The paired total keeps the
-    marginal cost visible, bounded in [0, 1], and comparable across runs.
-    """
+    """Return the conservative call component of marginal cost."""
 
     extra_calls = max(0, int(candidate_calls) - int(parent_calls))
-    if extra_calls == 0:
+    return min(1.0, extra_calls / max(1, int(parent_calls)))
+
+
+def _fork_cost_penalty(call_cost: float, time_cost: float) -> float:
+    """Charge modest bounded marginal cost while keeping quality decisive."""
+
+    return min(0.35, 0.25 * max(0.0, call_cost) + 0.10 * max(0.0, time_cost))
+
+
+def _trajectory_wall_seconds(*paths: Path) -> float:
+    """Recover observed episode duration from persisted trajectory timestamps."""
+
+    stamps: list[datetime] = []
+    for path in paths:
+        if not path.is_file():
+            continue
+        try:
+            for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+                try:
+                    value = json.loads(line).get("created_at")
+                    if value:
+                        stamps.append(datetime.fromisoformat(str(value)))
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    continue
+        except OSError:
+            continue
+    if len(stamps) < 2:
         return 0.0
-    total_calls = int(parent_calls) + int(candidate_calls)
-    if total_calls <= 0:
-        return 1.0
-    return min(1.0, extra_calls / total_calls)
+    return max(0.0, (max(stamps) - min(stamps)).total_seconds())
+
+
+def _soft_rubric_capacity(validation: object) -> float:
+    """Return the fixed soft-score capacity used to normalize quality gains."""
+
+    capacity = 0.0
+    for rubric in getattr(validation, "dynamic_rubrics", ()):
+        if isinstance(rubric, dict):
+            try:
+                capacity += float(rubric.get("weight", 0.0))
+            except (TypeError, ValueError):
+                pass
+    return max(1.0, capacity)
 
 
 def _default_task_identity(task_file: Path) -> str:
@@ -227,6 +260,12 @@ def _runtime_config(
             "unknown shared runtime plugins: " + ", ".join(unknown_shared_plugins)
         )
     active_plugins.update(shared_runtime_plugins)
+    # Polaris may spend up to its 300s stream-idle interval on a retry. Keep
+    # enough hard-deadline budget for the mandatory evidence-preserving wrap-up
+    # after the main turn is cancelled.
+    profile["finalization_reserve_seconds"] = _finalization_reserve_seconds(
+        int(profile.get("finalization_reserve_seconds", 120))
+    )
     if prototypes is None:
         active_plugins.discard("fork_context_subagent")
         profile.pop("active_subagent_prototypes", None)
@@ -272,6 +311,21 @@ def _run_submission(
     return runtime.run(task, episode_dir=output / f"{side}-runtime")
 
 
+def _finalization_reserve_seconds(configured: int) -> int:
+    return max(configured, 420)
+
+
+def _normalized_seed_project_root(seed: Path) -> Path:
+    source = seed.resolve()
+    if not (source / "project.godot").is_file() and (
+        source / "game" / "project.godot"
+    ).is_file():
+        source = source / "game"
+    if not (source / "project.godot").is_file():
+        raise ValueError(f"seed does not contain a Godot project root: {source}")
+    return source
+
+
 def _prepare_task_seed(
     *,
     output: Path,
@@ -280,7 +334,11 @@ def _prepare_task_seed(
 ) -> Path:
     staged = output / "task-seed"
     staged.mkdir()
-    shutil.copytree(seed.resolve(), staged / "game")
+    source = _normalized_seed_project_root(seed)
+    # Accepted artifacts may be a workspace wrapper whose actual Godot project
+    # is at ``game/project.godot``. The task contract already supplies the
+    # ``game/`` boundary, so unwrap that one level before staging.
+    shutil.copytree(source, staged / "game")
     godot = ensure_godot_env()
     stage_local_runtime_overlay(
         overlay_workspace=staged,
@@ -588,6 +646,18 @@ def _fork_usage(submission: GameSubmission) -> dict[str, object]:
                     "child_id": child_id,
                     "completion_report_sequence": notice["sequence"],
                 })
+            else:
+                # A completed, matching handoff is already a usable contribution.
+                # Root-side editing is useful evidence, but not a second hard gate.
+                adoption_actions.append({
+                    "name": "child_handoff",
+                    "call_id": "",
+                    "sequence": notice["sequence"],
+                    "session": str(root["path"]),
+                    "fork_call_id": start["call_id"],
+                    "child_id": child_id,
+                    "completion_report_sequence": notice["sequence"],
+                })
     adopted_call_ids = {
         str(action["fork_call_id"])
         for action in adoption_actions
@@ -790,6 +860,10 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     task_text = sanitize_public_instruction(
         args.task_file.read_text(encoding="utf-8")
     )
+    if args.design_charter:
+        task_text = f"{task_text.rstrip()}{charter_section(load_design_charter(args.design_charter))}"
+    if args.evolution_goal:
+        task_text = f"{task_text.rstrip()}\n\n## Evolution goal\n\n{args.evolution_goal.strip()}"
     task_source = output / "task"
     task_source.mkdir()
     (task_source / "instruction.md").write_text(task_text, encoding="utf-8")
@@ -952,10 +1026,20 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     parent_soft = sum(item.parent.soft_total for item in validation.case_results)
     candidate_soft = sum(item.candidate.soft_total for item in validation.case_results)
     quality_delta = candidate_soft - parent_soft
+    quality_gain = max(
+        -1.0,
+        min(1.0, quality_delta / _soft_rubric_capacity(validation)),
+    )
     parent_calls = int(parent_submission.usage.get("modelCalls", 1))
     candidate_calls = int(candidate_submission.usage.get("modelCalls", 1))
-    cost_penalty = _relative_fork_cost_penalty(parent_calls, candidate_calls)
-    net_utility = quality_delta - cost_penalty
+    call_cost = _relative_fork_cost_penalty(parent_calls, candidate_calls)
+    parent_seconds = _trajectory_wall_seconds(Path(parent_submission.trajectory_ref))
+    candidate_seconds = _trajectory_wall_seconds(Path(candidate_submission.trajectory_ref))
+    time_cost = max(0.0, candidate_seconds - parent_seconds) / max(
+        1, int(args.wall_timeout_seconds)
+    )
+    cost_penalty = _fork_cost_penalty(call_cost, time_cost)
+    net_utility = quality_gain - cost_penalty
     fork_usage = _fork_usage(candidate_submission)
     root_contract_visibility = _root_contract_visibility(
         candidate_submission, prototypes
@@ -979,7 +1063,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         )
     if fork_usage["adopted_fork_count"] == 0:
         fork_admission_reasons.append(
-            "root produced no artifact-changing action after a completed child report"
+            "root received no complete child handoff with artifact evidence"
         )
     # A fork is only a successful evolution when it improves the delivered
     # artifact. Lower inference cost alone is not evidence that delegation
@@ -1004,7 +1088,12 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         "rubric_validation": validation.to_dict(),
         "utility": {
             "quality_delta": quality_delta,
+            "quality_gain": quality_gain,
             "model_call_delta": candidate_calls - parent_calls,
+            "parent_wall_seconds": parent_seconds,
+            "candidate_wall_seconds": candidate_seconds,
+            "call_cost": call_cost,
+            "time_cost": time_cost,
             "cost_penalty": cost_penalty,
             "net_utility": net_utility,
         },
@@ -1031,6 +1120,9 @@ def main() -> int:
     parser.add_argument("--gcbench-root", type=Path, default=DEFAULT_GCBENCH_ROOT)
     parser.add_argument("--runtime-profile", type=Path, default=DEFAULT_PROFILE)
     parser.add_argument("--candidate-submission", type=Path)
+    parser.add_argument("--evolution-goal", default="")
+    parser.add_argument("--design-charter", type=Path,
+                        help="Frozen human design guidance supplied to agents and the rubric judge.")
     parser.add_argument("--inner-config", type=Path, default=DEFAULT_INNER)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--wall-timeout-seconds", type=int, default=600)

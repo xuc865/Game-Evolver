@@ -1780,6 +1780,34 @@ class OuterHarnessLibraryAgent:
             return normalized
         catalog = self.store.catalog()
         metadata = self.store.metadata()
+        # Model planners occasionally echo a shortlisted element as a
+        # "modify" without changing it.  This is an invalid action, not an
+        # infrastructure failure.  Normalize it to an explicit no-op before
+        # action counting and transaction validation; audited repair requests
+        # still fail below because they must remain real modifications.
+        normalized_operations = []
+        for operation in normalized.get("operations", []):
+            if (
+                isinstance(operation, dict)
+                and str(operation.get("operation", "")).casefold() == "modify"
+                and str(operation.get("element_id", "")) in catalog
+            ):
+                replacement = operation.get("replacement")
+                if isinstance(replacement, dict):
+                    try:
+                        if HarnessElementConfig.from_dict(replacement) == catalog[
+                            str(operation.get("element_id", ""))
+                        ]:
+                            operation = {
+                                **operation,
+                                "operation": "unchanged",
+                                "reason": "planner emitted an equivalent replacement; no mutation committed",
+                            }
+                    except (TypeError, ValueError):
+                        pass
+            normalized_operations.append(operation)
+        normalized["operations"] = normalized_operations
+        operations = normalized_operations
         merge_operations = {
             str(operation.get("element_id", "")): operation
             for operation in operations
@@ -1964,6 +1992,7 @@ class OuterHarnessLibraryAgent:
         non_adopted_element_ids: Iterable[str] = (),
         required_non_adoption_repair_ids: Iterable[str] = (),
         prototype_evidence: Iterable[Mapping[str, Any]] = (),
+        evolution_goal: str = "",
     ) -> OuterLibraryUpdate:
         current_inner_ids = tuple(dict.fromkeys(
             str(item) for item in current_inner_element_ids
@@ -1998,6 +2027,7 @@ class OuterHarnessLibraryAgent:
                 required_non_adoption_repairs
             ),
             "prototype_evidence": prototype_evidence_rows,
+            "evolution_goal": str(evolution_goal).strip(),
             "created_at": utc_now(),
         }
         self.store.write_epoch_record(epoch, record)
@@ -2030,6 +2060,8 @@ class OuterHarnessLibraryAgent:
                 "rationale:string}. You have index metadata only, so do not infer hidden "
                 "details. A valid rubric score below 1.0 may justify addition_needed=true."
             )
+            if evolution_goal:
+                shortlist_task += f" The persistent game-evolution goal is: {evolution_goal.strip()}"
             if required_non_adoption_repairs:
                 shortlist_task += (
                     " Include every id in required_non_adoption_repair_ids because each has "
