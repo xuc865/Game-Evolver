@@ -4,6 +4,8 @@ import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
+
+from game_loop.core.continuation_admission import decide_paired_admission
 from unittest import mock
 
 from game_loop.config import HarnessElementConfig, HarnessEvolutionConfig
@@ -2546,6 +2548,37 @@ class DynamicForkEvidenceTests(unittest.TestCase):
             "delegation_depth": 1,
         })
         self.assertTrue(_session_completed(child_events))
+
+
+class ContinuationAdmissionTests(unittest.TestCase):
+    def test_requires_strict_score_improvement(self):
+        base = {"infrastructure_ok": True, "passed": True, "hard_regression": False}
+        tied = decide_paired_admission(
+            {**base, "parent_score": 0.7, "candidate_score": 0.7},
+            material_change=True,
+        )
+        improved = decide_paired_admission(
+            {**base, "parent_score": 0.7, "candidate_score": 0.71},
+            material_change=True,
+        )
+        self.assertFalse(tied["accepted"])
+        self.assertTrue(improved["accepted"])
+
+    def test_fails_closed_without_pair_or_with_hard_regression(self):
+        self.assertFalse(
+            decide_paired_admission(None, material_change=True)["accepted"]
+        )
+        decision = decide_paired_admission(
+            {
+                "infrastructure_ok": True,
+                "passed": True,
+                "parent_score": 0.2,
+                "candidate_score": 0.9,
+                "hard_regression": True,
+            },
+            material_change=True,
+        )
+        self.assertFalse(decision["accepted"])
 
 
 if __name__ == "__main__":

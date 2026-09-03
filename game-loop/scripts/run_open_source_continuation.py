@@ -9,6 +9,7 @@ import signal
 import subprocess
 import sys
 from pathlib import Path
+from game_loop.core.continuation_admission import decide_paired_admission
 from game_loop.core.game_design_charter import charter_section, load_design_charter
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -82,6 +83,10 @@ def main() -> int:
                    help="Frozen human design guidance for this game.")
     p.add_argument("--max-tokens", type=int, default=None,
                    help="Override the DeepSeek runtime profile token budget.")
+    p.add_argument("--ab-evaluator-profile", type=Path,
+                   help="JSON command profile that evaluates parent and candidate under identical conditions.")
+    p.add_argument("--minimum-score-delta", type=float, default=0.0,
+                   help="Candidate score must improve by more than this amount.")
     args = p.parse_args()
     root = args.run_dir.resolve(); root.mkdir(parents=True, exist_ok=True)
     profile_path = args.profile.resolve()
@@ -140,19 +145,23 @@ def main() -> int:
             if submission.get("status") == "completed" and submission.get("artifact_ref"):
                 artifact = Path(str(submission["artifact_ref"])).resolve()
                 row["material_change"] = _material_change(seed, artifact)
-                # Generic open-source continuation runs do not have a separate
-                # evaluator profile.  The runtime's completed status plus the
-                # material-change gate is therefore the benchmark acceptance
-                # decision for this adapter. Persist it explicitly so the
-                # continuation chain can inherit only verified artifacts.
-                accepted = bool(row["material_change"]["passed"])
+                paired = _run_paired_evaluator(
+                    profile_path=args.ab_evaluator_profile,
+                    parent=seed,
+                    candidate=artifact,
+                    episode=episode,
+                    environment=env,
+                )
+                acceptance = decide_paired_admission(
+                    paired,
+                    material_change=bool(row["material_change"]["passed"]),
+                    minimum_delta=args.minimum_score_delta,
+                )
+                accepted = bool(acceptance["accepted"])
                 row["accepted"] = accepted
+                row["acceptance"] = acceptance
                 submission["accepted"] = accepted
-                submission["acceptance"] = {
-                    "method": "generic-material-change-gate-v1",
-                    "accepted": accepted,
-                    "material_change": row["material_change"],
-                }
+                submission["acceptance"] = acceptance
                 submission_path.write_text(json.dumps(submission, indent=2) + "\n", encoding="utf-8")
                 # Explicit evaluator acceptance and a real implementation/asset
                 # change are both required before continuation inheritance.
@@ -160,5 +169,41 @@ def main() -> int:
                     seed = artifact; state["seed"] = str(seed)
         state["epochs"].append(row); state["next_epoch"] = epoch + 1; state_path.write_text(json.dumps(state,indent=2)+"\n")
     return 0
+
+
+def _run_paired_evaluator(
+    *,
+    profile_path: Path | None,
+    parent: Path,
+    candidate: Path,
+    episode: Path,
+    environment: dict[str, str],
+) -> dict | None:
+    if profile_path is None:
+        return None
+    profile = json.loads(profile_path.resolve().read_text(encoding="utf-8"))
+    context = {
+        "parent": str(parent.resolve()),
+        "candidate": str(candidate.resolve()),
+        "episode": str(episode.resolve()),
+    }
+    command = [str(part).format_map(context) for part in profile["command"]]
+    output = episode / "paired-evaluation"
+    output.mkdir(parents=True, exist_ok=True)
+    completed = subprocess.run(
+        command,
+        cwd=Path(str(profile.get("cwd", ROOT))).resolve(),
+        env={**environment, **{str(k): str(v) for k, v in profile.get("environment", {}).items()}},
+        timeout=int(profile.get("timeout_seconds", 900)),
+        check=False,
+    )
+    if completed.returncode != 0:
+        return {"infrastructure_ok": False, "passed": False, "error": f"evaluator exit {completed.returncode}"}
+    result_path = Path(str(profile["result_path"]).format_map({**context, "output": str(output)}))
+    if not result_path.is_absolute():
+        result_path = output / result_path
+    if not result_path.is_file():
+        return {"infrastructure_ok": False, "passed": False, "error": "paired result missing"}
+    return json.loads(result_path.read_text(encoding="utf-8"))
 
 if __name__ == "__main__": raise SystemExit(main())

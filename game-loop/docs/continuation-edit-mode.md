@@ -21,7 +21,15 @@ python scripts/run_v030_complex_10_epochs.py ... --design-charter experiments/op
 
 > Improve the existing game every epoch: preserve working features, make a concrete quality improvement, and verify the result.
 
-配对、评分、fork 归因、HPA library 演化、接受门槛和基础设施处理逻辑不变。接续模式只改变 seed 选择和目标上下文。若某轮发生基础设施失败，状态推进但不会替换 `current_artifact`；下一轮继续使用最近一次成功的 candidate 产物。
+接续模式只改变 seed 选择和目标上下文，不放宽接受门槛。通用开源游戏 runner 必须通过 `--ab-evaluator-profile` 提供同条件的 parent/candidate 成对评估。候选只有同时满足以下条件才会被接受并成为下一轮 seed：
+
+- 存在实质实现或资源改动；
+- 父版本与候选版本的评估基础设施均正常；
+- 两侧分数均存在，且 `candidate_score - parent_score > --minimum-score-delta`；
+- evaluator 明确判定 paired comparison passed；
+- 没有玩法、宪章、视觉或可靠性硬回归。
+
+没有 A/B profile、评估失败、分数持平或降低、出现硬回归时一律 `accepted=false`，下一轮继续使用最近一次已接受产物。运行完成和测试通过本身不等于质量提升。
 
 状态文件新增 `evolution_mode` 和 `current_artifact` 字段，保证可恢复运行时不会悄悄切换模式。已有旧状态文件可按从头模式继续；恢复为接续模式时需显式传入 `--evolution-mode continuation`。
 
