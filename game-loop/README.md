@@ -1,6 +1,6 @@
 # Game Loop
 
-Game Loop 0.3.0 is a local, self-evolving multi-agent studio for building and
+Game Loop 0.7.0 is a local, self-evolving multi-agent studio for building and
 improving playable Godot games. A game-building agent (GOA) evolves alongside a
 harness-proposal agent (HPA). HPA can create executable Agent Circuits with
 custom roles, isolated contexts, typed handoffs, parallel branches, fan-in, and
@@ -24,7 +24,7 @@ DEEPSEEK_API_KEY=... uvx game-loop studio
 For an installed wheel or checkout:
 
 ```bash
-uvx --from ./dist/game_loop-0.3.0-py3-none-any.whl game-loop studio
+uvx --from ./dist/game_loop-0.7.0-py3-none-any.whl game-loop studio
 ```
 
 Studio opens at [http://127.0.0.1:8766](http://127.0.0.1:8766). Use a different

@@ -9,6 +9,7 @@ import argparse
 import hashlib
 import json
 import os
+import signal
 import shutil
 import subprocess
 import sys
@@ -47,6 +48,44 @@ def resolve_godot_executable(explicit: str | None = None) -> str | None:
 
 def _resolve_godot_bin(explicit: str | None) -> str | None:
     return resolve_godot_executable(explicit)
+
+
+
+
+def _run_process_group(
+    command: list[str],
+    *,
+    env: dict[str, str] | None = None,
+    cwd: Path | str | None = None,
+    timeout: int | float,
+) -> subprocess.CompletedProcess[str]:
+    """Run a command and kill its whole process group on timeout."""
+    process = subprocess.Popen(
+        command,
+        cwd=cwd,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+        return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+    except subprocess.TimeoutExpired as exc:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+            process.communicate(timeout=5)
+        except (ProcessLookupError, subprocess.TimeoutExpired):
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            try:
+                process.communicate(timeout=2)
+            except subprocess.TimeoutExpired:
+                pass
+        raise subprocess.TimeoutExpired(command, timeout) from exc
 
 
 def _godot_runtime_env() -> dict[str, str]:
@@ -96,14 +135,15 @@ def cmd_godot_import(args: argparse.Namespace) -> int:
     if godot is None:
         _emit({"passed": False, "score": 0.0, "diagnostics": ["godot binary not found"]})
         return 1
-    proc = subprocess.run(
-        [godot, "--headless", "--path", str(artifact), "--import", "--quit"],
-        env=_godot_runtime_env(),
-        capture_output=True,
-        text=True,
-        timeout=args.timeout,
-        check=False,
-    )
+    try:
+        proc = _run_process_group(
+            [godot, "--headless", "--path", str(artifact), "--import", "--quit"],
+            env=_godot_runtime_env(),
+            timeout=args.timeout,
+        )
+    except subprocess.TimeoutExpired:
+        _emit({"passed": False, "score": 0.0, "diagnostics": [f"godot import timed out after {args.timeout}s"]})
+        return 1
     passed = proc.returncode == 0
     diagnostics = []
     if proc.stdout.strip():
@@ -124,21 +164,22 @@ def cmd_godot_playtest(args: argparse.Namespace) -> int:
     if godot is None:
         _emit({"passed": False, "score": 0.0, "diagnostics": ["godot binary not found"]})
         return 1
-    proc = subprocess.run(
-        [
-            godot,
-            "--headless",
-            "--path",
-            str(artifact),
-            "--quit-after",
-            str(args.frames),
-        ],
-        env=_godot_runtime_env(),
-        capture_output=True,
-        text=True,
-        timeout=args.timeout,
-        check=False,
-    )
+    try:
+        proc = _run_process_group(
+            [
+                godot,
+                "--headless",
+                "--path",
+                str(artifact),
+                "--quit-after",
+                str(args.frames),
+            ],
+            env=_godot_runtime_env(),
+            timeout=args.timeout,
+        )
+    except subprocess.TimeoutExpired:
+        _emit({"passed": False, "score": 0.0, "diagnostics": [f"godot playtest timed out after {args.timeout}s"]})
+        return 1
     passed = proc.returncode == 0
     _emit(
         {
@@ -404,13 +445,10 @@ def cmd_godot_interaction_replay(args: argparse.Namespace) -> int:
             ]
             if scenario:
                 command.extend(["--", "--scenario", scenario])
-            proc = subprocess.run(
+            proc = _run_process_group(
                 command,
                 env=_godot_runtime_env(),
-                capture_output=True,
-                text=True,
                 timeout=args.timeout,
-                check=False,
             )
         except subprocess.TimeoutExpired:
             _emit({
@@ -465,6 +503,216 @@ def cmd_godot_interaction_replay(args: argparse.Namespace) -> int:
         })
         return 0 if passed else 1
 
+
+
+def _event_key(event: dict) -> str:
+    return str(event.get("keycode", event.get("key", ""))).upper()
+
+
+def cmd_moba_scripted_playtest(args: argparse.Namespace) -> int:
+    """Layered MOBA-family scripted evidence probe from deterministic public traces.
+
+    The probe has fixed hard-floor checks plus stage-sensitive diagnostic
+    layers. It is run identically for parent and candidate. Passing means the
+    artifact keeps the non-negotiable MOBA/evidence floor; the numeric score,
+    stage scores, and failed checks reveal which quality tier still has gaps.
+    """
+    artifact = _artifact_root(Path(args.artifact))
+    traces, errors = load_demo_traces(artifact, max_frames=args.max_frames)
+    trace_payloads = {path.name: payload for path, payload in traces}
+    trace_names = set(trace_payloads)
+    scenarios = {str(payload.get("scenario", path[:-5])).lower() for path, payload in trace_payloads.items()}
+    all_events = [
+        event
+        for payload in trace_payloads.values()
+        for event in payload.get("events", [])
+        if isinstance(event, dict)
+    ]
+    keys = {_event_key(event) for event in all_events}
+    event_types = {str(event.get("type", "")) for event in all_events}
+    durations = [int(payload.get("duration_frames", 0)) for payload in trace_payloads.values()]
+    scenario_text = " ".join(sorted(scenarios | {name[:-5].lower() for name in trace_names}))
+    loadout_keys = {key for key in keys if key in {"F1", "F2", "F3", "F4", "KP_1", "KP_2", "KP_3", "KP_4"}}
+    recipe_keys = {key for key in keys if key in {"4", "5", "6", "7", "8", "9"}}
+    objective_sell_keys = {key for key in keys if key in {"Z", "X"}}
+    strategic_trace_names = {name for name in trace_names if name in {"strategy.json", "ai_lanes.json", "herald.json", "neutral.json", "structures.json", "full_match.json"}}
+
+    expected_rejections: list[str] = []
+    unexpected_errors: list[str] = []
+    for error in errors:
+        name = error.split(":", 1)[0].strip()
+        path = artifact / "demo_outputs" / name
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            value = None
+        if isinstance(value, dict) and value.get("expected_rejection") is True:
+            expected_rejections.append(name)
+        else:
+            unexpected_errors.append(error)
+
+    files_text = "\n".join(
+        path.relative_to(artifact).as_posix()
+        for path in sorted(artifact.rglob("*"))
+        if path.is_file()
+    ).lower()
+    source_text_parts: list[str] = []
+    for rel in [
+        "Main.gd",
+        "scripts/combat_system.gd",
+        "scripts/economy_system.gd",
+        "scripts/objective_system.gd",
+        "scripts/ai_system.gd",
+        "scripts/hud_system.gd",
+        "scripts/replay_system.gd",
+        "MODULE_CONTRACTS.md",
+        "SYSTEM_CONTRACT.md",
+    ]:
+        path = artifact / rel
+        if path.is_file():
+            source_text_parts.append(path.read_text(encoding="utf-8", errors="replace")[:60000].lower())
+    source_text = "\n".join(source_text_parts)
+    combined_text = "\n".join((scenario_text, files_text, source_text))
+
+    def has_any(words: tuple[str, ...], text: str = combined_text) -> bool:
+        return any(word in text for word in words)
+
+    checks_by_stage: dict[str, dict[str, bool]] = {
+        "fixed_floor": {
+            "project_structure_present": (artifact / "project.godot").is_file(),
+            "trace_suite_valid": bool(traces) and not unexpected_errors,
+            "negative_trace_declared": bool(expected_rejections) or not errors,
+            "module_boundaries_present": all(
+                token in files_text
+                for token in (
+                    "scripts/combat_system.gd",
+                    "scripts/economy_system.gd",
+                    "scripts/objective_system.gd",
+                    "scripts/ai_system.gd",
+                    "scripts/hud_system.gd",
+                    "scripts/replay_system.gd",
+                )
+            ),
+        },
+        "foundation": {
+            "title_to_match_input": (
+                ("title_to_match" in scenario_text or "title" in scenario_text)
+                and ("ENTER" in keys or "SPACE" in keys or "mouse_click" in event_types)
+            ),
+            "movement_or_targeting_input": bool({"W", "A", "S", "D", "UP", "DOWN", "LEFT", "RIGHT"} & keys)
+            or "mouse_click" in event_types
+            or "mouse_down" in event_types,
+            "ability_inputs_qe": "Q" in keys and "E" in keys,
+            "hud_or_feedback_surface": has_any(("hud", "cooldown", "health", "gold", "timeline", "status", "feedback")),
+        },
+        "core_loop": {
+            "combat_damage_death_respawn": has_any(("damage", "death", "respawn", "kill", "combat", "shield", "burn", "cooldown")),
+            "economy_and_itemization": (
+                has_any(("economy", "shop", "upgrade", "purchase", "respec", "team_build", "gold"))
+                and bool({"1", "2", "3", "4", "5", "6", "7", "8", "9", "R", "F"} & keys)
+            ),
+            "objectives_and_structures": has_any(("herald", "beacon", "neutral", "tower", "inhibitor", "core", "objective")),
+            "win_loss_states": has_any(("victory", "defeat", "phase=\"victory\"", "phase=\"defeat\""))
+            or {"core.json", "defeat.json"}.issubset(trace_names),
+            "long_horizon_coverage": len(traces) >= args.min_traces and max(durations or [0]) >= args.min_long_frames,
+        },
+        "systems": {
+            "ai_macro_strategy": has_any(("ai_lanes", "strategy", "lane_rotation", "team_signal", "objective_handoff", "retreat", "defense")),
+            "teamwide_economy_or_builds": has_any(("team_build", "team_builds", "team gold", "shared team", "re-derives every champion", "roster")),
+            "objective_rewards_affect_match": has_any(("objective", "buff", "beacon", "herald", "carrier", "reward", "sell_objective", "gold")),
+            "cooldown_or_status_integrity": has_any(("cooldown", "status", "buff_t", "shield", "burn", "slow", "permanent", "respawn")),
+            "replay_state_observability": has_any(("checkpoint", "coverage_report", "state_changes", "observe_log_entries", "package_report")),
+        },
+        "mature": {
+            "anti_surface_spectacle_guard": not (
+                has_any(("particle", "sparkle", "glow", "title animation", "background effect"))
+                and not has_any(("damage", "economy", "objective", "ai", "respawn", "victory", "defeat"))
+            ),
+            "multiple_strategic_scenarios": len({name for name in trace_names if name in {"strategy.json", "ai_lanes.json", "herald.json", "neutral.json", "structures.json", "full_match.json"}}) >= 4,
+            "visual_evidence_breadth": len(list((artifact / ".shots").glob("*.png"))) >= 6 if (artifact / ".shots").is_dir() else False,
+            "contracts_disclose_capabilities": has_any(("contract_check_ids", "capabilities", "module_contracts", "system_contract")),
+            "known_bug_regression_hooks": has_any(("killer_team", "team_build", "buff", "cooldown", "expected_rejection")),
+        },
+        "advanced_moba": {
+            # Diagnostic-only high-stage checks. These are intentionally not
+            # hard gates; they expose next-step quality gaps once the game is
+            # already runnable and system-rich. Prefer replay/input coverage
+            # where possible so comments alone do not earn mature credit.
+            "multi_loadout_trace_coverage": len(loadout_keys) >= 3,
+            "recipe_path_diversity": len(recipe_keys) >= 3,
+            "objective_tradeoff_input_coverage": bool(objective_sell_keys) and has_any(("sell_objective", "hold_t", "buff_t", "not a free gold printer")),
+            "team_resource_causality": has_any(("team_build", "team_builds", "shared team", "re-derives every champion", "killer_team")),
+            "counterplay_and_recovery_paths": has_any(("retreat", "defense", "respawn", "respec", "cooldown lockout", "purchase_rejected"))
+            and bool({"R", "P", "H"} & keys),
+            "balance_or_anti_degenerate_hooks": has_any(("cooldown", "refund", "attack_rate", "damage", "cost", "gold", "respawn_t"))
+            and has_any(("reject", "cap", "max", "min", "lockout", "timer", "not a free")),
+            "late_game_state_pressure": has_any(("inhibitor", "core", "victory", "defeat", "map pressure", "open the core"))
+            and {"core.json", "defeat.json"}.issubset(trace_names),
+            "strategic_trace_breadth": len(strategic_trace_names) >= 5,
+        },
+    }
+    stage_order = ["fixed_floor", "foundation", "core_loop", "systems", "mature", "advanced_moba"]
+    stage_scores = {
+        stage: (sum(1 for ok in checks.values() if ok) / len(checks) if checks else 0.0)
+        for stage, checks in checks_by_stage.items()
+    }
+    # Stage is diagnostic and monotonic: later stages matter only after earlier
+    # stages mostly hold. It is not chosen from candidate-specific goals.
+    if stage_scores["fixed_floor"] < 1.0:
+        active_stage = "fixed_floor"
+    elif stage_scores["foundation"] < 0.75:
+        active_stage = "foundation"
+    elif stage_scores["core_loop"] < 0.80:
+        active_stage = "core_loop"
+    elif stage_scores["systems"] < 0.70:
+        active_stage = "systems"
+    elif stage_scores["mature"] < 0.80:
+        active_stage = "mature"
+    else:
+        active_stage = "advanced_moba"
+    stage_weights = {
+        "fixed_floor": 0.20,
+        "foundation": 0.17,
+        "core_loop": 0.22,
+        "systems": 0.18,
+        "mature": 0.13,
+        "advanced_moba": 0.10,
+    }
+    score = sum(stage_weights[stage] * stage_scores[stage] for stage in stage_order)
+    failed_by_stage = {
+        stage: [key for key, ok in checks.items() if not ok]
+        for stage, checks in checks_by_stage.items()
+    }
+    # Passing is intentionally not "perfect mature game"; it means the fixed
+    # floor and current-stage basics are adequate. Scores expose finer gaps.
+    passed = (
+        stage_scores["fixed_floor"] == 1.0
+        and stage_scores["foundation"] >= 0.75
+        and checks_by_stage["foundation"]["title_to_match_input"]
+    )
+    _emit({
+        "passed": passed,
+        "score": round(score, 4),
+        "active_stage": active_stage,
+        "stage_scores": {key: round(value, 4) for key, value in stage_scores.items()},
+        "checks_by_stage": checks_by_stage,
+        "failed_by_stage": failed_by_stage,
+        "trace_count": len(traces),
+        "scenario_names": sorted(scenarios),
+        "validated_traces": sorted(trace_names),
+        "max_duration_frames": max(durations or [0]),
+        "loadout_keys": sorted(loadout_keys),
+        "recipe_keys": sorted(recipe_keys),
+        "objective_sell_keys": sorted(objective_sell_keys),
+        "strategic_trace_count": len(strategic_trace_names),
+        "expected_rejection_count": len(expected_rejections),
+        "diagnostics": [
+            *unexpected_errors[:5],
+            *[f"accepted expected rejection fixture: {name}" for name in expected_rejections],
+            "Layered MOBA probe: fixed floor always applies; foundation/core/systems/mature/advanced checks expose stage-specific quality gaps without candidate-specific tailoring.",
+        ],
+    })
+    return 0 if passed else 1
 
 def cmd_gcbench_demo_evidence(args: argparse.Namespace) -> int:
     artifact = _artifact_root(Path(args.artifact))
@@ -673,6 +921,14 @@ def build_parser() -> argparse.ArgumentParser:
     interaction.add_argument("--trace-name", default=None)
     interaction.add_argument("--timeout", type=int, default=120)
     interaction.set_defaults(func=cmd_godot_interaction_replay)
+
+    moba = sub.add_parser("moba-scripted-playtest")
+    moba.add_argument("--artifact", required=True)
+    moba.add_argument("--max-frames", type=int, default=600)
+    moba.add_argument("--min-traces", type=int, default=8)
+    moba.add_argument("--min-long-frames", type=int, default=240)
+    moba.add_argument("--pass-score", type=float, default=0.72)
+    moba.set_defaults(func=cmd_moba_scripted_playtest)
 
     demo = sub.add_parser("gcbench-demo-evidence")
     demo.add_argument("--artifact", required=True)

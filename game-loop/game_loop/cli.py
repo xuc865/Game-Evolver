@@ -2196,7 +2196,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     if args.json_output:
         print(json.dumps({"ready": ready, "checks": checks}, indent=2))
     else:
-        print("Game Loop 0.3.0 doctor")
+        print("Game Loop 0.7.0 doctor")
         for name, available in checks.items():
             suffix = "ready" if available else "missing"
             print(f"  {'OK' if available else '--'}  {name}: {suffix}")

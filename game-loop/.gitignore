@@ -1,0 +1,35 @@
+.DS_Store
+
+# Python/runtime caches
+__pycache__/
+*.py[cod]
+.venv/
+.venvs/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.cache/
+.tmp/
+.smoke/
+*.egg-info/
+
+# Build and distribution outputs
+build/
+dist/
+dist-*/
+
+# Long-running harness output and provider state
+.baseline-agent-runs/
+.game-loop-ui-runs/
+screenlog.*
+*.log
+**/trajectory.jsonl
+**/session.jsonl.zstd
+**/.dsh/
+**/.qwen/
+**/.godot/
+
+# Local experiment artifacts. Keep tracked experiment configs/source explicit.
+experiments/complex-game-multiagent-v030/
+experiments/open-source-games/
+experiments/studio-projects/

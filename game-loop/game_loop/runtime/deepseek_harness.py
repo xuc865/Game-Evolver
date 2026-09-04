@@ -32,20 +32,36 @@ _FINALIZATION_PROMPT = (
     "The runtime soft deadline has been reached. Stop all implementation, inspection, "
     "and verification now. Do not call any tool for a summary. If the required artifact "
     "has not yet received a meaningful implementation change, make exactly one immediate "
-    "write/edit to the smallest launchable production baseline before ending; do not "
+    "write/edit that improves the existing production artifact before ending; preserve "
+    "working seed code and do not replace it with a new scaffold. Do not "
     "continue exploration. Otherwise briefly summarize the artifact already written, "
     "any verification already completed, and any known limitations, then end this turn."
 )
-
 
 def _finalization_prompt(
     cwd: Path,
     *,
     session_restarted: bool,
     artifact_relpath: str | None = None,
+    artifact_changed: bool | None = None,
 ) -> str:
+    progress = ""
+    if artifact_changed is False:
+        progress = (
+            "\n\nRuntime content comparison: UNCHANGED since this episode started. "
+            "The required artifact has not changed from the supplied seed. Existing "
+            "files and successful inspection are not implementation by this episode. "
+            "Use the remaining write opportunity for one concrete production fix; "
+            "if you cannot finish it, report no improvement rather than claiming delivery."
+        )
+    elif artifact_changed is True:
+        progress = (
+            "\n\nRuntime content comparison: CHANGED since this episode started. "
+            "This confirms a content difference only, not correctness or passed checks. "
+            "Report only implementation and verification supported by available evidence."
+        )
     if not session_restarted:
-        return _FINALIZATION_PROMPT + (
+        return _FINALIZATION_PROMPT + progress + (
             f" The required artifact path is `{artifact_relpath}`."
             if artifact_relpath
             else ""
@@ -60,7 +76,7 @@ def _finalization_prompt(
     if len(files) > 200:
         inventory += f"\n- ... {len(files) - 200} additional files"
     return (
-        _FINALIZATION_PROMPT
+        _FINALIZATION_PROMPT + progress
         + (
             f" The required artifact path is `{artifact_relpath}`."
             if artifact_relpath
@@ -70,8 +86,9 @@ def _finalization_prompt(
         "have its transcript. Do not interpret missing conversation history as a missing "
         "artifact. The runtime directly inspected the shared workspace and found "
         f"{len(files)} artifact files:\n{inventory}\n"
-        "Base the summary on this concrete inventory. Do not claim that no artifact was "
-        "written when files are listed above."
+        "This inventory proves file existence only: it includes the supplied seed and "
+        "does not prove this episode wrote or improved those files. Do not infer "
+        "completed implementation or verification from the inventory alone."
     )
 
 
@@ -499,6 +516,11 @@ class PythonSDKRunner:
                             cwd,
                             session_restarted=finalization_restarted,
                             artifact_relpath=config.artifact_relpath,
+                            artifact_changed=(
+                                None if config.artifact_relpath is None else
+                                _artifact_digest(_workspace_artifact(cwd, config.artifact_relpath))
+                                != initial_artifact_digest
+                            ),
                         )
                     )
                 except BaseException as exc:  # noqa: BLE001 - cross-thread transport outcome.

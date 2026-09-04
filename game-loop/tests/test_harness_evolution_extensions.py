@@ -45,6 +45,7 @@ from scripts.evaluate_v030_dynamic_fork_pair import (
     _background_child_id,
     _background_report_child_id,
     _default_task_identity,
+    _evolution_admission,
     _fork_usage_from_events,
     _finalization_reserve_seconds,
     _normalized_seed_project_root,
@@ -56,6 +57,30 @@ from scripts.evaluate_v030_dynamic_fork_pair import (
 )
 from game_loop.runtime.protocol import GameSubmission
 from scripts.run_v030_complex_10_epochs import _epoch_provider_salt
+
+
+class OptionalForkAdmissionTests(unittest.TestCase):
+    def test_improving_candidate_can_be_accepted_without_fork_evidence(self):
+        admission = _evolution_admission(
+            infrastructure_ok=True, rubric_accepted=True,
+            quality_delta=0.1, net_utility=0.0,
+        )
+        self.assertTrue(admission["accepted"])
+        self.assertFalse(admission["fork_required"])
+
+    def test_other_admission_gates_remain_required(self):
+        valid = dict(infrastructure_ok=True, rubric_accepted=True,
+                     quality_delta=0.1, net_utility=0.05)
+        for failure in [
+            {"infrastructure_ok": False}, {"rubric_accepted": False},
+            {"quality_delta": 0.0}, {"quality_delta": -0.1},
+            {"net_utility": -0.01}, {"quality_delta": float("nan")},
+            {"net_utility": float("nan")},
+        ]:
+            with self.subTest(failure=failure):
+                admission = _evolution_admission(**{**valid, **failure})
+                self.assertFalse(admission["accepted"])
+                self.assertTrue(admission["reasons"])
 
 
 class DynamicForkTaskIdentityTests(unittest.TestCase):
@@ -194,9 +219,10 @@ class DynamicRubricGeneratorTests(unittest.TestCase):
             soft_ids = {item.rubric_id for item in rubric.soft_rubrics}
             self.assertEqual(soft_ids, {
                 "public_feature_completion",
-                "core_gameplay_depth",
+                "critical_bug_repair_and_stability",
+                "deep_mechanic_causality",
+                "long_horizon_play_progression",
                 "interaction_correctness",
-                "progression_and_end_state",
                 "playability_and_balance",
                 "runtime_feedback_quality",
                 "demo_coverage",
@@ -2437,6 +2463,8 @@ class DynamicForkEvidenceTests(unittest.TestCase):
         self.assertIn("bounded_worker", evidence)
         self.assertIn("non-adoption evidence", evidence)
         self.assertIn("Never force or quota fork calls", evidence)
+        self.assertIn("Fork is optional for formal acceptance", evidence)
+        self.assertIn("zero invocation alone is neither an admission failure", evidence)
 
     def test_root_contract_visibility_matches_hpa_prototype_tools(self):
         prototypes = [{"id": "bounded_worker", "persona": "bounded"}]

@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from game_loop.cache_keys import build_cache_key_headers
+from game_loop.runtime.context_compaction import compact_messages_for_api
 from game_loop.runtime.credentials import provider_api_keys, provider_key_start_index
 
 _BASE_SYSTEM_PROMPT = """\
@@ -626,23 +627,32 @@ class LocalChatAgent:
 
     @classmethod
     def _bounded_messages_for_api(cls, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Return a provider-sized replay window while preserving valid tool pairs.
+        """Return a provider-sized replay window with mandatory preflight compaction.
 
         Smaller OpenAI-compatible deployments can become unstable when every
         prior tool call and tool result is replayed for dozens of turns.  The
-        workspace is the source of truth for files already written, so Qwen-like
-        profiles can opt into a bounded recent history without changing the
-        executed tools or verifier contract.
+        workspace is the source of truth for files already written, so the API
+        replay can clear stale tool payloads and fold older middle history
+        without changing executed tools or verifier logs.
         """
 
         max_history = cls._env_int("GAME_LOOP_CHAT_MAX_HISTORY_MESSAGES", 0)
-        if max_history <= 0 or len(messages) <= 2 + max_history:
-            return messages
-        head = messages[:2]
-        tail = messages[2:][-max_history:]
-        while tail and tail[0].get("role") == "tool":
-            tail = tail[1:]
-        return [*head, *tail]
+        compacted, stats = compact_messages_for_api(
+            messages,
+            max_history_messages=max_history,
+        )
+        if stats.chars_saved > 0:
+            print(
+                "[chat_agent] context compaction "
+                f"messages={stats.messages_before}->{stats.messages_after} "
+                f"chars={stats.chars_before}->{stats.chars_after} "
+                f"saved={stats.chars_saved} "
+                f"tools_folded={stats.tool_results_folded} "
+                f"tools_pruned={stats.tool_results_pruned} "
+                f"messages_folded={stats.messages_folded}",
+                file=sys.stderr,
+            )
+        return compacted
 
     def _execute_tool(
         self,

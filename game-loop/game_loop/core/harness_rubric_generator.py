@@ -209,34 +209,47 @@ def _build_soft_rubrics(
                 f"instruction, including {mechanics}; nominal files, labels, or planned features "
                 "without executable behavior receive no credit."
             ),
-            weight=0.25,
+            weight=0.14,
         ),
         HarnessRubricCriterion(
-            "core_gameplay_depth",
+            "critical_bug_repair_and_stability",
             "soft",
             (
-                "The core game loop has meaningful state transitions, consequences, and enough "
-                f"mechanical depth to sustain play in this {family} task."
+                "Important bug fixes, crash repairs, stalled-state fixes, input/state-sync fixes, "
+                "and validation-chain repairs count as real quality improvement when evidence shows "
+                "the defect is gone and existing working behavior is preserved."
+            ),
+            weight=0.18,
+        ),
+        HarnessRubricCriterion(
+            "deep_mechanic_causality",
+            "soft",
+            (
+                "Reward deep gameplay mechanisms whose effects propagate across systems over time: "
+                "combat, economy, objectives, AI decisions, map pressure, progression, and win/loss "
+                "conditions should causally affect one another rather than only adding surface UI, "
+                "particles, labels, or first-screen effects."
             ),
             weight=0.20,
+        ),
+        HarnessRubricCriterion(
+            "long_horizon_play_progression",
+            "soft",
+            (
+                "Runtime evidence should show meaningful changes beyond the initial screen or first "
+                "few seconds: laning, fights, spending, objectives, deaths/respawns, map pressure, "
+                "and reachable victory/defeat through actual play."
+            ),
+            weight=0.16,
         ),
         HarnessRubricCriterion(
             "interaction_correctness",
             "soft",
             (
                 "Real player inputs trigger correct, deterministic gameplay responses, and the "
-                "runtime evidence shows those responses rather than only a launch or title screen."
+                "runtime evidence shows those responses rather than only a launch, title screen, or cosmetic animation."
             ),
-            weight=0.15,
-        ),
-        HarnessRubricCriterion(
-            "progression_and_end_state",
-            "soft",
-            (
-                "The game supports coherent progression and reaches task-appropriate success, "
-                "failure, result, or completion states through actual play."
-            ),
-            weight=0.15,
+            weight=0.12,
         ),
         HarnessRubricCriterion(
             "playability_and_balance",
@@ -252,9 +265,10 @@ def _build_soft_rubrics(
             "soft",
             (
                 "Runtime presentation clearly communicates actions, state changes, hazards, "
-                "progress, and outcomes through readable visual or textual feedback."
+                "progress, and outcomes. Visual polish helps only when it clarifies real gameplay state; "
+                "decorative clutter without mechanical value should receive little credit."
             ),
-            weight=0.10,
+            weight=0.06,
         ),
         HarnessRubricCriterion(
             "demo_coverage",
@@ -263,7 +277,7 @@ def _build_soft_rubrics(
                 "Completed deterministic replay evidence covers the core loop and important "
                 "states; demo JSON or nominal scenarios without successful replay receive no credit."
             ),
-            weight=0.05,
+            weight=0.04,
         ),
     ]
     del harness_focus, loop_role

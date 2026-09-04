@@ -144,10 +144,14 @@ def _episode_config_dict(
                 if element.category == "subagent"
             ]
             active_cordis_plugins = {
+                str(plugin_id)
+                for plugin_id in runtime_profile.get("active_cordis_plugins", [])
+            }
+            active_cordis_plugins.update({
                 str(element.spec.get("plugin_id", element.element_id))
                 for element in active_profile.active_elements
                 if element.category == "dsh_plugin"
-            }
+            })
             if active_subagent_prototypes:
                 active_cordis_plugins.add("fork_context_subagent")
             runtime_profile["active_cordis_plugins"] = sorted(

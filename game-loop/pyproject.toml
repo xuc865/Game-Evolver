@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "game-loop"
-version = "0.3.0"
+version = "0.7.0"
 description = "Self-evolving multi-agent studio for building and improving games"
 readme = "README.md"
 requires-python = ">=3.11"

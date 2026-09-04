@@ -153,7 +153,10 @@ def run(args: argparse.Namespace) -> dict:
                 state_path.write_text(json.dumps(state, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
                 continue
 
-            if mode == "continuation" and pair.get("accepted") is True:
+            artifact_promoted = bool(
+                pair.get("artifact_promoted", pair.get("accepted") is True)
+            )
+            if mode == "continuation" and artifact_promoted:
                 candidate_ref = pair.get("candidate", {}).get("artifact_ref")
                 if candidate_ref and Path(str(candidate_ref)).is_dir():
                     current_seed = Path(str(candidate_ref)).resolve()
@@ -182,6 +185,9 @@ def run(args: argparse.Namespace) -> dict:
                 "pair": str((pair_dir / "paired-proof.json").resolve()),
                 "status": "ACCEPT" if pair.get("accepted") is True else "REJECT",
                 "accepted": pair.get("accepted"),
+                "harness_accepted": pair.get("harness_accepted", pair.get("accepted")),
+                "artifact_promoted": artifact_promoted,
+                "artifact_promotion": pair.get("artifact_promotion"),
                 "hpa_status": hpa_status,
                 "parent_baseline": pair.get("parent_baseline"),
                 "fork_usage": pair.get("fork_usage"),

@@ -217,7 +217,21 @@ class DeepSeekHarnessRuntimeTests(unittest.TestCase):
             self.assertIn("2 artifact files", prompt)
             self.assertIn("project.godot", prompt)
             self.assertIn("scripts/Main.gd", prompt)
-            self.assertIn("Do not claim that no artifact was written", prompt)
+            self.assertIn("includes the supplied seed", prompt)
+            self.assertIn("does not prove this episode wrote or improved", prompt)
+
+    def test_finalizer_distinguishes_unchanged_seed_from_actual_changes(self):
+        for changed, marker in [(False, "UNCHANGED"), (True, "CHANGED")]:
+            with self.subTest(changed=changed):
+                prompt = _finalization_prompt(
+                    Path("/tmp/episode"), session_restarted=False,
+                    artifact_relpath="game", artifact_changed=changed,
+                )
+                self.assertIn(f"Runtime content comparison: {marker}", prompt)
+                if not changed:
+                    self.assertIn("not changed from the supplied seed", prompt)
+                else:
+                    self.assertIn("not correctness or passed checks", prompt)
 
     def test_max_token_recovery_requires_immediate_workspace_edits(self):
         with tempfile.TemporaryDirectory() as td:
@@ -240,12 +254,16 @@ class DeepSeekHarnessRuntimeTests(unittest.TestCase):
                 "runtime_type": "deepseek-harness",
                 "cordis": str(cordis),
                 "cordis_plugin_catalog": {
+                    "context_efficiency_guards": [{
+                        "id": "evolved-compaction-result-pruner",
+                        "name": "@deepseek-ai/dsh-compaction-tool-result-pruner",
+                    }],
                     "search": [{
                         "id": "evolved-search",
                         "name": "@deepseek-ai/dsh-tool-fs-search",
                     }],
                 },
-                "active_cordis_plugins": [],
+                "active_cordis_plugins": ["context_efficiency_guards"],
             }))
             source = (
                 Path(__file__).resolve().parents[1]
@@ -274,7 +292,7 @@ class DeepSeekHarnessRuntimeTests(unittest.TestCase):
             payload = _episode_config_dict(config, harness=harness)
             self.assertEqual(
                 payload["backend"]["runtime_profile_value"]["active_cordis_plugins"],
-                ["search"],
+                ["context_efficiency_guards", "search"],
             )
             self.assertEqual(
                 payload["backend"]["runtime_profile_value"]["agent_circuit"][
@@ -1302,6 +1320,7 @@ class DeepSeekHarnessRuntimeTests(unittest.TestCase):
 
     def test_python_sdk_runner_restarts_finalization_when_cancel_is_blocked(self):
         instances = []
+        prompts = []
 
         class Result:
             finish_reason = "completed"
@@ -1317,6 +1336,7 @@ class DeepSeekHarnessRuntimeTests(unittest.TestCase):
                 self.owner = owner
 
             def run(self, prompt, on_notification=None):
+                prompts.append(prompt)
                 if self.owner.index == 0:
                     if on_notification is not None:
                         on_notification({
@@ -1362,6 +1382,7 @@ class DeepSeekHarnessRuntimeTests(unittest.TestCase):
             sys.modules, {"deepseek_harness": fake_module}
         ):
             root = Path(td)
+            (root / "game.txt").write_text("pre-existing seed game\n")
             result = PythonSDKRunner().run(
                 "build",
                 cwd=root,
@@ -1371,6 +1392,7 @@ class DeepSeekHarnessRuntimeTests(unittest.TestCase):
                     timeout_seconds=3,
                     finalization_reserve_seconds=2,
                     finalization_cancel_grace_seconds=0.1,
+                    artifact_relpath="game.txt",
                 ),
                 environment={},
             )
@@ -1378,6 +1400,7 @@ class DeepSeekHarnessRuntimeTests(unittest.TestCase):
         self.assertEqual(len(instances), 2)
         self.assertEqual(result.finish_reason, "completed")
         self.assertTrue(result.finalization_restarted)
+        self.assertIn("Runtime content comparison: UNCHANGED", prompts[1])
         self.assertEqual(result.model_calls, 2)
         usage = _collect_usage(result.events, result.notifications)
         self.assertEqual(usage, {"inputTokens": 9, "outputTokens": 1})

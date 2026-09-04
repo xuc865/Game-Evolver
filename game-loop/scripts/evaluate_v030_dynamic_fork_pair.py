@@ -84,6 +84,52 @@ def _fork_cost_penalty(call_cost: float, time_cost: float) -> float:
     return min(0.35, 0.25 * max(0.0, call_cost) + 0.10 * max(0.0, time_cost))
 
 
+def _artifact_promotion_admission(
+    *, infrastructure_ok: bool, rubric_accepted: bool, quality_delta: float,
+) -> dict[str, object]:
+    """Decide whether the produced game artifact should seed continuation.
+
+    Continuation artifact promotion is intentionally quality-only: if the
+    candidate is valid and improves the delivered game, inherit it even when the
+    agent/harness was slow or expensive. Cost belongs to harness/GOA admission.
+    """
+    reasons = []
+    if infrastructure_ok is not True:
+        reasons.append("pair infrastructure failure")
+    if rubric_accepted is not True:
+        reasons.append("paired rubric validation failed")
+    if not quality_delta > 0:
+        reasons.append("candidate quality did not improve")
+    return {
+        "policy": "continuation-artifact-quality-v1",
+        "promoted": not reasons,
+        "cost_ignored": True,
+        "reasons": reasons,
+    }
+
+
+def _evolution_admission(
+    *, infrastructure_ok: bool, rubric_accepted: bool,
+    quality_delta: float, net_utility: float,
+) -> dict[str, object]:
+    """Decide whether the candidate harness/GOA proposal should be accepted."""
+    reasons = []
+    if infrastructure_ok is not True:
+        reasons.append("pair infrastructure failure")
+    if rubric_accepted is not True:
+        reasons.append("paired rubric validation failed")
+    if not quality_delta > 0:
+        reasons.append("candidate quality did not improve")
+    if not net_utility >= 0:
+        reasons.append("candidate net utility is negative or invalid")
+    return {
+        "policy": "optional-fork-harness-net-utility-v2",
+        "fork_required": False,
+        "accepted": not reasons,
+        "reasons": reasons,
+    }
+
+
 def _trajectory_wall_seconds(*paths: Path) -> float:
     """Recover observed episode duration from persisted trajectory timestamps."""
 
@@ -321,8 +367,12 @@ def _normalized_seed_project_root(seed: Path) -> Path:
         source / "game" / "project.godot"
     ).is_file():
         source = source / "game"
-    if not (source / "project.godot").is_file():
-        raise ValueError(f"seed does not contain a Godot project root: {source}")
+    if not (
+        (source / "project.godot").is_file()
+        or (source / "package.json").is_file()
+        or (source / "index.html").is_file()
+    ):
+        raise ValueError(f"seed does not contain a supported game project root: {source}")
     return source
 
 
@@ -339,12 +389,13 @@ def _prepare_task_seed(
     # is at ``game/project.godot``. The task contract already supplies the
     # ``game/`` boundary, so unwrap that one level before staging.
     shutil.copytree(source, staged / "game")
-    godot = ensure_godot_env()
-    stage_local_runtime_overlay(
-        overlay_workspace=staged,
-        gcbench_root=gcbench_root,
-        godot_bin=godot,
-    )
+    if (source / "project.godot").is_file():
+        godot = ensure_godot_env()
+        stage_local_runtime_overlay(
+            overlay_workspace=staged,
+            gcbench_root=gcbench_root,
+            godot_bin=godot,
+        )
     return staged
 
 
@@ -872,12 +923,20 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         seed=args.seed,
         gcbench_root=args.gcbench_root,
     )
-    runtime_block = render_runtime_instruction_block({
-        "godot_bin": ensure_godot_env(),
-        "game_dir": "game",
-        "tools_dir": "tools",
-        "runtime_note": str(staged_seed / "RUNTIME_PATHS.md"),
-    })
+    runtime_block = ""
+    if (staged_seed / "game" / "project.godot").is_file():
+        runtime_block = render_runtime_instruction_block({
+            "godot_bin": ensure_godot_env(),
+            "game_dir": "game",
+            "tools_dir": "tools",
+            "runtime_note": str(staged_seed / "RUNTIME_PATHS.md"),
+        })
+    else:
+        runtime_block = (
+            "\n\nRuntime note: this is a browser game. Serve the `game/` directory "
+            "with a local HTTP server, run its package build when available, and "
+            "capture real browser gameplay evidence before finalizing.\n"
+        )
     task_identity = _default_task_identity(args.task_file)
     task_id = args.task_id or f"dynamic-fork-{task_identity}"
     case_id = args.case_id or f"dynamic-fork-{task_identity}"
@@ -1065,15 +1124,28 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         fork_admission_reasons.append(
             "root received no complete child handoff with artifact evidence"
         )
-    # A fork is only a successful evolution when it improves the delivered
-    # artifact. Lower inference cost alone is not evidence that delegation
-    # contributed; retain the quality gate even when the candidate is cheaper.
-    accepted = not fork_admission_reasons and validation.accepted and (
-        quality_delta > 0 and net_utility >= 0
+    artifact_promotion = _artifact_promotion_admission(
+        infrastructure_ok=validation.infrastructure_ok,
+        rubric_accepted=validation.accepted,
+        quality_delta=quality_delta,
+    )
+    # Delegation is optional. Its audit measures attribution. Harness/GOA
+    # acceptance includes marginal runtime/call cost; artifact continuation does
+    # not. A slow but better game can be inherited while the harness proposal is
+    # rejected for negative net utility.
+    admission = _evolution_admission(
+        infrastructure_ok=validation.infrastructure_ok,
+        rubric_accepted=validation.accepted,
+        quality_delta=quality_delta,
+        net_utility=net_utility,
     )
     payload = {
         "schema": "v030-dynamic-fork-paired-proof.v1",
-        "accepted": accepted,
+        "accepted": admission["accepted"],
+        "harness_accepted": admission["accepted"],
+        "artifact_promoted": artifact_promotion["promoted"],
+        "admission": admission,
+        "artifact_promotion": artifact_promotion,
         "infrastructure_ok": validation.infrastructure_ok,
         "source_hpa_proof": str(args.hpa_proof.resolve()),
         "prototypes": prototypes,
@@ -1082,6 +1154,8 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         "fork_usage": fork_usage,
         "root_contract_visibility": root_contract_visibility,
         "fork_admission": {
+            "required_for_acceptance": False,
+            "purpose": "delegation_attribution_only",
             "accepted": not fork_admission_reasons,
             "reasons": fork_admission_reasons,
         },

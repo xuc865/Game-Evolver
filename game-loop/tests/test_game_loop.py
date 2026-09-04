@@ -2891,6 +2891,90 @@ class GameLoopTests(unittest.TestCase):
         self.assertNotEqual(bounded[2]["role"], "tool")
         self.assertEqual([m["role"] for m in bounded], ["system", "user", "assistant", "user"])
 
+    def test_context_compaction_leaves_small_payload_unchanged(self):
+        from game_loop.runtime.context_compaction import compact_messages_for_api
+
+        messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "build a game"},
+            {"role": "assistant", "content": "working"},
+        ]
+
+        compacted, stats = compact_messages_for_api(messages)
+
+        self.assertEqual(compacted, messages)
+        self.assertEqual(stats.chars_saved, 0)
+        self.assertEqual(stats.tool_results_folded, 0)
+
+    def test_context_compaction_clears_old_tool_results_after_trigger(self):
+        from game_loop.runtime.context_compaction import compact_messages_for_api
+
+        payload = "x" * 70_000
+        messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "build"},
+        ]
+        for index in range(12):
+            messages.append({
+                "role": "assistant",
+                "tool_calls": [{
+                    "id": f"call-{index}",
+                    "type": "function",
+                    "function": {"name": "run_command", "arguments": "{}"},
+                }],
+            })
+            messages.append({
+                "role": "tool",
+                "tool_call_id": f"call-{index}",
+                "content": payload,
+            })
+
+        compacted, stats = compact_messages_for_api(messages)
+        tool_messages = [message for message in compacted if message["role"] == "tool"]
+
+        self.assertGreater(stats.tool_results_folded, 0)
+        self.assertIn("old tool result cleared", tool_messages[0]["content"])
+        self.assertEqual([message["content"] for message in tool_messages[-8:]], [payload] * 8)
+
+    def test_context_compaction_trims_recent_oversize_tool_result(self):
+        from game_loop.runtime.context_compaction import compact_messages_for_api
+
+        payload = "a" * 140_000
+        messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "build"},
+            {"role": "assistant", "tool_calls": [{
+                "id": "call-1",
+                "type": "function",
+                "function": {"name": "run_command", "arguments": "{}"},
+            }]},
+            {"role": "tool", "tool_call_id": "call-1", "content": payload},
+        ]
+
+        compacted, stats = compact_messages_for_api(messages)
+
+        self.assertEqual(stats.tool_results_pruned, 1)
+        self.assertLessEqual(len(compacted[-1]["content"]), 96_000)
+        self.assertIn("recent tool result compacted", compacted[-1]["content"])
+
+    def test_context_compaction_folds_middle_history_near_window(self):
+        from game_loop.runtime.context_compaction import compact_messages_for_api
+
+        messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "build"},
+        ]
+        for index in range(40):
+            messages.append({"role": "assistant", "content": f"step {index} " + ("x" * 24_000)})
+            messages.append({"role": "user", "content": f"continue {index}"})
+
+        compacted, stats = compact_messages_for_api(messages)
+
+        self.assertGreater(stats.messages_folded, 0)
+        self.assertEqual(compacted[:2], messages[:2])
+        self.assertIn("conversation middle folded", compacted[2]["content"])
+        self.assertEqual(compacted[-24:], messages[-24:])
+
     def test_chat_agent_continues_after_required_demo_delivery(self):
         from game_loop.chat_agent import LocalChatAgent
 

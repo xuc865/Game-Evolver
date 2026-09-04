@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import signal
@@ -33,10 +34,10 @@ _NON_MATERIAL_NAMES = {
 def _material_change(seed: Path, artifact: Path) -> dict:
     """Conservative inheritance gate: require a changed implementation/asset file."""
 
-    ignored_parts = {".git", ".godot", "node_modules", "dist", "build", "__pycache__"}
+    ignored_parts = {".git", ".godot", "node_modules", "dist", "build", "__pycache__", ".pytest_cache", ".qwen", ".dsh", ".agents", "screenshots"}
 
-    def inventory(root: Path) -> dict[str, tuple[int, int]]:
-        result: dict[str, tuple[int, int]] = {}
+    def inventory(root: Path) -> dict[str, str]:
+        result: dict[str, str] = {}
         if not root.is_dir():
             return result
         for path in root.rglob("*"):
@@ -46,10 +47,10 @@ def _material_change(seed: Path, artifact: Path) -> dict:
             if any(part in ignored_parts for part in relative.parts):
                 continue
             try:
-                stat = path.stat()
+                digest = hashlib.sha256(path.read_bytes()).hexdigest()
             except OSError:
                 continue
-            result[relative.as_posix()] = (stat.st_size, int(stat.st_mtime_ns))
+            result[relative.as_posix()] = digest
         return result
 
     before = inventory(seed)
@@ -187,16 +188,20 @@ def _run_paired_evaluator(
         "candidate": str(candidate.resolve()),
         "episode": str(episode.resolve()),
     }
-    command = [str(part).format_map(context) for part in profile["command"]]
     output = episode / "paired-evaluation"
     output.mkdir(parents=True, exist_ok=True)
-    completed = subprocess.run(
-        command,
-        cwd=Path(str(profile.get("cwd", ROOT))).resolve(),
-        env={**environment, **{str(k): str(v) for k, v in profile.get("environment", {}).items()}},
-        timeout=int(profile.get("timeout_seconds", 900)),
-        check=False,
-    )
+    context["output"] = str(output.resolve())
+    command = [str(part).format_map(context) for part in profile["command"]]
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=Path(str(profile.get("cwd", ROOT))).resolve(),
+            env={**environment, **{str(k): str(v) for k, v in profile.get("environment", {}).items()}},
+            timeout=int(profile.get("timeout_seconds", 900)),
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"infrastructure_ok": False, "passed": False, "error": str(exc)}
     if completed.returncode != 0:
         return {"infrastructure_ok": False, "passed": False, "error": f"evaluator exit {completed.returncode}"}
     result_path = Path(str(profile["result_path"]).format_map({**context, "output": str(output)}))
