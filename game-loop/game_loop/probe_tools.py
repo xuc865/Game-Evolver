@@ -14,6 +14,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
+import urllib.request
+import urllib.parse
 from pathlib import Path
 
 
@@ -176,6 +179,238 @@ def _run_npm_script(
         timeout=timeout,
         check=False,
     )
+
+
+def _browser_game_profile(artifact: Path) -> str | None:
+    """Recognize the supported browser-game families without requiring npm."""
+    if (artifact / "polybranch.pjs").is_file():
+        return "processing"
+    if (artifact / "js" / "vendor" / "three.min.js").is_file():
+        return "three-fps"
+    if (artifact / "src" / "main.js").is_file() and (artifact / "game.js").is_file():
+        return "canvas-survivors"
+    if (artifact / "server.js").is_file() and (artifact / "public").is_dir():
+        return "node-pwa"
+    if (artifact / "index.html").is_file():
+        return "static-browser"
+    return None
+
+
+def _browser_entrypoint(artifact: Path) -> Path | None:
+    for name in ("index.html", "public/index.html"):
+        path = artifact / name
+        if path.is_file():
+            return path
+    return next(iter(sorted(artifact.rglob("index.html"))), None)
+
+
+def _free_local_port() -> int:
+    import socket
+
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def _cdp_call(ws, counter: list[int], method: str, params: dict | None = None) -> dict:
+    import json as _json
+
+    counter[0] += 1
+    ws.send(_json.dumps({"id": counter[0], "method": method, "params": params or {}}))
+    deadline = time.time() + 15
+    while time.time() < deadline:
+        message = _json.loads(ws.recv())
+        if message.get("id") == counter[0]:
+            return message
+    raise TimeoutError(f"CDP timeout: {method}")
+
+
+def cmd_browser_game_deep_probe(args: argparse.Namespace) -> int:
+    """Run a bounded, engine-agnostic browser gameplay probe via Chrome CDP."""
+    artifact = Path(args.artifact).expanduser().resolve()
+    profile = args.profile or _browser_game_profile(artifact)
+    entrypoint = _browser_entrypoint(artifact)
+    if profile is None or entrypoint is None:
+        _emit({"passed": False, "score": 0.0, "infrastructure_error": False,
+               "diagnostics": ["unsupported browser game: index.html/profile missing"]})
+        return 1
+    chrome = next(
+        (candidate for candidate in (
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        ) if Path(candidate).is_file()),
+        shutil.which("google-chrome") or shutil.which("chromium"),
+    )
+    if not chrome:
+        _emit({"passed": None, "score": None, "infrastructure_error": True,
+               "diagnostics": ["Chrome/Chromium executable not found"]})
+        return 2
+    port = _free_local_port()
+    server_port = _free_local_port()
+    server = None
+    temp_root = Path(tempfile.mkdtemp(prefix="game-loop-browser-probe-"))
+    try:
+        server = subprocess.Popen(
+            [sys.executable, "-m", "http.server", str(server_port), "--bind", "127.0.0.1"],
+            cwd=artifact,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        browser = subprocess.Popen(
+            [chrome, "--headless=new", "--no-sandbox", "--disable-gpu",
+             "--enable-unsafe-swiftshader", "--hide-scrollbars",
+             "--remote-allow-origins=*",
+             "--window-size=1280,800", f"--remote-debugging-port={port}",
+             f"--user-data-dir={temp_root}"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        version_url = f"http://127.0.0.1:{port}/json/version"
+        deadline = time.time() + args.timeout
+        while time.time() < deadline:
+            try:
+                version = json.loads(urllib.request.urlopen(version_url, timeout=1).read())
+                break
+            except Exception:
+                time.sleep(0.1)
+        else:
+            _emit({"passed": False, "score": 0.0, "infrastructure_error": True,
+                   "diagnostics": ["Chrome CDP endpoint did not start"]})
+            return 2
+        import websocket
+
+        target_url = "http://127.0.0.1:" + str(server_port) + "/" + entrypoint.relative_to(artifact).as_posix()
+        page_request = urllib.request.Request(
+            f"http://127.0.0.1:{port}/json/new?{urllib.parse.quote(target_url)}",
+            method="PUT",
+        )
+        page = json.loads(urllib.request.urlopen(page_request, timeout=5).read())
+        ws = websocket.create_connection(page["webSocketDebuggerUrl"], timeout=15)
+        counter = [0]
+        _cdp_call(ws, counter, "Page.enable")
+        _cdp_call(ws, counter, "Runtime.enable")
+        _cdp_call(ws, counter, "Page.navigate", {"url": page["url"]})
+        time.sleep(3.0)
+        state = _cdp_call(ws, counter, "Runtime.evaluate", {
+            "expression": """(() => {
+              const canvases = [...document.querySelectorAll('canvas')];
+              const visible = [...document.querySelectorAll('body *')].filter(e => {
+                const r=e.getBoundingClientRect(); return r.width>0 && r.height>0;
+              }).length;
+              return {ready: document.readyState, title: document.title,
+                canvasCount: canvases.length, visible, bodyText: document.body.innerText.slice(0,800),
+                width: innerWidth, height: innerHeight};
+            })()""",
+            "returnByValue": True,
+        })["result"]["result"].get("value", {})
+        action_by_profile = {
+            "node-pwa": ["Tab", "Enter", "Space"],
+            "canvas-survivors": ["Space", "ArrowUp", "ArrowRight", "ArrowDown", "ArrowLeft"],
+            "processing": ["Enter", "Space", "ArrowRight", "ArrowUp"],
+            "three-fps": ["Enter", "Space", "KeyW", "KeyD", "MouseLeft"],
+            "static-browser": ["Enter", "Space", "ArrowRight"],
+        }[profile]
+        before_shot = _cdp_call(ws, counter, "Page.captureScreenshot", {"format": "png"})["result"]["data"]
+        click_expression = {
+            "canvas-survivors": """(() => {
+              const node = document.querySelector('#btnStart');
+              if (node) { node.click(); return {clicked: node.id}; }
+              return {clicked: null};
+            })()""",
+            "three-fps": """(() => {
+              const node = document.querySelector('#endlessModeButton') ||
+                document.querySelector('#levelModeButton');
+              if (node) { node.click(); return {clicked: node.id}; }
+              return {clicked: null};
+            })()""",
+        }.get(profile, """(() => {
+              const wanted = /start|开始|无尽模式|关卡模式/i;
+              const nodes = [...document.querySelectorAll('button,a,[role="button"]')];
+              const node = nodes.find(e => wanted.test((e.innerText || e.textContent || '').trim()));
+              if (node) { node.click(); return {clicked: (node.innerText || node.textContent || '').trim()}; }
+              return {clicked: null};
+            })()""")
+        _cdp_call(ws, counter, "Runtime.evaluate", {
+            "expression": click_expression,
+            "returnByValue": True,
+        })
+        time.sleep(1.0)
+        if profile == "three-fps":
+            _cdp_call(ws, counter, "Runtime.evaluate", {
+                "expression": """(() => {
+                  const node = document.querySelector('.endless-map-button');
+                  if (node) { node.click(); return {clicked: 'endless-map-button'}; }
+                  return {clicked: null};
+                })()""",
+                "returnByValue": True,
+            })
+            time.sleep(1.0)
+        for key in action_by_profile:
+            if key == "MouseLeft":
+                _cdp_call(ws, counter, "Input.dispatchMouseEvent", {
+                    "type": "mousePressed", "x": 640, "y": 400, "button": "left", "clickCount": 1,
+                })
+                _cdp_call(ws, counter, "Input.dispatchMouseEvent", {
+                    "type": "mouseReleased", "x": 640, "y": 400, "button": "left", "clickCount": 1,
+                })
+            else:
+                _cdp_call(ws, counter, "Input.dispatchKeyEvent", {"type": "keyDown", "key": key, "code": key})
+                _cdp_call(ws, counter, "Input.dispatchKeyEvent", {"type": "keyUp", "key": key, "code": key})
+            time.sleep(0.3)
+        after = _cdp_call(ws, counter, "Runtime.evaluate", {
+            "expression": """(() => {
+              const canvases = [...document.querySelectorAll('canvas')];
+              let pixels = 0;
+              for (const c of canvases) { try {
+                const x=c.getContext('2d'); if (x) pixels += [...x.getImageData(0,0,Math.min(c.width,64),Math.min(c.height,64)).data].reduce((a,b)=>a+b,0);
+              } catch (_) {} }
+              return {visible: [...document.querySelectorAll('body *')].filter(e => {
+                const r=e.getBoundingClientRect(); return r.width>0 && r.height>0;
+              }).length, bodyText: document.body.innerText.slice(0,800), pixels};
+            })()""",
+            "returnByValue": True,
+        })["result"]["result"].get("value", {})
+        screenshot = _cdp_call(ws, counter, "Page.captureScreenshot", {"format": "png"})["result"]["data"]
+        import base64
+
+        evidence_dir = artifact / "probe-evidence"
+        evidence_dir.mkdir(exist_ok=True)
+        (evidence_dir / "deep-probe.png").write_bytes(base64.b64decode(screenshot))
+        rendered = bool(after.get("visible", 0)) and len(screenshot) > 1000
+        interacted = (
+            after.get("bodyText") != state.get("bodyText")
+            or after.get("pixels", 0) > 0
+            or screenshot != before_shot
+        )
+        passed = bool(state.get("ready") == "complete" and rendered and interacted)
+        _emit({
+            "passed": passed, "score": 1.0 if passed else 0.0,
+            "profile": profile, "entrypoint": entrypoint.relative_to(artifact).as_posix(),
+            "rendered": rendered, "interaction_observed": interacted,
+            "before": state, "after": after,
+            "screenshots": ["probe-evidence/deep-probe.png"],
+            "diagnostics": ["Chrome CDP launch/menu/action/screenshot sequence completed"],
+        })
+        return 0 if passed else 1
+    except Exception as exc:
+        _emit({"passed": False, "score": 0.0, "infrastructure_error": False,
+               "profile": profile, "diagnostics": [f"{type(exc).__name__}: {exc}"]})
+        return 1
+    finally:
+        for process in (server, locals().get("browser")):
+            if process is not None:
+                try:
+                    os.killpg(process.pid, signal.SIGTERM)
+                except (ProcessLookupError, PermissionError, AttributeError):
+                    try:
+                        process.terminate()
+                    except (ProcessLookupError, AttributeError):
+                        pass
+        shutil.rmtree(temp_root, ignore_errors=True)
 
 
 def cmd_godot_import(args: argparse.Namespace) -> int:
@@ -1080,6 +1315,12 @@ def build_parser() -> argparse.ArgumentParser:
     verigame_shot.add_argument("--wait-ms", type=int, default=1000)
     verigame_shot.add_argument("--timeout", type=int, default=900)
     verigame_shot.set_defaults(func=cmd_verigame_screenshot)
+
+    browser_probe = sub.add_parser("browser-game-deep-probe")
+    browser_probe.add_argument("--artifact", required=True)
+    browser_probe.add_argument("--profile", default=None)
+    browser_probe.add_argument("--timeout", type=int, default=45)
+    browser_probe.set_defaults(func=cmd_browser_game_deep_probe)
 
     pygame = sub.add_parser("pygame-runtime")
     pygame.add_argument("--artifact", required=True)

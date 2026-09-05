@@ -446,6 +446,15 @@ def _artifact_kind(artifact: Path) -> str:
         return "godot"
     if (artifact / "package.json").is_file():
         return "web"
+    if (
+        (artifact / "index.html").is_file()
+        and (
+            (artifact / "polybranch.pjs").is_file()
+            or (artifact / "js" / "vendor" / "three.min.js").is_file()
+            or (artifact / "src" / "main.js").is_file()
+        )
+    ):
+        return "web"
     if any(artifact.glob("*.py")):
         return "pygame"
     if (artifact / "demo_outputs").is_dir():
@@ -561,15 +570,24 @@ def collect_deep_playtest_evidence(
                 }
             )
     elif kind == "web":
-        probes.append(
-            _run_probe(
-                [python, "-m", "game_loop.probe_tools", "verigame-build", "--artifact", str(artifact)],
-                timeout=300,
+        if (artifact / "package.json").is_file():
+            probes.append(
+                _run_probe(
+                    [python, "-m", "game_loop.probe_tools", "verigame-build", "--artifact", str(artifact)],
+                    timeout=300,
+                )
             )
-        )
         probes.append(
             _run_probe(
-                [python, "-m", "game_loop.probe_tools", "verigame-screenshot", "--artifact", str(artifact)],
+                [
+                    python,
+                    "-m",
+                    "game_loop.probe_tools",
+                    "browser-game-deep-probe",
+                    "--artifact",
+                    str(artifact),
+                ],
+                timeout=900,
             )
         )
     elif kind == "pygame":
