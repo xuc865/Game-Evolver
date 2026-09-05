@@ -885,6 +885,26 @@ class DeepSeekHarnessRuntime:
                     "GAME_LOOP_RESOLVED_PROVIDER_ROUTE": resolved.route_id,
                     "GAME_LOOP_RESOLVED_PROVIDER_MODEL": resolved.model,
                 })
+                if resolved.provider_id == "glm":
+                    environment.update({
+                        "GLM_BASE_URL": resolved.base_url,
+                        "GLM_MODEL": resolved.model,
+                        "GLM_API_KEY": resolved.api_key or "EMPTY",
+                    })
+                elif resolved.provider_id == "qwen":
+                    environment.update({
+                        "QWEN_BASE_URL": resolved.base_url,
+                        "QWEN_MODEL": resolved.model,
+                        "QWEN_API_KEY": resolved.api_key or "EMPTY",
+                        "DASHSCOPE_API_KEY": resolved.api_key or "EMPTY",
+                    })
+                elif resolved.provider_id == "kimi":
+                    environment.update({
+                        "KIMI_BASE_URL": resolved.base_url,
+                        "KIMI_MODEL": resolved.model,
+                        "MOONSHOT_API_KEY": resolved.api_key or "EMPTY",
+                        "KIMI_API_KEY": resolved.api_key or "EMPTY",
+                    })
 
         prompt = task.prompt
         if system_prompt:

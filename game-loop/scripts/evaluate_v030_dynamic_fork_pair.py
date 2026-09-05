@@ -371,6 +371,7 @@ def _normalized_seed_project_root(seed: Path) -> Path:
         (source / "project.godot").is_file()
         or (source / "package.json").is_file()
         or (source / "index.html").is_file()
+        or any(source.glob("*.py"))
     ):
         raise ValueError(f"seed does not contain a supported game project root: {source}")
     return source

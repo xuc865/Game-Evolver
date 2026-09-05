@@ -61,7 +61,7 @@
     {
       "id": "node_build_tool",
       "kind": "command_wrapper",
-      "description": "Build the candidate web game with npm.",
+      "description": "Verify the candidate web game's declared build or validation path.",
       "command": [
         "python3",
         "-m",
@@ -70,6 +70,7 @@
         "--artifact",
         "{artifact_dir}"
       ],
+      "timeout_seconds": 300,
       "safety_scope": "candidate_workspace_only",
       "tags": [
         "build"
@@ -78,7 +79,7 @@
     {
       "id": "playwright_screenshot",
       "kind": "engine_probe",
-      "description": "Verify build artifacts exist before screenshot-based checks.",
+      "description": "Run the candidate's screenshot/review capture path and verify it completes.",
       "command": [
         "python3",
         "-m",
@@ -87,6 +88,7 @@
         "--artifact",
         "{artifact_dir}"
       ],
+      "timeout_seconds": 900,
       "safety_scope": "candidate_workspace_only",
       "tags": [
         "visual"

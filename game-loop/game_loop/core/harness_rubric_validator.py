@@ -12,6 +12,7 @@ import subprocess
 import sys
 import time
 import fcntl
+from http.client import IncompleteRead
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, Sequence
@@ -629,6 +630,10 @@ class HeuristicRubricJudge:
             for item in evidence.probes
             if isinstance(item.get("result"), dict)
         ]
+        infrastructure_ok = not any(
+            bool(item.get("infrastructure_error", False))
+            for item in probe_results
+        )
         passed_all = bool(probe_results) and all(item.get("passed") for item in probe_results)
         avg_score = (
             sum(float(item.get("score", 0.0)) for item in probe_results) / len(probe_results)
@@ -716,6 +721,7 @@ class HeuristicRubricJudge:
             soft_total=soft_total,
             judge=self.judge_id,
             evidence_ref=evidence.run_ref,
+            infrastructure_ok=infrastructure_ok,
         )
 
 
@@ -769,6 +775,13 @@ class LLMRubricJudge:
     def __init__(self, *, provider_id: str, timeout_seconds: int = 120):
         self.provider_id = provider_id
         self.timeout_seconds = timeout_seconds
+
+    @staticmethod
+    def _http_error_body(exc: urllib.error.HTTPError) -> str:
+        try:
+            return exc.read().decode("utf-8", errors="replace")
+        except (IncompleteRead, OSError, ValueError):
+            return ""
 
     @staticmethod
     def _multimodal_content(
@@ -977,11 +990,7 @@ class LLMRubricJudge:
                 break
             except urllib.error.HTTPError as exc:
                 parsed = None
-                body = ""
-                try:
-                    body = exc.read().decode("utf-8", errors="replace")
-                except Exception:
-                    pass
+                body = self._http_error_body(exc)
                 errors.append(
                     f"HTTPError {exc.code} provider={self.provider_id} "
                     f"base_url={resolved.base_url} model={resolved.model}: {body[:200]}"
@@ -1225,7 +1234,7 @@ class LLMRubricJudge:
                     )
                 break
             except urllib.error.HTTPError as exc:
-                body = exc.read().decode("utf-8", errors="replace")
+                body = self._http_error_body(exc)
                 errors.append(f"HTTPError {exc.code}: {body[:200]}")
                 if exc.code in (400, 422):
                     supports_response_format = False

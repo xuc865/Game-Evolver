@@ -125,6 +125,59 @@ def _artifact_root(path: Path) -> Path:
     return root
 
 
+def _load_package_json(artifact: Path) -> dict[str, object] | None:
+    package = artifact / "package.json"
+    if not package.is_file():
+        return None
+    try:
+        value = json.loads(package.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _package_script(package: dict[str, object] | None, name: str) -> str | None:
+    if not isinstance(package, dict):
+        return None
+    scripts = package.get("scripts")
+    if not isinstance(scripts, dict):
+        return None
+    value = scripts.get(name)
+    return str(value).strip() if isinstance(value, str) and value.strip() else None
+
+
+def _package_has_keyword(package: dict[str, object] | None, keyword: str) -> bool:
+    if not isinstance(package, dict):
+        return False
+    raw_keywords = package.get("keywords")
+    if not isinstance(raw_keywords, list):
+        return False
+    return any(str(item).strip().casefold() == keyword.casefold() for item in raw_keywords)
+
+
+def _run_npm_script(
+    artifact: Path,
+    script: str,
+    *,
+    timeout: int,
+    extra_args: list[str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    npm = shutil.which("npm")
+    if npm is None:
+        raise FileNotFoundError("npm not found")
+    command = [npm, "run", script]
+    if extra_args:
+        command.extend(["--", *extra_args])
+    return subprocess.run(
+        command,
+        cwd=artifact,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
+    )
+
+
 def cmd_godot_import(args: argparse.Namespace) -> int:
     artifact = _artifact_root(Path(args.artifact))
     project = artifact / "project.godot"
@@ -779,18 +832,44 @@ def cmd_verigame_build(args: argparse.Namespace) -> int:
     if not package.is_file():
         _emit({"passed": False, "score": 0.0, "diagnostics": ["package.json missing"]})
         return 1
-    npm = shutil.which("npm")
-    if npm is None:
+    package_json = _load_package_json(artifact)
+    if package_json is None:
+        _emit({"passed": False, "score": 0.0, "diagnostics": ["package.json unreadable"]})
+        return 1
+    scripts = {
+        name: _package_script(package_json, name)
+        for name in ("build", "check", "test", "verify")
+    }
+    script_name = next((name for name in ("build", "check", "test", "verify") if scripts[name]), None)
+    if script_name is None:
+        if _package_has_keyword(package_json, "no-build") and (
+            _package_script(package_json, "start") or _package_script(package_json, "serve")
+        ):
+            _emit(
+                {
+                    "passed": True,
+                    "score": 1.0,
+                    "diagnostics": [
+                        "no build script declared; direct-launch web game will be validated by the screenshot probe",
+                    ],
+                }
+            )
+            return 0
+        _emit(
+            {
+                "passed": False,
+                "score": 0.0,
+                "diagnostics": [
+                    "no build/check/test/verify script declared",
+                ],
+            }
+        )
+        return 1
+    try:
+        proc = _run_npm_script(artifact, script_name, timeout=args.timeout)
+    except FileNotFoundError:
         _emit({"passed": False, "score": 0.0, "diagnostics": ["npm not found"]})
         return 1
-    proc = subprocess.run(
-        [npm, "run", "build"],
-        cwd=artifact,
-        capture_output=True,
-        text=True,
-        timeout=args.timeout,
-        check=False,
-    )
     passed = proc.returncode == 0
     _emit({"passed": passed, "score": 1.0 if passed else 0.0, "diagnostics": [proc.stderr[-500:]]})
     return 0 if passed else 1
@@ -798,6 +877,57 @@ def cmd_verigame_build(args: argparse.Namespace) -> int:
 
 def cmd_verigame_screenshot(args: argparse.Namespace) -> int:
     artifact = Path(args.artifact).expanduser().resolve()
+    package_json = _load_package_json(artifact)
+    screenshot_script = _package_script(package_json, "tool:screenshot") if package_json else None
+    if screenshot_script or (artifact / "tools" / "screenshot.mjs").is_file():
+        try:
+            if screenshot_script:
+                proc = _run_npm_script(artifact, "tool:screenshot", timeout=args.timeout)
+            else:
+                node = shutil.which("node") or shutil.which("nodejs")
+                if node is None:
+                    raise FileNotFoundError("node not found")
+                proc = subprocess.run(
+                    [node, str((artifact / "tools" / "screenshot.mjs").resolve())],
+                    cwd=artifact,
+                    capture_output=True,
+                    text=True,
+                    timeout=args.timeout,
+                    check=False,
+                )
+        except FileNotFoundError:
+            _emit({"passed": False, "score": 0.0, "diagnostics": ["node/npm not found"]})
+            return 1
+        output_text = (proc.stdout or "") + (proc.stderr or "")
+        infra_error = any(
+            marker in output_text
+            for marker in (
+                "Executable doesn't exist",
+                "Please run the following command to download new browsers",
+                "browserType.launch",
+                "npx playwright install",
+                "Playwright was just installed or updated",
+            )
+        )
+        passed = proc.returncode == 0 and (artifact / "tools" / "shots" / "contactsheet.png").is_file()
+        diagnostics = [f"timeout={args.timeout}"]
+        if infra_error:
+            diagnostics.append("playwright browser infrastructure missing")
+        diagnostics.append(
+            f"contactsheet_exists={(artifact / 'tools' / 'shots' / 'contactsheet.png').is_file()}"
+        )
+        tail = output_text.strip().splitlines()
+        if tail:
+            diagnostics.extend(tail[-5:])
+        _emit(
+            {
+                "passed": None if infra_error else passed,
+                "score": None if infra_error else (1.0 if passed else 0.0),
+                "infrastructure_error": infra_error,
+                "diagnostics": diagnostics,
+            }
+        )
+        return 2 if infra_error else (0 if passed else 1)
     dist = artifact / "dist"
     index = dist / "index.html"
     passed = index.is_file()
@@ -948,6 +1078,7 @@ def build_parser() -> argparse.ArgumentParser:
     verigame_shot = sub.add_parser("verigame-screenshot")
     verigame_shot.add_argument("--artifact", required=True)
     verigame_shot.add_argument("--wait-ms", type=int, default=1000)
+    verigame_shot.add_argument("--timeout", type=int, default=900)
     verigame_shot.set_defaults(func=cmd_verigame_screenshot)
 
     pygame = sub.add_parser("pygame-runtime")
