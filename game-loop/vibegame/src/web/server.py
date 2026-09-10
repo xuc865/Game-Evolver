@@ -511,6 +511,26 @@ def build_workspace_payload(project_dir: Optional[Path], view: str) -> dict[str,
     return {'view': view, 'error': 'unknown workspace view'}
 
 
+def build_game_evolver_payload(project_dir: Optional[Path]) -> dict[str, Any]:
+    """Expose the production-to-evolution gate in the unified Dashboard."""
+    if not project_dir:
+        return {'error': 'project not configured'}
+    review = build_review_payload(project_dir).get('acceptance', {})
+    reviewer_accepted = review.get('reviewer', {}).get('verdict') == 'accepted'
+    human_approved = review.get('human', {}).get('approved') is True
+    baseline = _read_project_json(project_dir, 'game-evolver-baseline.json')
+    return {
+        'engine': 'vibegame-phaser',
+        'project': project_dir.name,
+        'acceptance': review,
+        'reviewer_accepted': reviewer_accepted,
+        'human_approved': human_approved,
+        'promoted': bool(baseline and baseline.get('status') == 'accepted'),
+        'baseline': baseline,
+        'phase': 'evolve' if baseline else 'review' if reviewer_accepted else 'produce',
+    }
+
+
 PLAY_PREFIX = '/play'
 
 # Game code resolves project files through appBasePath, but ES module specifiers
@@ -2904,6 +2924,10 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             self._send_json(build_review_payload(PROJECT_DIR))
             return
 
+        if path == '/api/game-evolver/status':
+            self._send_json(build_game_evolver_payload(PROJECT_DIR))
+            return
+
         if path in ('/api/design', '/api/scenes', '/api/evolution', '/api/settings'):
             self._send_json(build_workspace_payload(PROJECT_DIR, path.rsplit('/', 1)[-1]))
             return
@@ -3086,6 +3110,31 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         """Handle POST requests."""
         parsed = urlparse(self.path)
         path = parsed.path
+
+        if path in ('/api/game-evolver/validate', '/api/game-evolver/promote'):
+            if not PROJECT_DIR:
+                self._send_json({'error': 'No project directory configured'}, 400)
+                return
+            try:
+                from dataclasses import asdict
+                from game_loop.vibegame_bridge import (
+                    promote_vibegame_baseline,
+                    validate_vibegame_project,
+                )
+                if path.endswith('/validate'):
+                    result = validate_vibegame_project(PROJECT_DIR)
+                    self._send_json({'validation': result, 'game_evolver': build_game_evolver_payload(PROJECT_DIR)})
+                else:
+                    manifest = promote_vibegame_baseline(
+                        PROJECT_DIR, accepted_by='human-via-unified-dashboard'
+                    )
+                    self._send_json({'baseline': asdict(manifest), 'game_evolver': build_game_evolver_payload(PROJECT_DIR)})
+            except (ValueError, RuntimeError) as exc:
+                self._send_json({'error': str(exc)}, 400)
+            except Exception as exc:
+                logger.exception('game_evolver_action_failed')
+                self._send_json({'error': str(exc)}, 500)
+            return
 
         # Reviewer and human decisions are deliberately separate. Promotion
         # requires both; the Dashboard never auto-accepts a generated build.

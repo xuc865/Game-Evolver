@@ -56,14 +56,8 @@ function renderActive() {
   renderEvolutionMap(p?.evolution_graph);
   if (p?.runtime === "vibegame" && p?.production?.dashboard_url) {
     const production = p.production;
-    const accepted = production.reviewer_accepted && production.human_approved;
-    els.previewStage.innerHTML = `<div class="production-shell">
-      <div class="production-flow"><span class="active">1 Produce</span><span class="${production.phase === "review" ? "active" : ""}">2 Review</span><span class="${production.promoted ? "active" : ""}">3 Baseline</span><span>4 Evolve</span>
-      <div class="production-actions"><button id="validateVibeGame">Check project</button><button id="promoteVibeGame" ${accepted && !production.promoted ? "" : "disabled"}>${production.promoted ? "Baseline accepted" : "Accept baseline"}</button><button id="openVibeGame">Open full screen ↗</button></div></div>
-      <iframe src="${production.dashboard_url}" title="VibeGame production dashboard" allow="clipboard-read; clipboard-write; autoplay; fullscreen" tabindex="0"></iframe></div>`;
-    $("validateVibeGame")?.addEventListener("click", validateVibeGame);
-    $("promoteVibeGame")?.addEventListener("click", promoteVibeGame);
-    $("openVibeGame")?.addEventListener("click", () => window.open(production.dashboard_url, "_blank", "noopener"));
+    els.previewStage.innerHTML = `<div class="preview-empty"><span>VG</span><strong>Unified production workspace is running</strong><p>Chat, assets, objects, scenes, Play, review and baseline controls now live in one page.</p><button id="openVibeGame">Open production workspace →</button></div>`;
+    $("openVibeGame")?.addEventListener("click", () => location.assign(production.dashboard_url));
     els.buildStatus.innerHTML = `<i></i> ${production.promoted ? "Baseline ready" : "Production live"}`;
     els.versionLabel.textContent = production.promoted ? "Accepted baseline" : "VibeGame draft";
     els.memoryLabel.textContent = production.human_approved ? "Human approved" : "Awaiting review";
@@ -285,6 +279,13 @@ async function loadProjects(selectFirst = true) {
 async function openProject(id) {
   state.active = await api(`/api/projects/${id}`);
   state.runtime = state.active.runtime || "deepseek-harness";
+  if (state.runtime === "vibegame" && state.active.production?.dashboard_url && !new URLSearchParams(location.search).has("stay")) {
+    const target = new URL(state.active.production.dashboard_url);
+    target.searchParams.set("studio", `${location.origin}/?stay=1`);
+    target.searchParams.set("studio_project", state.active.id);
+    location.assign(target.toString());
+    return;
+  }
   setRuntime(state.runtime); renderProjects(); renderActive();
   if (state.active.running || state.active.status === "running" || state.active.runtime === "vibegame") startPolling();
   document.body.classList.remove("rail-open");
@@ -336,29 +337,12 @@ async function play() {
       renderActive(); toast("Build stopped safely"); return;
     }
     if (state.active.runtime === "vibegame") {
-      window.open(state.active.production.dashboard_url, "_blank", "noopener");
+      location.assign(state.active.production.dashboard_url);
       return;
     }
     await api(`/api/projects/${state.active.id}/play`, {method:"POST", body:"{}"}); toast("Opening in Godot");
   }
   catch (error) { toast(error.message); }
-}
-
-async function validateVibeGame() {
-  if (!state.active) return;
-  try {
-    const result = await api(`/api/projects/${state.active.id}/vibegame/validate`, {method:"POST", body:"{}"});
-    state.active = result.project; renderActive();
-    toast(result.validation.ok ? "VibeGame validation passed" : "Validation found issues");
-  } catch (error) { toast(error.message); }
-}
-
-async function promoteVibeGame() {
-  if (!state.active) return;
-  try {
-    state.active = await api(`/api/projects/${state.active.id}/vibegame/promote`, {method:"POST", body:"{}"});
-    renderActive(); toast("Accepted as the Game-Evolver baseline");
-  } catch (error) { toast(error.message); }
 }
 
 async function retryBuild() {

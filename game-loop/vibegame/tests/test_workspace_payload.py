@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-from web.server import build_review_payload, build_workspace_payload
+from web.server import build_game_evolver_payload, build_review_payload, build_workspace_payload
 
 
 def test_settings_payload_never_exposes_secrets(tmp_path: Path) -> None:
@@ -37,3 +37,22 @@ def test_scenes_payload_reads_real_scene_files(tmp_path: Path) -> None:
     assert payload["scenes"] == [
         {"path": "scenes/main.scene.json", "data": {"name": "Main"}}
     ]
+
+
+def test_game_evolver_payload_tracks_review_and_baseline_phase(tmp_path: Path) -> None:
+    review = tmp_path / ".vibegame" / "review" / "acceptance.json"
+    review.parent.mkdir(parents=True)
+    review.write_text(
+        json.dumps({"reviewer": {"verdict": "accepted"}, "human": {"approved": True}}),
+        encoding="utf-8",
+    )
+    ready = build_game_evolver_payload(tmp_path)
+    assert ready["reviewer_accepted"] is True
+    assert ready["human_approved"] is True
+    assert ready["promoted"] is False
+    (tmp_path / "game-evolver-baseline.json").write_text(
+        json.dumps({"status": "accepted", "evolution_seed": True}), encoding="utf-8"
+    )
+    promoted = build_game_evolver_payload(tmp_path)
+    assert promoted["phase"] == "evolve"
+    assert promoted["promoted"] is True

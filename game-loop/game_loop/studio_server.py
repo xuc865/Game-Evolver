@@ -709,7 +709,9 @@ class StudioManager:
     def _launch_vibegame_team(self, project_id: str, turn: int, content: str, port: int) -> None:
         workspace = self._vibegame_workspace(project_id)
         env = self._runtime_environment()
-        env["PYTHONPATH"] = str(VIBEGAME_SRC) + os.pathsep + env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = os.pathsep.join(filter(None, (
+            str(VIBEGAME_SRC), str(SOURCE_ROOT), env.get("PYTHONPATH", ""),
+        )))
         env["PATH"] = str(vibegame_python().parent) + os.pathsep + env.get("PATH", "")
         env.setdefault("IMAGE_PROVIDER", "Krea2")
         env.setdefault("IMAGE_MODEL", "krea2")

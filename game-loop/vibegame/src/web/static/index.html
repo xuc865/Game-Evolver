@@ -2793,9 +2793,66 @@
         }
         .at-item:hover, .at-item.selected { background: var(--warm-sand); }
         .at-item strong { font-weight: 700; }
+
+        /* Game-Evolver unified product shell. VibeGame views remain native DOM. */
+        :root { --ge-ink:#211912; --ge-paper:#fffaf0; --ge-signal:#ff665b; --ge-bar-h:58px; }
+        body { background-color:#f2ede3; background-image:radial-gradient(#b8aa9b .65px,transparent .65px); background-size:5px 5px; }
+        .ge-bar { height:var(--ge-bar-h); display:grid; grid-template-columns:auto minmax(180px,1fr) auto; align-items:center; gap:18px; padding:0 16px; color:var(--ge-ink); background:var(--ge-paper); border-bottom:2px solid var(--ge-ink); font-family:"Courier New",monospace; }
+        .ge-brand { display:flex; align-items:center; gap:9px; color:inherit; text-decoration:none; font-weight:900; text-transform:uppercase; white-space:nowrap; }
+        .ge-mark { display:grid; place-items:center; width:30px; height:30px; background:var(--ge-signal); border:2px solid var(--ge-ink); box-shadow:2px 2px 0 var(--ge-ink); font-size:10px; }
+        .ge-project { min-width:0; }
+        .ge-project strong,.ge-project small { display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .ge-project strong { font-size:12px; text-transform:uppercase; }
+        .ge-project small { color:#6e6257; font-size:8px; margin-top:2px; }
+        .ge-pipeline { display:flex; align-items:center; gap:5px; }
+        .ge-step { padding:4px 7px; border:1px solid var(--ge-ink); font-size:8px; font-weight:900; text-transform:uppercase; white-space:nowrap; }
+        .ge-step.active { background:var(--ge-signal); box-shadow:2px 2px 0 var(--ge-ink); }
+        .ge-actions { display:flex; gap:5px; margin-left:5px; }
+        .ge-action { border:1px solid var(--ge-ink); background:var(--ge-paper); color:var(--ge-ink); padding:5px 8px; box-shadow:2px 2px 0 var(--ge-ink); font:900 8px/1 "Courier New",monospace; text-transform:uppercase; cursor:pointer; }
+        .ge-action.primary { background:var(--ge-signal); }
+        .ge-action:disabled { opacity:.35; box-shadow:none; cursor:not-allowed; }
+        .layout { height:calc(100vh - var(--ge-bar-h)); }
+        .sidebar { background:#211912; border-right:2px solid #211912; }
+        .sidebar-top { border-bottom:1px solid #fffaf0!important; }
+        .logo { color:#fffaf0; font-family:"Courier New",monospace; font-weight:900; text-transform:uppercase; }
+        .logo-dot { color:#ff665b; }
+        .collapse-btn,.sidebar .nav-item { color:#fffaf0; border-radius:0; }
+        .sidebar .nav-item:hover { background:#38342e; color:#fffaf0; }
+        .sidebar .nav-item.active { background:#fffaf0; color:#211912; box-shadow:inset 4px 0 0 #ff665b; }
+        .sidebar-body { color:#fffaf0; }
+        .sidebar-body .s-item { border-radius:0; }
+        .sidebar-body .s-item.active { background:#fffaf0; color:#211912; }
+        .panel { border:0; background:rgba(255,250,240,.96); }
+        .card-item,.asset-card,.input-card,.at-btn,.code-block { border-radius:0!important; }
+        .input-card { border:2px solid #211912!important; box-shadow:4px 4px 0 #211912!important; }
+        .at-btn-primary,.send-btn { background:#ff665b!important; color:#211912!important; border-color:#211912!important; }
+        .ge-evolution-view { padding:2rem; max-width:1100px; font-family:"Courier New",monospace; }
+        .ge-evolution-view>h1 { text-transform:uppercase; font-size:22px; }
+        .ge-evolution-view>p { color:#6e6257; margin:.5rem 0 1.5rem; }
+        .ge-evolution-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-bottom:18px; }
+        .ge-evolution-grid article { position:relative; min-height:145px; padding:16px; border:2px solid #211912; background:#fffaf0; box-shadow:4px 4px 0 #211912; }
+        .ge-evolution-grid small,.ge-evolution-grid strong { display:block; }
+        .ge-evolution-grid small { font-size:8px; color:#6e6257; }
+        .ge-evolution-grid strong { margin-top:8px; font-size:15px; text-transform:uppercase; }
+        .ge-evolution-grid span { position:absolute; right:10px; top:10px; border:1px solid #211912; padding:3px 5px; font-size:7px; font-weight:900; }
+        .ge-evolution-grid span.pass { background:#ff665b; }
+        .ge-evolution-grid p { margin-top:24px; font-size:10px; color:#6e6257; }
+        @media(max-width:900px){.ge-bar{grid-template-columns:auto 1fr}.ge-pipeline{grid-column:1/-1; overflow-x:auto; padding-bottom:6px}.ge-bar{height:92px}.layout{height:calc(100vh - 92px)}}
+        @media(max-width:700px){.ge-evolution-grid{grid-template-columns:1fr}}
     </style>
 </head>
 <body>
+    <header class="ge-bar">
+        <a class="ge-brand" id="ge-games-link" href="http://127.0.0.1:8766/?stay=1"><span class="ge-mark">GE</span><span>Game Evolver</span></a>
+        <div class="ge-project"><strong id="ge-project-name">VibeGame production</strong><small id="ge-stage-text">Produce a playable baseline, review it, then evolve the harness.</small></div>
+        <div class="ge-pipeline" aria-label="Game Evolver workflow">
+            <span class="ge-step active" data-ge-step="produce">1 Produce</span>
+            <span class="ge-step" data-ge-step="review">2 Review</span>
+            <span class="ge-step" data-ge-step="baseline">3 Baseline</span>
+            <span class="ge-step" data-ge-step="evolve">4 Evolve</span>
+            <div class="ge-actions"><button class="ge-action" id="ge-validate">Check</button><button class="ge-action primary" id="ge-promote" disabled>Accept baseline</button></div>
+        </div>
+    </header>
     <!-- Tool detail modal -->
     <div class="td-overlay" id="td-overlay" style="display:none" onclick="if(event.target===this)closeToolDetail()">
         <div class="td-modal">
@@ -2860,7 +2917,7 @@
     <div class="layout" id="layout">
         <aside class="sidebar">
             <div class="sidebar-top">
-                <span class="logo">VibeGame<span class="logo-dot">.</span></span>
+                <span class="logo">GE / VibeGame<span class="logo-dot">.</span></span>
                 <button class="collapse-btn" onclick="toggleSidebar()" title="Toggle sidebar">
                     <svg viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4">
                         <path d="M9.5 11.5L5.5 7.5L9.5 3.5"/>
@@ -3031,7 +3088,57 @@
         const connDot     = document.getElementById('conn-dot');
         const scrollBtn   = document.getElementById('scroll-bottom');
         const themeBtn    = document.getElementById('theme-btn');
+        const geProjectName = document.getElementById('ge-project-name');
+        const geStageText = document.getElementById('ge-stage-text');
+        const geValidate = document.getElementById('ge-validate');
+        const gePromote = document.getElementById('ge-promote');
         let wasAtBottom   = true;
+        const studioReturn = new URLSearchParams(location.search).get('studio');
+        if (studioReturn) document.getElementById('ge-games-link').href = studioReturn;
+
+        function renderGameEvolver(state) {
+            if (!state || state.error) return;
+            geProjectName.textContent = state.project || 'VibeGame production';
+            const reached = state.promoted ? 4 : state.human_approved ? 3 : state.reviewer_accepted ? 2 : 1;
+            document.querySelectorAll('[data-ge-step]').forEach((step, index) => step.classList.toggle('active', index < reached));
+            gePromote.disabled = !(state.reviewer_accepted && state.human_approved) || state.promoted;
+            gePromote.textContent = state.promoted ? 'Baseline accepted' : 'Accept baseline';
+            geStageText.textContent = state.promoted
+                ? 'Accepted VibeGame baseline is ready for Game-Evolver continuation.'
+                : state.human_approved ? 'Both review gates passed. Accept this version as the evolution baseline.'
+                : state.reviewer_accepted ? 'Reviewer passed. Play the game and record human approval in Review.'
+                : 'Produce and refine in Chat, then ask Reviewer to evaluate the playable build.';
+        }
+
+        async function refreshGameEvolver() {
+            try {
+                const response = await fetch('/api/game-evolver/status');
+                if (response.ok) renderGameEvolver(await response.json());
+            } catch {}
+        }
+
+        async function runGameEvolverAction(action) {
+            const button = action === 'validate' ? geValidate : gePromote;
+            button.disabled = true;
+            try {
+                const response = await fetch(`/api/game-evolver/${action}`, {method:'POST'});
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || `${action} failed`);
+                renderGameEvolver(data.game_evolver);
+                toast(action === 'validate'
+                    ? (data.validation?.ok ? 'Project check passed' : 'Project check found issues')
+                    : 'Accepted as Game-Evolver baseline');
+            } catch (error) {
+                toast(error.message || String(error), 'error');
+            } finally {
+                await refreshGameEvolver();
+            }
+        }
+
+        geValidate.addEventListener('click', () => runGameEvolverAction('validate'));
+        gePromote.addEventListener('click', () => runGameEvolverAction('promote'));
+        refreshGameEvolver();
+        setInterval(refreshGameEvolver, 3000);
 
         if (sidebarCollapsed) layout.classList.add('collapsed');
 
@@ -3265,7 +3372,16 @@
                     const human = acceptance.human || {};
                     panelBody.innerHTML = `<div style="padding:2rem;max-width:900px"><h1>Review Gate</h1><p>Reviewer verdict: <strong>${esc(reviewer.verdict || 'pending')}</strong></p><p>Human approval: <strong>${human.approved ? 'approved' : 'pending'}</strong></p><p>The build becomes an evolution seed only after both gates pass.</p><button class="at-btn at-btn-primary" onclick="recordHumanApproval(true)">Approve played build</button> <button class="at-btn" onclick="recordHumanApproval(false)">Request changes</button><h2>Review context</h2><pre class="code-block">${pretty(data)}</pre></div>`;
                 } else {
-                    panelBody.innerHTML = `<div style="padding:2rem;max-width:1000px"><h1>Evolution</h1><p>Accepted VibeGame builds are immutable baseline seeds for Game-Evolver.</p><pre class="code-block">${pretty(data)}</pre></div>`;
+                    const gate = data.acceptance || {};
+                    const reviewerPassed = gate.reviewer?.verdict === 'accepted';
+                    const humanPassed = gate.human?.approved === true;
+                    const baselinePassed = Boolean(data.baseline);
+                    panelBody.innerHTML = `<div class="ge-evolution-view"><h1>Game-Evolver continuation</h1><p>Production stays human-directed. Only a reviewed, playable version becomes the seed for harness evolution.</p><div class="ge-evolution-grid">
+                      <article><small>PRODUCTION HARNESS</small><strong>VibeGame / Phaser</strong><span class="pass">ACTIVE</span><p>Agent team, asset pipeline, object editor, scenes and runtime Play.</p></article>
+                      <article><small>REVIEW GATE</small><strong>Reviewer + Human</strong><span class="${reviewerPassed && humanPassed ? 'pass' : ''}">${reviewerPassed && humanPassed ? 'PASSED' : 'WAITING'}</span><p>Reviewer: ${esc(gate.reviewer?.verdict || 'pending')} · Human: ${humanPassed ? 'approved' : 'pending'}</p></article>
+                      <article><small>BASELINE</small><strong>Playable seed</strong><span class="${baselinePassed ? 'pass' : ''}">${baselinePassed ? 'ACCEPTED' : 'LOCKED'}</span><p>${baselinePassed ? 'Immutable manifest recorded.' : 'Use Review, then Accept baseline in the top bar.'}</p></article>
+                      <article><small>GOA / HPA</small><strong>Agent & harness evolution</strong><span class="${baselinePassed ? 'pass' : ''}">${baselinePassed ? 'READY' : 'WAITING'}</span><p>Evolution begins from the accepted VibeGame production harness.</p></article>
+                    </div><details><summary>Technical state</summary><pre class="code-block">${pretty(data)}</pre></details></div>`;
                 }
             } catch (error) {
                 panelBody.innerHTML = `<div style="padding:2rem" class="review-error">Unable to load ${esc(view)}: ${esc(error.message || error)}</div>`;
@@ -3278,6 +3394,7 @@
             if (!response.ok) { toast('Could not save review decision'); return; }
             toast(approved ? 'Human approval recorded' : 'Change request recorded');
             renderWorkspaceView('review');
+            refreshGameEvolver();
         }
 
         async function renderAssetsView() {
