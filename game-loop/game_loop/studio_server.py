@@ -727,7 +727,10 @@ class StudioManager:
                 text=True, timeout=240, check=False,
             )
             log_path.write_text(completed.stdout[-30000:], encoding="utf-8")
-            if completed.returncode:
+            # Codex sessions can register with the Dashboard a moment after
+            # upstream's 30-second startup wait. The team panes and Dashboard
+            # are nevertheless usable, so treat the live endpoint as success.
+            if completed.returncode and not self._dashboard_alive(port):
                 raise RuntimeError(f"VibeGame team startup failed ({completed.returncode})")
             meta = self._meta(project_id)
             meta.update({
