@@ -4,7 +4,12 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-from web.server import build_game_evolver_payload, build_review_payload, build_workspace_payload
+from web.server import (
+    _apply_model_preset,
+    build_game_evolver_payload,
+    build_review_payload,
+    build_workspace_payload,
+)
 
 
 def test_settings_payload_never_exposes_secrets(tmp_path: Path) -> None:
@@ -56,3 +61,23 @@ def test_game_evolver_payload_tracks_review_and_baseline_phase(tmp_path: Path) -
     promoted = build_game_evolver_payload(tmp_path)
     assert promoted["phase"] == "evolve"
     assert promoted["promoted"] is True
+
+
+def test_hybrid_model_preset_routes_qwen_backbone_and_glm_advisor(tmp_path: Path) -> None:
+    team = tmp_path / ".vibegame" / "team"
+    team.mkdir(parents=True)
+    (tmp_path / ".vibegame" / "settings.json").write_text('{"agents": {}}')
+    healthy = {
+        "glm": {"ok": True, "model": "GLM-5.3-Flash-node1"},
+        "qwen": {"ok": True, "model": "Qwen3.8-27B-node1"},
+    }
+    with patch("web.server._probe_hybrid_models", return_value=healthy):
+        preset = _apply_model_preset(tmp_path, "glm-qwen")
+    settings = json.loads((tmp_path / ".vibegame" / "settings.json").read_text())
+    assert preset["id"] == "glm-qwen"
+    assert preset["roles"]["designer"]["advisor"] == "GLM-5.3-Flash-node1"
+    assert preset["roles"]["programmer"]["advisor"] is None
+    assert settings["agents"]["orchestrator"] == {
+        "cli": "qwen-codex", "model": "Qwen3.8-27B-node1"
+    }
+    assert (team / "models.json").is_file()

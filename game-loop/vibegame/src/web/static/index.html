@@ -2808,6 +2808,10 @@
         .ge-step { padding:4px 7px; border:1px solid var(--ge-ink); font-size:8px; font-weight:900; text-transform:uppercase; white-space:nowrap; }
         .ge-step.active { background:var(--ge-signal); box-shadow:2px 2px 0 var(--ge-ink); }
         .ge-actions { display:flex; gap:5px; margin-left:5px; }
+        .ge-model-switch { display:flex; padding:2px; border:1px solid var(--ge-ink); background:#dfd5c8; margin-left:6px; }
+        .ge-model-switch button { border:0; background:transparent; padding:4px 7px; color:var(--ge-ink); font:900 8px/1 "Courier New",monospace; cursor:pointer; white-space:nowrap; }
+        .ge-model-switch button.active { background:var(--ge-ink); color:var(--ge-paper); }
+        .ge-model-switch button:disabled { opacity:.45; cursor:wait; }
         .ge-action { border:1px solid var(--ge-ink); background:var(--ge-paper); color:var(--ge-ink); padding:5px 8px; box-shadow:2px 2px 0 var(--ge-ink); font:900 8px/1 "Courier New",monospace; text-transform:uppercase; cursor:pointer; }
         .ge-action.primary { background:var(--ge-signal); }
         .ge-action:disabled { opacity:.35; box-shadow:none; cursor:not-allowed; }
@@ -2837,6 +2841,9 @@
         .ge-evolution-grid span { position:absolute; right:10px; top:10px; border:1px solid #211912; padding:3px 5px; font-size:7px; font-weight:900; }
         .ge-evolution-grid span.pass { background:#ff665b; }
         .ge-evolution-grid p { margin-top:24px; font-size:10px; color:#6e6257; }
+        .ge-model-table { width:100%; margin-top:14px; border-collapse:collapse; font-family:"Courier New",monospace; background:#fffaf0; box-shadow:4px 4px 0 #211912; }
+        .ge-model-table th,.ge-model-table td { padding:8px 10px; border:1px solid #211912; text-align:left; font-size:10px; }
+        .ge-model-table th { background:#211912; color:#fffaf0; text-transform:uppercase; font-size:8px; }
         @media(max-width:900px){.ge-bar{grid-template-columns:auto 1fr}.ge-pipeline{grid-column:1/-1; overflow-x:auto; padding-bottom:6px}.ge-bar{height:92px}.layout{height:calc(100vh - 92px)}}
         @media(max-width:700px){.ge-evolution-grid{grid-template-columns:1fr}}
     </style>
@@ -2850,6 +2857,7 @@
             <span class="ge-step" data-ge-step="review">2 Review</span>
             <span class="ge-step" data-ge-step="baseline">3 Baseline</span>
             <span class="ge-step" data-ge-step="evolve">4 Evolve</span>
+            <div class="ge-model-switch" aria-label="Agent model preset"><button data-model-preset="gpt">GPT</button><button data-model-preset="glm-qwen">GLM + Qwen</button></div>
             <div class="ge-actions"><button class="ge-action" id="ge-validate">Check</button><button class="ge-action primary" id="ge-promote" disabled>Accept baseline</button></div>
         </div>
     </header>
@@ -3098,11 +3106,19 @@
 
         function renderGameEvolver(state) {
             if (!state || state.error) return;
+            window._lastGameEvolverState = state;
             geProjectName.textContent = state.project || 'VibeGame production';
             const reached = state.promoted ? 4 : state.human_approved ? 3 : state.reviewer_accepted ? 2 : 1;
             document.querySelectorAll('[data-ge-step]').forEach((step, index) => step.classList.toggle('active', index < reached));
             gePromote.disabled = !(state.reviewer_accepted && state.human_approved) || state.promoted;
             gePromote.textContent = state.promoted ? 'Baseline accepted' : 'Accept baseline';
+            const preset = state.model_preset || {id:'gpt'};
+            document.querySelectorAll('[data-model-preset]').forEach(button => {
+                button.classList.toggle('active', button.dataset.modelPreset === preset.id);
+                button.title = button.dataset.modelPreset === 'gpt'
+                    ? 'Codex tool agents using GPT'
+                    : 'Qwen tool-agent backbone with GLM design/review advice';
+            });
             geStageText.textContent = state.promoted
                 ? 'Accepted VibeGame baseline is ready for Game-Evolver continuation.'
                 : state.human_approved ? 'Both review gates passed. Accept this version as the evolution baseline.'
@@ -3137,6 +3153,32 @@
 
         geValidate.addEventListener('click', () => runGameEvolverAction('validate'));
         gePromote.addEventListener('click', () => runGameEvolverAction('promote'));
+        document.querySelectorAll('[data-model-preset]').forEach(button => button.addEventListener('click', async () => {
+            const preset = button.dataset.modelPreset;
+            if (button.classList.contains('active')) return;
+            if (!confirm(`Switch the agent team to ${button.textContent.trim()}? Current agent sessions will restart.`)) return;
+            const buttons = [...document.querySelectorAll('[data-model-preset]')];
+            buttons.forEach(item => item.disabled = true);
+            try {
+                const response = await fetch('/api/model-preset', {
+                    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({preset}),
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || 'Model switch failed');
+                renderGameEvolver({...window._lastGameEvolverState, model_preset:data.model_preset});
+                geStageText.textContent = 'Model preset saved. Restarting the agent team…';
+                toast('Model preset saved; agents are restarting');
+                const reconnect = setInterval(async () => {
+                    try {
+                        const check = await fetch('/api/game-evolver/status', {cache:'no-store'});
+                        if (check.ok) { clearInterval(reconnect); location.reload(); }
+                    } catch {}
+                }, 1200);
+            } catch (error) {
+                toast(error.message || String(error), 'error');
+                buttons.forEach(item => item.disabled = false);
+            }
+        }));
         refreshGameEvolver();
         setInterval(refreshGameEvolver, 3000);
 
@@ -3365,7 +3407,10 @@
                 } else if (view === 'scenes') {
                     panelBody.innerHTML = `<div style="padding:2rem;max-width:1100px"><h1>Scenes</h1>${(data.scenes || []).map(scene => `<section><h2>${esc(scene.path)}</h2><pre class="code-block">${pretty(scene.data)}</pre></section>`).join('') || '<p>No scene files yet.</p>'}</div>`;
                 } else if (view === 'settings') {
-                    panelBody.innerHTML = `<div style="padding:2rem;max-width:1000px"><h1>Model & Image Providers</h1><p>Credentials are never returned to the browser.</p><div class="card-grid">${(data.providers || []).map(p => `<article class="asset-card"><div class="asset-card-info"><strong>${esc(p.provider)}</strong><div>${p.credential_required ? (p.credential_present ? '● configured' : '○ credential missing') : '● keyless endpoint'}</div><small>${esc(p.model || 'default model')}</small><br><small>${esc(p.base_url || 'default endpoint')}</small></div></article>`).join('')}</div></div>`;
+                    const preset = data.model_preset || {};
+                    const roles = Object.entries(preset.roles || {}).map(([role, route]) => `<tr><td>${esc(role)}</td><td>${esc(route.backbone)}</td><td>${esc(route.advisor || '—')}</td></tr>`).join('');
+                    const health = Object.entries(preset.health || {}).map(([provider, result]) => `${esc(provider)}: ${result.ok ? '● ready' : '○ unavailable'}`).join(' · ') || 'Health checks run when selecting GLM + Qwen.';
+                    panelBody.innerHTML = `<div style="padding:2rem;max-width:1000px"><h1>Agent Model Routing</h1><p>Current preset: <strong>${esc(preset.label || 'GPT')}</strong> · ${health}</p><table class="ge-model-table"><thead><tr><th>Role</th><th>Executable backbone</th><th>Advisory model</th></tr></thead><tbody>${roles}</tbody></table><h1 style="margin-top:2rem">Model & Image Providers</h1><p>Credentials are never returned to the browser.</p><div class="card-grid">${(data.providers || []).map(p => `<article class="asset-card"><div class="asset-card-info"><strong>${esc(p.provider)}</strong><div>${p.credential_required ? (p.credential_present ? '● configured' : '○ credential missing') : '● keyless endpoint'}</div><small>${esc(p.model || 'default model')}</small><br><small>${esc(p.base_url || 'default endpoint')}</small></div></article>`).join('')}</div></div>`;
                 } else if (view === 'review') {
                     const acceptance = data.acceptance || {};
                     const reviewer = acceptance.reviewer || {};

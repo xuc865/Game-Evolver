@@ -98,6 +98,8 @@ def build_launch_command(cli: str, params: dict) -> str:
                 parts.extend([flag[0], shlex.quote(actual)])
         elif value:
             parts.append(flag)
+    for override in config.get("config_overrides", []):
+        parts.extend(["-c", shlex.quote(str(override))])
     return " ".join(parts)
 
 
@@ -132,6 +134,18 @@ def ensure_codex_role_doc(team_root: str, role: str) -> Path:
         raise ValueError(f"Missing Codex role source for '{role}': {source_path}")
 
     content = _strip_yaml_frontmatter(source_path.read_text(encoding="utf-8"))
+    preset_path = root / ".vibegame" / "model-preset.json"
+    try:
+        preset = json.loads(preset_path.read_text(encoding="utf-8")).get("preset")
+    except (OSError, json.JSONDecodeError):
+        preset = "gpt"
+    if preset == "glm-qwen" and role in {"orchestrator", "designer", "reviewer", "auditor"}:
+        content += (
+            "\n\n## Hybrid model policy\n"
+            "Your executable backbone is Qwen. For consequential design or review decisions, "
+            "obtain a GLM second opinion with `vibegame model ask glm --prompt \"...\"`, "
+            "then reconcile that advice with project evidence before acting.\n"
+        )
     if not role_doc.exists() or role_doc.read_text(encoding="utf-8") != content:
         role_doc.write_text(content, encoding="utf-8")
     return role_doc

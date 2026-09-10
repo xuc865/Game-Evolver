@@ -15,6 +15,7 @@ import logging
 logger = logging.getLogger('vibegame.dashboard')
 import json
 import os
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -507,7 +508,10 @@ def build_workspace_payload(project_dir: Optional[Path], view: str) -> dict[str,
             'base_url': os.environ.get('KREA2_BASE_URL', 'http://29.116.237.141:80'),
             'model': 'krea2',
         })
-        return {'view': view, 'providers': rows, 'secrets_exposed': False}
+        return {
+            'view': view, 'providers': rows, 'secrets_exposed': False,
+            'model_preset': _model_preset_payload(project_dir),
+        }
     return {'view': view, 'error': 'unknown workspace view'}
 
 
@@ -519,6 +523,7 @@ def build_game_evolver_payload(project_dir: Optional[Path]) -> dict[str, Any]:
     reviewer_accepted = review.get('reviewer', {}).get('verdict') == 'accepted'
     human_approved = review.get('human', {}).get('approved') is True
     baseline = _read_project_json(project_dir, 'game-evolver-baseline.json')
+    preset = _model_preset_payload(project_dir)
     return {
         'engine': 'vibegame-phaser',
         'project': project_dir.name,
@@ -528,7 +533,131 @@ def build_game_evolver_payload(project_dir: Optional[Path]) -> dict[str, Any]:
         'promoted': bool(baseline and baseline.get('status') == 'accepted'),
         'baseline': baseline,
         'phase': 'evolve' if baseline else 'review' if reviewer_accepted else 'produce',
+        'model_preset': preset,
     }
+
+
+MODEL_PRESETS = {
+    'gpt': {
+        'label': 'GPT',
+        'cli': 'codex',
+        'model': 'gpt-5.6-sol',
+        'advisor': None,
+    },
+    'glm-qwen': {
+        'label': 'GLM + Qwen',
+        'cli': 'qwen-codex',
+        'model': 'Qwen3.8-27B-node1',
+        'advisor': 'GLM-5.3-Flash-node1',
+    },
+}
+TEAM_ROLES = ('orchestrator', 'artist', 'designer', 'reviewer', 'architect', 'programmer', 'auditor', 'player')
+GLM_ADVISORY_ROLES = frozenset({'orchestrator', 'designer', 'reviewer', 'auditor'})
+
+
+def _model_preset_payload(project_dir: Path) -> dict[str, Any]:
+    path = project_dir / '.vibegame' / 'model-preset.json'
+    saved = _read_project_json(project_dir, '.vibegame/model-preset.json') or {}
+    preset_id = str(saved.get('preset') or 'gpt')
+    if preset_id not in MODEL_PRESETS:
+        preset_id = 'gpt'
+    config = MODEL_PRESETS[preset_id]
+    roles = {
+        role: {
+            'backbone': config['model'],
+            'advisor': config['advisor'] if role in GLM_ADVISORY_ROLES else None,
+        }
+        for role in TEAM_ROLES
+    }
+    return {
+        'id': preset_id,
+        'label': config['label'],
+        'roles': roles,
+        'health': saved.get('health', {}),
+        'updated_at': saved.get('updated_at'),
+        'restart_required': bool(saved.get('restart_required', False)),
+        'path': str(path.relative_to(project_dir)),
+    }
+
+
+def _probe_hybrid_models() -> dict[str, Any]:
+    from model_gateway import ModelGateway, ModelRequest, ProviderConfig
+
+    health: dict[str, Any] = {}
+    for provider in ('glm', 'qwen'):
+        cfg = ProviderConfig.from_env(provider)
+        result = ModelGateway(cfg).generate(
+            ModelRequest('Reply with exactly OK.', max_output_tokens=128)
+        )
+        health[provider] = {
+            'ok': result.ok,
+            'model': cfg.model,
+            'base_url': cfg.base_url,
+            'error': result.error[:240] if not result.ok else '',
+        }
+    return health
+
+
+def _apply_model_preset(project_dir: Path, preset_id: str) -> dict[str, Any]:
+    if preset_id not in MODEL_PRESETS:
+        raise ValueError('preset must be gpt or glm-qwen')
+    health = _probe_hybrid_models() if preset_id == 'glm-qwen' else {}
+    failed = [name for name, result in health.items() if not result.get('ok')]
+    if failed:
+        raise RuntimeError(f"model health check failed: {', '.join(failed)}")
+
+    # Existing workspaces receive the current launch adapter as part of the
+    # preset transaction; newly initialized projects already copy these files.
+    source_team = Path(__file__).resolve().parent.parent / '.vibegame' / 'team'
+    target_team = project_dir / '.vibegame' / 'team'
+    for name in ('launch.py', 'models.json'):
+        shutil.copy2(source_team / name, target_team / name)
+
+    settings_path = project_dir / '.vibegame' / 'settings.json'
+    settings = _read_project_json(project_dir, '.vibegame/settings.json') or {}
+    config = MODEL_PRESETS[preset_id]
+    agents = settings.setdefault('agents', {})
+    for role in TEAM_ROLES:
+        agents[role] = {'cli': config['cli'], 'model': config['model']}
+    temporary = settings_path.with_suffix('.json.tmp')
+    temporary.write_text(json.dumps(settings, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    temporary.replace(settings_path)
+
+    preset_path = project_dir / '.vibegame' / 'model-preset.json'
+    value = {
+        'schema_version': 1,
+        'preset': preset_id,
+        'health': health,
+        'updated_at': datetime.now().astimezone().isoformat(),
+        'restart_required': True,
+    }
+    temporary = preset_path.with_suffix('.json.tmp')
+    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    temporary.replace(preset_path)
+    return _model_preset_payload(project_dir)
+
+
+def _schedule_team_restart(project_dir: Path, host: str, port: int) -> None:
+    """Restart out-of-process after the API response reaches the browser."""
+    command = [
+        sys.executable, '-m', 'cli.main', 'start', '--project', str(project_dir),
+        '--host', host, '--port', str(port), '--no-open-browser',
+    ]
+    env = os.environ.copy()
+    env['PATH'] = str(Path(sys.executable).parent) + os.pathsep + env.get('PATH', '')
+    log_path = project_dir / '.vibegame' / 'logs' / 'model-preset-restart.log'
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def launch() -> None:
+        with log_path.open('a', encoding='utf-8') as stream:
+            subprocess.Popen(
+                command, cwd=Path(__file__).resolve().parents[2], env=env,
+                stdout=stream, stderr=subprocess.STDOUT, start_new_session=True,
+            )
+
+    timer = threading.Timer(0.8, launch)
+    timer.daemon = True
+    timer.start()
 
 
 PLAY_PREFIX = '/play'
@@ -3110,6 +3239,29 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         """Handle POST requests."""
         parsed = urlparse(self.path)
         path = parsed.path
+
+        if path == '/api/model-preset':
+            if not PROJECT_DIR:
+                self._send_json({'error': 'No project directory configured'}, 400)
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = json.loads(self.rfile.read(content_length) or b'{}')
+                preset = _apply_model_preset(PROJECT_DIR, str(body.get('preset') or ''))
+                self._send_json({'ok': True, 'model_preset': preset, 'restarting': True})
+                _schedule_team_restart(
+                    PROJECT_DIR,
+                    str(getattr(self.server, 'server_host', '127.0.0.1')),
+                    int(self.server.server_port),
+                )
+            except json.JSONDecodeError:
+                self._send_json({'error': 'Invalid JSON'}, 400)
+            except (ValueError, RuntimeError) as exc:
+                self._send_json({'error': str(exc)}, 400)
+            except Exception as exc:
+                logger.exception('model_preset_update_failed')
+                self._send_json({'error': str(exc)}, 500)
+            return
 
         if path in ('/api/game-evolver/validate', '/api/game-evolver/promote'):
             if not PROJECT_DIR:

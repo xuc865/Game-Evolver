@@ -57,6 +57,24 @@
       "skip_permissions": "--dangerously-bypass-approvals-and-sandbox"
     }
   },
+  "qwen-codex": {
+    "command": "codex",
+    "models": ["Qwen3.8-27B-node1"],
+    "default_model": "Qwen3.8-27B-node1",
+    "trust_enter": true,
+    "system_prompt_flag": null,
+    "initial_prompt_mode": "argument",
+    "resume": "resume",
+    "default_params": {"skip_permissions": true},
+    "flags": {
+      "model": ["--model", true],
+      "skip_permissions": "--dangerously-bypass-approvals-and-sandbox"
+    },
+    "config_overrides": [
+      "model_provider=\"qwen_vibegame\"",
+      "model_providers.qwen_vibegame={name=\"Qwen VibeGame\",base_url=\"http://29.116.237.141:8080/v1\",wire_api=\"responses\",requires_openai_auth=false,supports_websockets=false}"
+    ]
+  },
   "glm": {
     "command": "claude",
     "models": ["glm-5.1"],

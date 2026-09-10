@@ -58,3 +58,21 @@ def smoke(
         "elapsed": round(result.elapsed, 3),
     }, ensure_ascii=False))
     raise typer.Exit(0 if result.ok else 1)
+
+
+@model_app.command("ask")
+def ask(
+    provider: str = typer.Argument(..., help=f"One of: {', '.join(PROVIDER_IDS)}"),
+    prompt: str = typer.Option(..., "--prompt", help="Question for the advisory model"),
+) -> None:
+    """Ask one configured advisory model and print only its response text."""
+    provider = provider.casefold()
+    if provider not in PROVIDER_IDS:
+        raise typer.BadParameter(f"expected one of: {', '.join(PROVIDER_IDS)}")
+    result = ModelGateway(ProviderConfig.from_env(provider)).generate(
+        ModelRequest(prompt, max_output_tokens=2048)
+    )
+    if not result.ok:
+        print(result.error)
+        raise typer.Exit(1)
+    print(result.text)
