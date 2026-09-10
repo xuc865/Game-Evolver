@@ -278,6 +278,11 @@ def build_parser() -> argparse.ArgumentParser:
     vg_promote.add_argument("--project", type=Path, required=True)
     vg_promote.add_argument("--accepted-by", default="human")
     vg_promote.add_argument("--force", action="store_true")
+    vg_promote.add_argument(
+        "--unattended-experiment",
+        action="store_true",
+        help="accept an auditable automated gate while leaving human approval pending",
+    )
 
     return parser
 
@@ -2279,7 +2284,10 @@ def cmd_vibegame_promote(args: argparse.Namespace) -> int:
     from game_loop.vibegame_bridge import promote_vibegame_baseline
 
     manifest = promote_vibegame_baseline(
-        args.project, accepted_by=args.accepted_by, force=bool(args.force)
+        args.project,
+        accepted_by=args.accepted_by,
+        force=bool(args.force),
+        unattended_experiment=bool(args.unattended_experiment),
     )
     print(json.dumps(asdict(manifest), ensure_ascii=False, indent=2))
     return 0

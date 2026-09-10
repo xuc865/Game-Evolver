@@ -1,5 +1,6 @@
 from pathlib import Path
 from unittest.mock import Mock, patch
+import json
 
 import pytest
 
@@ -35,3 +36,27 @@ def test_reviewer_alone_cannot_promote(tmp_path: Path) -> None:
     with patch("game_loop.vibegame_bridge.validate_vibegame_project", return_value={"ok": True}):
         with pytest.raises(RuntimeError, match="human approval"):
             promote_vibegame_baseline(tmp_path, accepted_by="reviewer")
+
+
+def test_unattended_experiment_gate_keeps_human_pending(tmp_path: Path) -> None:
+    (tmp_path / ".vibegame" / "review").mkdir(parents=True)
+    (tmp_path / ".vibegame" / "seed-request.json").write_text('{"prompt":"boss"}')
+    (tmp_path / ".vibegame" / "review" / "play.png").write_bytes(b"evidence")
+    (tmp_path / ".vibegame" / "review" / "acceptance.json").write_text(
+        json.dumps({
+            "reviewer": {"verdict": "accepted"},
+            "human": {"approved": None},
+            "automated_experiment_gate": {
+                "mode": "unattended-experiment",
+                "verdict": "accepted",
+                "checks": {"runtime": True, "playability": True, "assets": True},
+                "evidence": [".vibegame/review/play.png"],
+            },
+        })
+    )
+    with patch("game_loop.vibegame_bridge.validate_vibegame_project", return_value={"ok": True}):
+        manifest = promote_vibegame_baseline(
+            tmp_path, accepted_by="automated-reviewer", unattended_experiment=True
+        )
+    assert manifest.approval_mode == "unattended-experiment"
+    assert manifest.human_approval == "pending"

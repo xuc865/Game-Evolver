@@ -29,6 +29,9 @@ class BaselineManifest:
     accepted_by: str
     accepted_at: str
     validation: dict[str, Any]
+    approval_mode: str = "human"
+    human_approval: str = "approved"
+    automated_gate: dict[str, Any] | None = None
     evolution_seed: bool = True
 
 
@@ -150,6 +153,7 @@ def promote_vibegame_baseline(
     *,
     accepted_by: str,
     force: bool = False,
+    unattended_experiment: bool = False,
 ) -> BaselineManifest:
     project_dir = project_dir.resolve()
     seed_request_path = project_dir / ".vibegame" / "seed-request.json"
@@ -164,12 +168,35 @@ def promote_vibegame_baseline(
     review = json.loads(review_path.read_text(encoding="utf-8")) if review_path.is_file() else {}
     reviewer_accepted = review.get("reviewer", {}).get("verdict") == "accepted"
     human_accepted = review.get("human", {}).get("approved") is True
-    if not force and not (reviewer_accepted and human_accepted):
+    automated_gate = review.get("automated_experiment_gate", {})
+    automated_checks = automated_gate.get("checks", {})
+    evidence_paths = automated_gate.get("evidence", [])
+    evidence_valid = bool(evidence_paths) and all(
+        isinstance(value, str)
+        and value
+        and (project_dir / value).resolve().is_relative_to(project_dir)
+        and (project_dir / value).is_file()
+        for value in evidence_paths
+    )
+    unattended_accepted = (
+        unattended_experiment
+        and reviewer_accepted
+        and automated_gate.get("mode") == "unattended-experiment"
+        and automated_gate.get("verdict") == "accepted"
+        and all(automated_checks.get(name) is True for name in ("runtime", "playability", "assets"))
+        and evidence_valid
+        and review.get("human", {}).get("approved") is None
+    )
+    if not force and not (reviewer_accepted and human_accepted) and not unattended_accepted:
         raise RuntimeError(
             "reviewer verdict and human approval are both required; record them in "
-            ".vibegame/review/acceptance.json after Play review, or use --force for an "
-            "explicit manual override"
+            ".vibegame/review/acceptance.json after Play review. Unattended experiments "
+            "may instead use --unattended-experiment with a passing automated_experiment_gate "
+            "and human.approved left null; --force remains an explicit manual override"
         )
+    approval_mode = "unattended-experiment" if unattended_accepted else "human"
+    if force and not (reviewer_accepted and human_accepted) and not unattended_accepted:
+        approval_mode = "manual-force"
     manifest = BaselineManifest(
         schema_version=1,
         status="accepted",
@@ -180,6 +207,9 @@ def promote_vibegame_baseline(
         accepted_by=accepted_by,
         accepted_at=datetime.now(timezone.utc).isoformat(),
         validation=validation,
+        approval_mode=approval_mode,
+        human_approval="pending" if unattended_accepted else ("approved" if human_accepted else "overridden"),
+        automated_gate=automated_gate if unattended_accepted else None,
     )
     (project_dir / BASELINE_FILENAME).write_text(
         json.dumps(asdict(manifest), ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
