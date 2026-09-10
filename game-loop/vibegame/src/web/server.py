@@ -1349,6 +1349,15 @@ class Database:
             self.conn.commit()
             return cur.rowcount > 0
 
+    def detach_pane(self, composite_id: str) -> None:
+        """Keep transcript history but make a dead session non-messageable."""
+        with self._lock:
+            self.conn.execute(
+                "UPDATE sessions SET tmux_pane = NULL, status = 'stopped' WHERE id = ?",
+                (composite_id,),
+            )
+            self.conn.commit()
+
     def close(self):
         self.conn.close()
 
@@ -1801,7 +1810,7 @@ def _dashboard_sessions(status: Optional[str] = None, limit: int = 50) -> list[d
     if db is None:
         return []
     sessions = db.get_sessions(status, limit=limit, project_dir=PROJECT_DIR)
-    if _hydrate_pending_codex_sessions(sessions):
+    if _reconcile_codex_role_sessions(sessions):
         sessions = db.get_sessions(status, limit=limit, project_dir=PROJECT_DIR)
     return sessions
 
@@ -1914,16 +1923,71 @@ def _discover_codex_transcript_for_pane(
     return session_id, str(path)
 
 
-def _hydrate_pending_codex_sessions(sessions: list[dict]) -> bool:
-    """Replace hook-less Codex placeholders with their real transcript rows."""
+def _runtime_role_panes() -> dict[str, str]:
+    """Read the authoritative role-to-pane mapping written by team launchers."""
+    if not PROJECT_DIR:
+        return {}
+    state_path = PROJECT_DIR / '.vibegame' / 'team' / 'state.json'
+    try:
+        state = json.loads(state_path.read_text(encoding='utf-8'))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    result: dict[str, str] = {}
+    lead_pane = str((state.get('lead') or {}).get('pane_id') or '').strip()
+    if lead_pane:
+        result['orchestrator'] = lead_pane
+    for name, agent in (state.get('agents') or {}).items():
+        pane = str((agent or {}).get('pane_id') or '').strip()
+        if pane:
+            result[str(name)] = pane
+    return result
+
+
+def _pane_is_live_for_workspace(pane: str | None, working_dir: str | None) -> bool:
+    return bool(
+        pane
+        and _tmux_pane_process_ids(pane)
+        and _tmux_pane_matches_working_dir(pane, working_dir)
+    )
+
+
+def _reconcile_codex_role_sessions(sessions: list[dict]) -> bool:
+    """Bind fixed roles to their current panes and detach stale pane ids.
+
+    Model preset switches restart roles and tmux assigns new pane ids. Codex
+    hooks are not available on every provider, so state.json plus the live
+    process's open rollout is the reliable source of truth.
+    """
     if db is None:
         return False
     changed = False
+    role_panes = _runtime_role_panes()
     for session in sessions:
-        if session.get('source_app') != 'codex-pending':
+        name = str(session.get('name') or '')
+        if name not in Database.FIXED_ROLES:
+            continue
+        expected_pane = role_panes.get(name)
+        current_pane = session.get('tmux_pane')
+        if not _pane_is_live_for_workspace(expected_pane, session.get('working_dir')):
+            expected_pane = None
+
+        needs_binding = bool(expected_pane) and (
+            current_pane != expected_pane
+            or session.get('source_app') == 'codex-pending'
+            or not session.get('transcript_path')
+        )
+        if not needs_binding:
+            if current_pane and not _pane_is_live_for_workspace(
+                current_pane, session.get('working_dir')
+            ):
+                db.detach_pane(session['id'])
+                logger.info(
+                    '[SESSION] detached stale role=%s pane=%s', name, current_pane,
+                )
+                changed = True
             continue
         discovered = _discover_codex_transcript_for_pane(
-            session.get('tmux_pane'),
+            expected_pane,
             session.get('working_dir'),
         )
         if not discovered:
@@ -1935,13 +1999,13 @@ def _hydrate_pending_codex_sessions(sessions: list[dict]) -> bool:
             name=session.get('name'),
             transcript_path=transcript_path,
             working_dir=session.get('working_dir'),
-            tmux_pane=session.get('tmux_pane'),
+            tmux_pane=expected_pane,
             model=session.get('model'),
             status=session.get('status'),
         )
         logger.info(
-            '[SESSION] hydrated pending Codex role=%s pane=%s session=%s',
-            session.get('name'), session.get('tmux_pane'), composite_id,
+            '[SESSION] reconciled Codex role=%s pane=%s session=%s',
+            session.get('name'), expected_pane, composite_id,
         )
         changed = True
     return changed

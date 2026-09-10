@@ -45,3 +45,18 @@ def test_discover_codex_transcript_uses_open_top_level_rollout(tmp_path, monkeyp
 def test_rollout_identity_rejects_different_workspace(tmp_path):
     rollout = _rollout(tmp_path, session_id="wrong-workspace")
     assert server._codex_rollout_identity(rollout, str(tmp_path / "elsewhere")) is None
+
+
+def test_runtime_role_panes_includes_restarted_lead(tmp_path, monkeypatch):
+    state_path = tmp_path / ".vibegame" / "team" / "state.json"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(json.dumps({
+        "lead": {"pane_id": "%7"},
+        "agents": {"designer": {"pane_id": "%4"}},
+    }), encoding="utf-8")
+    monkeypatch.setattr(server, "PROJECT_DIR", tmp_path)
+
+    assert server._runtime_role_panes() == {
+        "orchestrator": "%7",
+        "designer": "%4",
+    }
