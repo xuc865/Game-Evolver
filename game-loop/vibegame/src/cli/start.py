@@ -116,17 +116,20 @@ def _configure_logging(project_path: Path, debug: bool = False) -> Path:
 def _run_lead(project_path: Path, args: str, debug: bool = False) -> sp.CompletedProcess:
     """Run `vibegame lead` with proper env from the project directory.
 
-    Uses the globally-installed `vibegame` CLI; the team/ runtime modules are
-    found in the project's .vibegame/ via VIBEGAME_TEAM_DIR.
+    Re-enter through the current interpreter so editable installs and direct
+    module invocations do not require a separate ``vibegame`` executable on
+    PATH. Team runtime modules are found in the project's .vibegame/ via
+    VIBEGAME_TEAM_DIR.
     """
     team_dir = project_path / ".vibegame" / "team"
     env = os.environ.copy()
+    env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env.get("PATH", "")
     env["VIBEGAME_ROLE"] = "orchestrator"
     env["VIBEGAME_TEAM_DIR"] = str(team_dir)
     if debug:
         env["VIBEGAME_DEBUG"] = "1"
     return sp.run(
-        ["vibegame", "lead", *shlex.split(args)],
+        [sys.executable, "-m", "cli.main", "lead", *shlex.split(args)],
         cwd=project_path,
         env=env,
         capture_output=True,
@@ -1008,6 +1011,7 @@ def start(
             orch_env = {
                 "VIBEGAME_ROLE": "orchestrator",
                 "VIBEGAME_TEAM_DIR": str(team_dir),
+                "PATH": str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", ""),
             }
             for key, val in (orch_config.get("env") or {}).items():
                 orch_env[key] = resolve_env_value(val, orch_model, runtime_env)
