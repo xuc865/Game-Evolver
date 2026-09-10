@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import hashlib
 from pathlib import Path
 
 
@@ -91,4 +92,6 @@ def workspace_slug(explicit: str | None = None) -> str:
 
 
 def default_session_name(explicit: str | None = None) -> str:
-    return f"vibegame-{workspace_slug(explicit)}"
+    root = workspace_root(explicit)
+    suffix = hashlib.sha256(str(root).encode("utf-8")).hexdigest()[:8]
+    return f"vibegame-{workspace_slug(explicit)}-{suffix}"
