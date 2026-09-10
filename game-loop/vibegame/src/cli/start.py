@@ -114,10 +114,12 @@ def _configure_logging(project_path: Path, debug: bool = False) -> Path:
 
 
 def _run_lead(project_path: Path, args: str, debug: bool = False) -> sp.CompletedProcess:
-    """Run `vibegame lead` with proper env from the project directory.
+    """Run ``vibegame lead`` with the same interpreter as this process.
 
-    Uses the globally-installed `vibegame` CLI; the team/ runtime modules are
-    found in the project's .vibegame/ via VIBEGAME_TEAM_DIR.
+    Invoking a bare ``vibegame`` executable fails for valid direct-entry-point
+    launches when the virtual environment's ``bin`` directory is not on PATH.
+    ``python -m cli.main`` keeps start/lead on the installed package and Python
+    environment that the user actually selected.
     """
     team_dir = project_path / ".vibegame" / "team"
     env = os.environ.copy()
@@ -126,7 +128,7 @@ def _run_lead(project_path: Path, args: str, debug: bool = False) -> sp.Complete
     if debug:
         env["VIBEGAME_DEBUG"] = "1"
     return sp.run(
-        ["vibegame", "lead", *shlex.split(args)],
+        [sys.executable, "-m", "cli.main", "lead", *shlex.split(args)],
         cwd=project_path,
         env=env,
         capture_output=True,
@@ -689,6 +691,10 @@ def _write_launch_script(
     lines = [
         "#!/bin/sh",
         "set -e",
+        # Keep child panes on the same installed VibeGame entry point even
+        # when the parent was invoked as ``/path/to/venv/bin/vibegame`` and
+        # that virtualenv was never activated in the interactive shell.
+        f"export PATH={shlex.quote(str(Path(sys.executable).parent))}:$PATH",
     ]
     for key, val in env_vars.items():
         lines.append(f"export {key}={shlex.quote(val)}")

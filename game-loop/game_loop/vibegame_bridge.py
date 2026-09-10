@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import shutil
 import subprocess
@@ -30,6 +31,8 @@ class BaselineManifest:
     accepted_at: str
     validation: dict[str, Any]
     evolution_seed: bool = True
+    acceptance_mode: str = "human"
+    unattended_evidence: dict[str, Any] | None = None
 
 
 def _vibegame_command(*args: str) -> list[str]:
@@ -150,6 +153,7 @@ def promote_vibegame_baseline(
     *,
     accepted_by: str,
     force: bool = False,
+    unattended_evidence: Path | None = None,
 ) -> BaselineManifest:
     project_dir = project_dir.resolve()
     seed_request_path = project_dir / ".vibegame" / "seed-request.json"
@@ -164,12 +168,47 @@ def promote_vibegame_baseline(
     review = json.loads(review_path.read_text(encoding="utf-8")) if review_path.is_file() else {}
     reviewer_accepted = review.get("reviewer", {}).get("verdict") == "accepted"
     human_accepted = review.get("human", {}).get("approved") is True
-    if not force and not (reviewer_accepted and human_accepted):
+    experiment_evidence: dict[str, Any] | None = None
+    acceptance_mode = "human"
+    if unattended_evidence is not None:
+        if force:
+            raise ValueError("--force and --unattended-evidence are mutually exclusive")
+        evidence_path = unattended_evidence.resolve()
+        if not evidence_path.is_file():
+            raise FileNotFoundError(evidence_path)
+        experiment_evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+        valid_experiment_gate = (
+            experiment_evidence.get("schema_version") == 1
+            and experiment_evidence.get("gate") == "unattended-experiment"
+            and experiment_evidence.get("human_approval_pending") is True
+            and experiment_evidence.get("automated_playtest", {}).get("passed") is True
+            and bool(experiment_evidence.get("requested_by"))
+        )
+        if human_accepted:
+            raise RuntimeError(
+                "unattended experiment evidence requires human approval to remain pending"
+            )
+        if not (reviewer_accepted and valid_experiment_gate):
+            raise RuntimeError(
+                "unattended experiment promotion requires reviewer acceptance and valid "
+                "automated-playtest evidence with human_approval_pending=true"
+            )
+        acceptance_mode = "unattended-experiment"
+        experiment_evidence = {
+            "path": str(evidence_path),
+            "sha256": hashlib.sha256(evidence_path.read_bytes()).hexdigest(),
+            "gate": experiment_evidence["gate"],
+            "requested_by": experiment_evidence["requested_by"],
+            "human_approval_pending": True,
+        }
+    elif not force and not (reviewer_accepted and human_accepted):
         raise RuntimeError(
             "reviewer verdict and human approval are both required; record them in "
             ".vibegame/review/acceptance.json after Play review, or use --force for an "
             "explicit manual override"
         )
+    elif force:
+        acceptance_mode = "manual-force"
     manifest = BaselineManifest(
         schema_version=1,
         status="accepted",
@@ -180,6 +219,8 @@ def promote_vibegame_baseline(
         accepted_by=accepted_by,
         accepted_at=datetime.now(timezone.utc).isoformat(),
         validation=validation,
+        acceptance_mode=acceptance_mode,
+        unattended_evidence=experiment_evidence,
     )
     (project_dir / BASELINE_FILENAME).write_text(
         json.dumps(asdict(manifest), ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
