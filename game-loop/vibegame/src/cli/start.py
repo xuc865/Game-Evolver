@@ -839,7 +839,10 @@ def start(
         if (team_dir / "messages.py").is_file():
             _run_lead(project_path, "close -f")
         _clear_session_lock(project_path)
-    init_state(session_name, str(team_dir))
+    # A forced-new launch must not carry pane ids from a previous (possibly
+    # collided or renamed) tmux session. Otherwise `lead agent` treats those
+    # rows as live and idempotently reuses agents outside the new session.
+    init_state(session_name, str(team_dir), reset_agents=new)
     if new:
         update_lead(
             explicit_team_dir=str(team_dir),

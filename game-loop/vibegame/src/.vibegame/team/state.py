@@ -115,11 +115,18 @@ def mutate_state(
         return state, result
 
 
-def init_state(session_name: str | None, explicit_team_dir: str | None = None) -> dict:
+def init_state(
+    session_name: str | None,
+    explicit_team_dir: str | None = None,
+    *,
+    reset_agents: bool = False,
+) -> dict:
     def _mutate(state: dict) -> None:
         if session_name:
             state["session_name"] = session_name
         state["lead"]["started_at"] = _now()
+        if reset_agents:
+            state["agents"] = {}
     return mutate_state(_mutate, explicit_team_dir)[0]
 
 
