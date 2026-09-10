@@ -113,6 +113,35 @@ def _max_tokens_recovery_prompt(cwd: Path) -> str:
     )
 
 
+def _artifact_recovery_prompt(
+    cwd: Path,
+    *,
+    artifact_relpath: str,
+    artifact_changed: bool,
+    finish_reason: str,
+) -> str:
+    ignored = {".git", ".godot", ".circuit_home", ".circuit_sessions", "node_modules"}
+    files = sorted(
+        path.relative_to(cwd).as_posix()
+        for path in cwd.rglob("*")
+        if path.is_file() and not any(
+            part in ignored for part in path.relative_to(cwd).parts
+        )
+    )
+    inventory = "\n".join(f"- {path}" for path in files[:120]) or "- (no files)"
+    if len(files) > 120:
+        inventory += f"\n- ... {len(files) - 120} additional files"
+    state = "changed" if artifact_changed else "unchanged or missing"
+    return (
+        "The required artifact was still not updated. "
+        f"`{artifact_relpath}` is currently {state}. "
+        f"The previous turn ended with finish reason `{finish_reason}`. "
+        "Stop inspecting and make one concrete production edit now. "
+        "Do not summarize; do not explain; do not continue with only tests.\n\n"
+        f"Workspace inventory:\n{inventory}"
+    )
+
+
 def _provider_failure_is_recoverable(error: BaseException) -> bool:
     text = str(error).casefold()
     return (
@@ -672,6 +701,81 @@ class PythonSDKRunner:
                         if sdk_result.session_root is None
                         else str(sdk_result.session_root)
                     ),
+                )
+            if (
+                config.artifact_relpath is not None
+                and initial_artifact_digest is not None
+                and _artifact_digest(
+                    _workspace_artifact(cwd, config.artifact_relpath)
+                ) == initial_artifact_digest
+                and result.finish_reason in {"completed", "error"}
+            ):
+                recovery_outcome: dict[str, Any] = {}
+
+                def recover_artifact() -> None:
+                    try:
+                        recovery_outcome["result"] = session.run(
+                            _artifact_recovery_prompt(
+                                cwd,
+                                artifact_relpath=config.artifact_relpath,
+                                artifact_changed=False,
+                                finish_reason=result.finish_reason,
+                            )
+                        )
+                    except BaseException as exc:  # noqa: BLE001 - owned transport.
+                        recovery_outcome["error"] = exc
+
+                recovery_worker = threading.Thread(
+                    target=recover_artifact,
+                    name="dsh-owned-artifact-recovery",
+                    daemon=True,
+                )
+                recovery_worker.start()
+                remaining = max(
+                    0.0, config.timeout_seconds - (time.monotonic() - started)
+                )
+                recovery_worker.join(remaining)
+                if recovery_worker.is_alive():
+                    _close_harness(harness)
+                    recovery_worker.join(config.shutdown_timeout_seconds)
+                    raise TimeoutError(
+                        "DeepSeek Harness artifact recovery exceeded the hard runtime deadline"
+                    )
+                if "error" in recovery_outcome:
+                    _close_harness(harness)
+                    raise recovery_outcome["error"]
+                recovery_result = recovery_outcome["result"]
+                result = DeepSeekHarnessRunnerResult(
+                    finish_reason=recovery_result.finish_reason,
+                    final_response=recovery_result.final_response,
+                    events=tuple(dict(item) for item in sdk_result.events)
+                    + tuple(dict(item) for item in recovery_result.events),
+                    notifications=tuple(
+                        _notification_dict(item) for item in sdk_result.notifications
+                    )
+                    + ({
+                        "method": "game-loop.artifact-recovery",
+                        "payload": {
+                            "trigger": "unchanged-artifact",
+                            "initial_finish_reason": sdk_result.finish_reason,
+                        },
+                    },)
+                    + tuple(
+                        _notification_dict(item)
+                        for item in recovery_result.notifications
+                    ),
+                    session_root=(
+                        str(recovery_result.session_root)
+                        if recovery_result.session_root is not None
+                        else (
+                            None
+                            if sdk_result.session_root is None
+                            else str(sdk_result.session_root)
+                        )
+                    ),
+                    model_calls=2,
+                    recovery_attempted=True,
+                    recovery_completed=recovery_result.finish_reason == "completed",
                 )
         try:
             return result

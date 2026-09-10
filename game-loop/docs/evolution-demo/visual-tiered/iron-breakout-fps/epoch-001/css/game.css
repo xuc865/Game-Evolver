@@ -1,0 +1,1657 @@
+* {
+  box-sizing: border-box;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: #05070a;
+  font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+}
+
+canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+#hud {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  color: #fff;
+  pointer-events: none;
+}
+
+.hud-box {
+  position: absolute;
+  padding: 13px 15px;
+  background: rgba(5, 8, 12, 0.76);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 0 22px rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(3px);
+}
+
+#healthPanel {
+  top: 20px;
+  left: 20px;
+  width: 260px;
+}
+
+#gameInfo {
+  top: 284px;
+  right: 20px;
+  min-width: 220px;
+  line-height: 1.8;
+  font-size: 13px;
+  letter-spacing: 1px;
+  text-align: right;
+}
+
+#ammoText {
+  color: #ffe08a;
+  font-size: 15px;
+  font-weight: 900;
+  letter-spacing: 2px;
+  text-shadow: 0 0 10px rgba(255, 183, 72, 0.42);
+}
+
+#ammoText.low {
+  color: #ff6d58;
+  animation: ammoPulse 0.55s ease-in-out infinite alternate;
+}
+
+#bestScoreText {
+  color: #ffd166;
+}
+
+#sfxCountText {
+  color: #5eead4;
+  font-weight: 700;
+}
+
+.audio-key {
+  padding: 1px 5px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+#streakText {
+  font-weight: 900;
+  color: #ffe08a;
+  transition: color 120ms linear, text-shadow 120ms linear;
+}
+
+#streakText.streak-hot {
+  color: #ff8a4c;
+  text-shadow: 0 0 10px rgba(255, 138, 76, 0.75);
+}
+
+#streakText.streak-blazing {
+  color: #ff5a3c;
+  text-shadow: 0 0 12px rgba(255, 90, 60, 0.85);
+}
+
+/* -----------------------------------------------------------------------
+   连杀窗口倒计时条：实时显示 4.5 秒连杀判定窗口（STREAK_WINDOW）的剩余
+   时间。每次击杀由 registerKillStreak() 回满，随真实战斗计时逐帧衰减，
+   清空时连杀加成随 resetKillStreak() 结算归零；剩余不足 1 秒进入
+   streak-critical 警示脉冲。无连杀时整体隐藏。数据源与连杀计时完全
+   共用（killStreakTimer / STREAK_WINDOW），读数不会撒谎；真·暂停期间
+   updateVisualUI 不执行，本条随之冻结，与 epoch_005 暂停语义一致。
+   配色随连杀层级与 streakText 同步（琥珀 -> 炽热橙 -> 血红）。
+   ----------------------------------------------------------------------- */
+#streakTrack {
+  position: relative;
+  width: 170px;
+  height: 8px;
+  margin: 3px 0 7px auto;
+  border: 1px solid rgba(255, 224, 138, 0.5);
+  border-radius: 4px;
+  background: rgba(6, 10, 14, 0.72);
+  overflow: hidden;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+}
+
+#streakTrackFill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #ffdf6e 0%, #ffb056 100%);
+  box-shadow: 0 0 8px rgba(255, 217, 94, 0.55);
+  transition: width 100ms linear;
+}
+
+#streakTrackLabel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: #241703;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+#streakTrack.streak-hot {
+  border-color: rgba(255, 138, 76, 0.65);
+}
+
+#streakTrack.streak-hot #streakTrackFill {
+  background: linear-gradient(90deg, #ff8a4c 0%, #ffb056 100%);
+  box-shadow: 0 0 8px rgba(255, 138, 76, 0.7);
+}
+
+#streakTrack.streak-blazing {
+  border-color: rgba(255, 90, 60, 0.7);
+}
+
+#streakTrack.streak-blazing #streakTrackFill {
+  background: linear-gradient(90deg, #ff5a3c 0%, #ff8a4c 100%);
+  box-shadow: 0 0 10px rgba(255, 90, 60, 0.8);
+}
+
+#streakTrack.streak-critical {
+  animation: streakCriticalPulse 0.5s ease-in-out infinite alternate;
+}
+
+@keyframes streakCriticalPulse {
+  from { box-shadow: 0 0 4px rgba(255, 120, 80, 0.35); }
+  to { box-shadow: 0 0 16px rgba(255, 120, 80, 0.95); }
+}
+
+@media (max-width: 760px) {
+  #streakTrack {
+    width: 120px;
+  }
+}
+
+#combatLog {
+  position: absolute;
+  left: 20px;
+  bottom: 118px;
+  width: 270px;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 4px;
+  pointer-events: none;
+  font-size: 13px;
+  letter-spacing: 1px;
+}
+
+#combatLog .combat-log-entry {
+  padding: 4px 9px;
+  color: #e9f3f8;
+  background: rgba(5, 8, 12, 0.72);
+  border-left: 3px solid #5fd0ff;
+  opacity: 0;
+  transform: translateX(-12px);
+  transition: opacity 160ms linear, transform 160ms linear;
+}
+
+#combatLog .combat-log-entry.visible {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+#combatLog .combat-log-entry.lethal {
+  border-left-color: #ff8a4c;
+  color: #ffd9a0;
+}
+
+#combatLog .combat-log-entry.streak {
+  border-left-color: #ffd166;
+  color: #ffe9ad;
+  font-weight: 800;
+}
+
+#combatLog .combat-log-entry.danger {
+  border-left-color: #ff4d4d;
+  color: #ffd6d6;
+  font-weight: 800;
+  background: rgba(74, 6, 6, 0.78);
+}
+
+.result-streak-summary {
+  color: #ffd166;
+  font-weight: 700;
+}
+
+.result-streak-summary.hidden {
+  display: none;
+}
+
+#minimapPanel {
+  top: 20px;
+  right: 20px;
+  width: 220px;
+  padding: 9px 10px 8px;
+}
+
+#minimapHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  color: #dce9ef;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 2px;
+}
+
+#minimapHeader small {
+  color: #768b96;
+  font-size: 9px;
+  letter-spacing: 1px;
+}
+
+#minimap {
+  display: block;
+  width: 198px;
+  height: 198px;
+  background: #091015;
+  border: 1px solid rgba(157, 206, 224, 0.35);
+  box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.82);
+}
+
+.minimap-legend {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  color: #a9b8c0;
+  font-size: 9px;
+  letter-spacing: 1px;
+}
+
+.minimap-legend i {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 3px;
+  border-radius: 50%;
+}
+
+.legend-player { background: #ffffff; }
+.legend-enemy { background: #ff4a42; }
+.legend-supply { background: #68e899; }
+
+#healthHeader {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 2px;
+}
+
+#healthTrack {
+  height: 17px;
+  overflow: hidden;
+  background: #171b21;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+#healthFill {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, #38b84a, #75ea68);
+  box-shadow: 0 0 12px rgba(58, 222, 84, 0.55);
+  transition: width 80ms linear, background 150ms ease;
+}
+
+#objective {
+  position: absolute;
+  top: 25px;
+  left: 50%;
+  max-width: 520px;
+  padding: 8px 18px;
+  color: #f0c56b;
+  background: rgba(4, 7, 10, 0.68);
+  border-bottom: 2px solid rgba(240, 177, 70, 0.75);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-align: center;
+  transform: translateX(-50%);
+}
+
+#climbHint {
+  position: absolute;
+  left: 50%;
+  bottom: 95px;
+  padding: 9px 15px;
+  opacity: 0;
+  color: #fff3b5;
+  background: rgba(0, 0, 0, 0.68);
+  border: 1px solid rgba(255, 226, 128, 0.45);
+  font-size: 13px;
+  transform: translateX(-50%);
+  transition: opacity 120ms linear;
+}
+
+#pickupNotice {
+  position: absolute;
+  left: 50%;
+  bottom: 140px;
+  padding: 10px 18px;
+  opacity: 0;
+  color: #ffffff;
+  background: rgba(8, 15, 19, 0.84);
+  border: 1px solid rgba(111, 231, 151, 0.65);
+  box-shadow: 0 0 18px rgba(72, 222, 126, 0.22);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  transform: translateX(-50%);
+  transition: opacity 140ms linear;
+}
+
+#reloadIndicator {
+  position: absolute;
+  left: 50%;
+  bottom: 80px;
+  min-width: 170px;
+  padding: 8px 15px;
+  opacity: 0;
+  color: #ffd477;
+  background: rgba(7, 11, 14, 0.84);
+  border: 1px solid rgba(255, 191, 83, 0.52);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 3px;
+  text-align: center;
+  transform: translateX(-50%);
+  transition: opacity 100ms linear;
+}
+
+#reloadIndicator.visible {
+  opacity: 1;
+}
+
+/* 换弹进度条：与倒计时文字同框，宽度逐帧跟随 reloadTimer 填充。 */
+#reloadBar {
+  margin-top: 6px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 191, 83, 0.18);
+  overflow: hidden;
+}
+
+#reloadBarFill {
+  width: 0%;
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #ffb750, #ffd477);
+  box-shadow: 0 0 8px rgba(255, 191, 83, 0.7);
+}
+
+/* 换弹提示：与换弹框同位置（准星下方），由 updateAmmoUI() 与右侧弹药
+   读数共用同一弹药数据源。三级：弹匣偏低（琥珀）→ 弹匣已空（橙红）→
+   备弹耗尽（红色脉冲）。换弹进行中隐藏，由换弹框接管同一位置。 */
+#reloadPrompt {
+  position: absolute;
+  left: 50%;
+  bottom: 80px;
+  min-width: 200px;
+  padding: 8px 15px;
+  opacity: 0;
+  color: #ffd477;
+  background: rgba(7, 11, 14, 0.84);
+  border: 1px solid rgba(255, 191, 83, 0.52);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 3px;
+  text-align: center;
+  transform: translateX(-50%);
+  transition: opacity 100ms linear;
+}
+
+#reloadPrompt.visible {
+  opacity: 1;
+}
+
+#reloadPrompt.prompt-empty {
+  color: #ffb27a;
+  border-color: rgba(255, 140, 80, 0.75);
+  box-shadow: 0 0 14px rgba(255, 140, 80, 0.25);
+}
+
+#reloadPrompt.prompt-out {
+  color: #ff8f8f;
+  border-color: rgba(255, 84, 84, 0.8);
+  box-shadow: 0 0 14px rgba(255, 84, 84, 0.3);
+  animation: reloadPromptOutPulse 0.8s ease-in-out infinite;
+}
+
+@keyframes reloadPromptOutPulse {
+  0%, 100% { box-shadow: 0 0 14px rgba(255, 84, 84, 0.3); }
+  50% { box-shadow: 0 0 22px rgba(255, 84, 84, 0.55); }
+}
+
+/* ------------------------------------------------------------------
+   濒死警告：全屏红晕脉冲 + 危险横幅 + 最近威胁方位指针
+   ------------------------------------------------------------------ */
+#dangerVignette {
+  position: absolute;
+  inset: 0;
+  z-index: 14;
+  opacity: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse at center,
+    transparent 0,
+    transparent 38%,
+    rgba(158, 12, 12, 0.5) 78%,
+    rgba(96, 0, 0, 0.82) 100%
+  );
+  transition: opacity 160ms linear;
+}
+
+#dangerVignette.active {
+  animation: dangerPulse 1.05s ease-in-out infinite;
+}
+
+@keyframes dangerPulse {
+  0% { opacity: 0.32; }
+  50% { opacity: 0.86; }
+  100% { opacity: 0.32; }
+}
+
+#lowHealthWarning {
+  position: absolute;
+  left: 50%;
+  bottom: 196px;
+  transform: translateX(-50%);
+  text-align: center;
+  pointer-events: none;
+}
+
+#lowHealthWarning.hidden {
+  display: none;
+}
+
+.danger-banner {
+  padding: 9px 20px;
+  color: #fff1f1;
+  background: rgba(64, 4, 4, 0.86);
+  border: 1px solid rgba(255, 84, 84, 0.78);
+  box-shadow: 0 0 24px rgba(190, 18, 18, 0.55);
+  font-size: 15px;
+  font-weight: 900;
+  letter-spacing: 3px;
+  animation: dangerBannerFlash 0.9s steps(2, end) infinite;
+}
+
+@keyframes dangerBannerFlash {
+  0%, 100% { border-color: rgba(255, 84, 84, 0.78); }
+  50% { border-color: rgba(255, 190, 190, 0.95); }
+}
+
+.danger-direction {
+  margin-top: 7px;
+  color: #ffd0d0;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  text-shadow: 0 0 10px rgba(255, 40, 40, 0.85);
+}
+
+#dangerArrow {
+  display: inline-block;
+  transition: transform 120ms linear;
+}
+
+
+#scopeOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 18;
+  opacity: 0;
+  background: radial-gradient(
+    circle at center,
+    transparent 0,
+    transparent min(28vw, 44vh),
+    rgba(0, 0, 0, 0.96) calc(min(28vw, 44vh) + 3px),
+    #000 100%
+  );
+  transition: opacity 110ms ease;
+}
+
+#scopeOverlay.active {
+  opacity: 1;
+}
+
+.scope-ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(56vw, 88vh);
+  height: min(56vw, 88vh);
+  border: 3px solid rgba(10, 12, 13, 0.92);
+  border-radius: 50%;
+  box-shadow: inset 0 0 45px rgba(0, 0, 0, 0.52);
+  transform: translate(-50%, -50%);
+}
+
+.scope-line-x,
+.scope-line-y {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  background: rgba(18, 18, 18, 0.9);
+  box-shadow: 0 0 1px rgba(255, 255, 255, 0.45);
+  transform: translate(-50%, -50%);
+}
+
+.scope-line-x { width: min(56vw, 88vh); height: 1px; }
+.scope-line-y { width: 1px; height: min(56vw, 88vh); }
+
+.scope-center {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  border: 1px solid rgba(180, 30, 25, 0.92);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+
+#crosshair {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 28px;
+  height: 28px;
+  transform: translate(-50%, -50%);
+  filter: drop-shadow(0 0 2px #000);
+  /* 动态散布：--bloom 由 JS 每帧写入（px），四条短线沿各自轴向平移。 */
+  --bloom: 0px;
+}
+
+#crosshair span {
+  position: absolute;
+  display: block;
+  background: rgba(255, 255, 255, 0.97);
+  transition: none;
+}
+
+#crosshair .top,
+#crosshair .bottom {
+  left: 13px;
+  width: 2px;
+  height: 8px;
+}
+
+/* 开火时准星随真实散布张开，停火后回收，帮助玩家读弹道。 */
+#crosshair .top { top: 0; transform: translateY(calc(-1 * var(--bloom))); }
+#crosshair .bottom { bottom: 0; transform: translateY(var(--bloom)); }
+
+#crosshair .left,
+#crosshair .right {
+  top: 13px;
+  width: 8px;
+  height: 2px;
+}
+
+#crosshair .left { left: 0; transform: translateX(calc(-1 * var(--bloom))); }
+#crosshair .right { right: 0; transform: translateX(var(--bloom)); }
+
+/* 高倍散布：准星泛红提醒弹道已不可靠。 */
+#crosshair.is-blooming span {
+  background: rgba(255, 170, 120, 0.97);
+}
+
+/* 命中部位反馈：贴在准星下方的部位标签 */
+#hitZoneLabel {
+  position: absolute;
+  top: 34px;
+  left: 50%;
+  transform: translateX(-50%);
+  font: 700 11px/1.1 "Rajdhani", "Segoe UI", sans-serif;
+  letter-spacing: 1px;
+  color: #ffd76a;
+  text-shadow: 0 0 6px rgba(0, 0, 0, 0.95);
+  opacity: 0;
+  transition: opacity 70ms linear;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+#hitZoneLabel.zone-head {
+  color: #ff6b5e;
+  text-shadow: 0 0 8px rgba(255, 70, 50, 0.9);
+}
+
+#hitZoneLabel.zone-limb {
+  color: #9fd0ff;
+  text-shadow: 0 0 6px rgba(0, 0, 0, 0.95);
+}
+
+/* 威胁方位指示：低血量时沿屏幕边缘指向敌人 */
+#threatMarkersPanel {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 12;
+}
+
+#threatMarkersPanel .threat-marker {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  transition: opacity 90ms linear;
+  will-change: transform, opacity;
+}
+
+#threatMarkersPanel .threat-marker .threat-arrow {
+  position: absolute;
+  left: -13px;
+  top: -200px;
+  width: 26px;
+  height: 26px;
+  background: transparent;
+  clip-path: polygon(50% 0%, 100% 82%, 50% 100%, 0% 82%);
+  background-color: rgba(255, 64, 44, 0.92);
+  filter: drop-shadow(0 0 6px rgba(255, 40, 20, 0.9));
+}
+
+#threatMarkersPanel .threat-marker .threat-distance {
+  position: absolute;
+  left: -26px;
+  top: -168px;
+  width: 52px;
+  text-align: center;
+  font: 700 11px/1.2 "Rajdhani", "Segoe UI", sans-serif;
+  color: rgba(255, 214, 190, 0.95);
+  text-shadow: 0 0 6px rgba(0, 0, 0, 0.95);
+  white-space: nowrap;
+}
+
+/* 受击方向指示：任意血量下被击中后，屏幕边缘出现一段弧线指向伤害
+   来源方向（命中瞬间方位），短暂停留后淡出；与低血量威胁箭头（红色
+   三角 + 距离）在形状与颜色上明确区分。 */
+#damageDirection {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 12;
+  will-change: transform, opacity;
+}
+
+#damageDirection .damage-arc {
+  position: absolute;
+  left: -58px;
+  top: -242px;
+  width: 116px;
+  height: 54px;
+  border: 7px solid rgba(255, 96, 46, 0.95);
+  border-bottom: none;
+  border-radius: 62px 62px 0 0;
+  filter: drop-shadow(0 0 10px rgba(255, 64, 20, 0.85));
+}
+
+#hitMarker {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 24px;
+  height: 24px;
+  opacity: 0;
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+/* 命中反馈脉冲：每帧由 JS 设置 --pulse，0 -> 1 -> 0 形成一次收缩扩散动画。 */
+#hitMarker.pulse {
+  --pulse: 0;
+  opacity: var(--pulse);
+  transform: translate(-50%, -50%) rotate(45deg)
+    scale(calc(1 + (1 - var(--pulse)) * 0.85));
+}
+
+/* 爆头：改为金色 X 并放大 1.25 倍，玩家一眼分辨高质量命中。 */
+#hitMarker.pulse.strong {
+  --pulse: 0;
+}
+
+#hitMarker.pulse.strong::before,
+#hitMarker.pulse.strong::after {
+  background: #ffd24a;
+  box-shadow: 0 0 7px rgba(255, 190, 40, 0.9);
+}
+
+#hitMarker.pulse.strong {
+  width: 30px;
+  height: 30px;
+}
+
+#hitMarker::before,
+#hitMarker::after {
+  content: "";
+  position: absolute;
+  top: 11px;
+  left: 1px;
+  width: 22px;
+  height: 2px;
+  background: #ff5252;
+  box-shadow: 0 0 5px #000;
+}
+
+#hitMarker::after {
+  transform: rotate(90deg);
+}
+
+#damageVignette {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  background: radial-gradient(circle, transparent 42%, rgba(190, 0, 0, 0.74) 100%);
+  transition: opacity 90ms linear;
+}
+
+.screen {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  text-align: center;
+  background:
+    radial-gradient(circle at center, rgba(27, 38, 48, 0.52), rgba(2, 4, 7, 0.94)),
+    rgba(3, 5, 8, 0.88);
+}
+
+.screen.hidden {
+  display: none;
+}
+
+.action-button.hidden {
+  display: none;
+}
+
+.panel {
+  width: min(720px, calc(100vw - 36px));
+  padding: 34px 42px;
+  background: rgba(12, 16, 21, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 20px 80px rgba(0, 0, 0, 0.82);
+}
+
+/* 主菜单采用程序化钢板、警戒条与扫描网格，保持单文件且不依赖图片。 */
+#modeScreen {
+  overflow-y: auto;
+  background:
+    linear-gradient(115deg, rgba(238, 96, 38, 0.1), transparent 38%),
+    radial-gradient(circle at 72% 30%, rgba(54, 111, 135, 0.28), transparent 34%),
+    linear-gradient(180deg, rgba(3, 6, 9, 0.64), rgba(2, 4, 6, 0.96));
+}
+
+#modeScreen::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0.24;
+  background-image:
+    linear-gradient(rgba(129, 164, 177, 0.16) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(129, 164, 177, 0.16) 1px, transparent 1px);
+  background-size: 42px 42px;
+  mask-image: linear-gradient(to bottom, #000, transparent 82%);
+  pointer-events: none;
+}
+
+#modeScreen::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0.13;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 3px,
+    rgba(255, 255, 255, 0.08) 4px
+  );
+  pointer-events: none;
+}
+
+#modeScreen .main-menu-panel {
+  position: relative;
+  z-index: 1;
+  width: min(940px, calc(100vw - 42px));
+  padding: 38px 46px 32px;
+  overflow: hidden;
+  background:
+    linear-gradient(135deg, rgba(28, 36, 42, 0.97), rgba(8, 12, 16, 0.97)),
+    rgba(9, 13, 17, 0.96);
+  border: 1px solid rgba(174, 201, 211, 0.26);
+  border-left: 5px solid #dc6939;
+  box-shadow:
+    0 30px 100px rgba(0, 0, 0, 0.84),
+    inset 0 0 80px rgba(84, 126, 141, 0.08);
+  clip-path: polygon(0 0, calc(100% - 26px) 0, 100% 26px, 100% 100%, 26px 100%, 0 calc(100% - 26px));
+}
+
+#modeScreen .main-menu-panel::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 24px;
+  width: 260px;
+  height: 8px;
+  background: repeating-linear-gradient(135deg, #e1703e 0 15px, #1a2025 15px 30px);
+}
+
+.menu-kicker {
+  margin-bottom: 8px;
+  color: #7fb6c8;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 5px;
+  text-align: left;
+}
+
+#modeScreen .main-title {
+  margin: 0;
+  color: #f1f3ef;
+  font-size: clamp(54px, 8vw, 98px);
+  font-weight: 1000;
+  line-height: 1;
+  letter-spacing: 14px;
+  text-align: left;
+  text-shadow: 5px 5px 0 rgba(109, 39, 23, 0.72), 0 0 38px rgba(226, 97, 47, 0.28);
+}
+
+#modeScreen .main-title span {
+  color: #e26a38;
+}
+
+.menu-subtitle-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 12px 0 28px;
+  color: #c0cbd0;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  text-align: left;
+}
+
+.menu-subtitle-row::before {
+  content: "";
+  width: 66px;
+  height: 3px;
+  background: #e26a38;
+  box-shadow: 0 0 14px rgba(226, 106, 56, 0.55);
+}
+
+#modeScreen .mode-grid {
+  gap: 18px;
+  margin: 0 0 20px;
+}
+
+#modeScreen .mode-card {
+  position: relative;
+  min-height: 190px;
+  padding: 26px 26px 22px;
+  overflow: hidden;
+  text-align: left;
+  background:
+    linear-gradient(145deg, rgba(56, 70, 78, 0.82), rgba(16, 22, 27, 0.96));
+  border: 1px solid rgba(162, 193, 204, 0.23);
+  border-bottom: 3px solid #576b75;
+}
+
+#modeScreen .mode-card:hover {
+  border-color: rgba(238, 141, 73, 0.72);
+  border-bottom-color: #e2733e;
+  background: linear-gradient(145deg, rgba(72, 83, 88, 0.9), rgba(24, 31, 36, 0.98));
+  transform: translateY(-4px);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.42);
+}
+
+.mode-card-number {
+  position: absolute;
+  top: 10px;
+  right: 15px;
+  color: rgba(255, 255, 255, 0.09);
+  font-size: 62px;
+  font-weight: 1000;
+  line-height: 1;
+}
+
+.mode-card-tag {
+  display: inline-block !important;
+  margin-bottom: 16px;
+  padding: 4px 8px;
+  color: #ffc379 !important;
+  background: rgba(195, 82, 38, 0.2);
+  border: 1px solid rgba(226, 106, 56, 0.35);
+  font-size: 10px !important;
+  font-weight: 800;
+  letter-spacing: 2px;
+}
+
+#modeScreen .mode-card strong {
+  margin-bottom: 12px;
+  color: #f5e3c7;
+  font-size: 28px;
+}
+
+.menu-status-strip {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  margin-bottom: 20px;
+  background: rgba(143, 170, 179, 0.16);
+  border: 1px solid rgba(143, 170, 179, 0.16);
+}
+
+.menu-status-strip span {
+  padding: 10px 8px;
+  color: #94a8b1;
+  background: rgba(8, 13, 17, 0.86);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 2px;
+}
+
+#modeScreen .controls {
+  padding-top: 15px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  color: #84949b;
+}
+
+#modeScreen .controls b {
+  display: inline-block;
+  min-width: 28px;
+  padding: 1px 5px;
+  color: #eef3f3;
+  background: #283139;
+  border: 1px solid #46545d;
+  text-align: center;
+}
+
+.title {
+  margin: 0 0 8px;
+  font-size: clamp(38px, 6vw, 68px);
+  font-weight: 900;
+  letter-spacing: 8px;
+  text-shadow: 0 0 26px rgba(235, 70, 45, 0.55);
+}
+
+.subtitle {
+  margin: 0 0 25px;
+  color: #f0b146;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 4px;
+}
+
+.mode-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin: 24px 0;
+}
+
+.map-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin: 24px 0;
+}
+
+#endlessMapScreen .panel {
+  width: min(1080px, calc(100vw - 36px));
+  margin: auto;
+}
+
+#endlessMapScreen {
+  align-items: flex-start;
+  overflow-y: auto;
+  padding: 24px 0;
+}
+
+.endless-map-button {
+  min-height: 330px;
+  padding: 14px;
+  text-align: left;
+}
+
+.endless-map-button strong {
+  margin-bottom: 8px;
+  font-size: 20px;
+  text-align: center;
+}
+
+.endless-map-preview {
+  display: block;
+  width: 100%;
+  height: 150px;
+  margin: 8px 0 12px;
+  background: #071015;
+  border: 1px solid rgba(148, 201, 219, 0.36);
+  box-shadow: inset 0 0 22px rgba(0, 0, 0, 0.85);
+}
+
+.map-layout-label {
+  display: block;
+  margin-bottom: 5px;
+  color: #f0b146 !important;
+  font-size: 11px !important;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-align: center;
+}
+
+.mode-button,
+.action-button {
+  color: #fff;
+  background: linear-gradient(180deg, #28323c, #171d23);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  cursor: pointer;
+  font-family: inherit;
+  transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.mode-button {
+  min-height: 150px;
+  padding: 20px;
+}
+
+.mode-button:hover,
+.action-button:hover {
+  border-color: #f0b146;
+  background: linear-gradient(180deg, #3a4651, #20272e);
+  transform: translateY(-2px);
+}
+
+.mode-button strong {
+  display: block;
+  margin-bottom: 10px;
+  color: #ffd078;
+  font-size: 24px;
+  letter-spacing: 3px;
+}
+
+.mode-button span {
+  color: #bfc7cf;
+  font-size: 13px;
+  line-height: 1.75;
+}
+
+.action-button {
+  min-width: 190px;
+  margin: 8px;
+  padding: 13px 22px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 2px;
+}
+
+.controls {
+  color: #c4ccd4;
+  font-size: 13px;
+  line-height: 2;
+  letter-spacing: 1px;
+}
+
+.controls b {
+  color: #fff;
+}
+
+.prompt {
+  margin-top: 20px;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  animation: pulse 1.15s ease-in-out infinite alternate;
+}
+
+#pauseScreen {
+  cursor: pointer;
+  background: rgba(3, 5, 8, 0.78);
+}
+
+#pauseScreen .panel {
+  width: min(500px, calc(100vw - 36px));
+}
+
+#loadingScreen {
+  z-index: 50;
+}
+
+#resultTitle.fail {
+  color: #ef4a3d;
+}
+
+#resultTitle.win {
+  color: #71e47c;
+}
+
+@keyframes pulse {
+  from { opacity: 0.55; }
+  to { opacity: 1; }
+}
+
+@keyframes ammoPulse {
+  from { opacity: 0.55; }
+  to { opacity: 1; }
+}
+
+@media (max-width: 640px) {
+  .mode-grid,
+  .map-grid {
+    grid-template-columns: 1fr;
+  }
+
+  #combatLog {
+    left: 12px;
+    bottom: 96px;
+    width: 200px;
+    font-size: 11px;
+  }
+
+  #gameInfo {
+    top: auto;
+    right: 12px;
+    bottom: 12px;
+    min-width: 210px;
+  }
+
+  #minimapPanel {
+    top: 12px;
+    right: 12px;
+    width: 148px;
+    padding: 7px;
+  }
+
+  #minimap {
+    width: 132px;
+    height: 132px;
+  }
+
+  #minimapHeader {
+    margin-bottom: 4px;
+    font-size: 10px;
+  }
+
+  #minimapHeader small,
+  .minimap-legend {
+    display: none;
+  }
+
+  .endless-map-button {
+    min-height: 300px;
+  }
+
+  #healthPanel {
+    top: 12px;
+    left: 12px;
+    width: 220px;
+  }
+
+  #modeScreen .main-menu-panel {
+    width: calc(100vw - 24px);
+    margin: 12px 0;
+    padding: 30px 22px 24px;
+  }
+
+  #modeScreen .main-title {
+    font-size: 48px;
+    letter-spacing: 8px;
+  }
+
+  .menu-status-strip {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* -----------------------------------------------------------------------
+   命中伤害数字：漂浮在敌人身上的世界坐标反馈
+   ----------------------------------------------------------------------- */
+#damageNumbers {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.damage-number {
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-family: "Rajdhani", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: #ffe9b8;
+  text-shadow: 0 0 6px rgba(255, 140, 40, 0.85), 0 2px 3px rgba(0, 0, 0, 0.8);
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+.damage-number.zone-head {
+  color: #fff5cc;
+  font-size: 26px;
+  text-shadow: 0 0 10px rgba(255, 90, 30, 0.95), 0 0 20px rgba(255, 170, 40, 0.7);
+}
+
+.damage-number.zone-limb {
+  color: #b9e9ff;
+  font-size: 16px;
+}
+
+.damage-number.zone-lethal {
+  color: #ff8f6a;
+}
+
+.damage-number.zone-kill {
+  color: #ffd25e;
+}
+
+.damage-number.visible {
+  opacity: 1;
+}
+
+/* -----------------------------------------------------------------------
+   任务进度条：把 objective 行升级为带可视进度的任务条
+   ----------------------------------------------------------------------- */
+.objective-with-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+}
+
+#missionTrack {
+  position: relative;
+  width: 260px;
+  height: 12px;
+  border: 1px solid rgba(255, 214, 130, 0.4);
+  border-radius: 6px;
+  background: rgba(6, 10, 14, 0.72);
+  overflow: hidden;
+  box-shadow: 0 0 12px rgba(0, 0, 0, 0.5);
+}
+
+#missionTrackFill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0%;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #6fd3ff 0%, #8fffc9 60%, #ffdf6e 100%);
+  box-shadow: 0 0 10px rgba(120, 230, 255, 0.7);
+  transition: width 0.25s ease-out;
+}
+
+#missionTrackLabel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.4px;
+  color: #0b1218;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
+  mix-blend-mode: screen;
+}
+
+@media (max-width: 760px) {
+  #missionTrack {
+    width: 190px;
+  }
+}
+
+/* -----------------------------------------------------------------------
+   威胁等级进度条：无尽模式显示“距离下一次威胁等级”的真实百分比进度。
+   等级提升瞬间加 .tier-up 类触发高亮闪烁，随后由 JS 移除。
+   ----------------------------------------------------------------------- */
+#threatTrack {
+  position: relative;
+  width: 260px;
+  height: 8px;
+  margin-top: 5px;
+  border: 1px solid rgba(255, 148, 96, 0.45);
+  border-radius: 5px;
+  background: rgba(6, 10, 14, 0.72);
+  overflow: hidden;
+  box-shadow: 0 0 12px rgba(0, 0, 0, 0.5);
+}
+
+#threatTrackFill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0%;
+  border-radius: 5px;
+  background: linear-gradient(90deg, #ffb056 0%, #ff7d4d 100%);
+  box-shadow: 0 0 10px rgba(255, 148, 96, 0.75);
+  transition: width 0.25s ease-out;
+}
+
+#threatTrack.tier-up #threatTrackFill {
+  animation: threatTierFlash 0.9s ease-out;
+}
+
+#threatTrackLabel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  color: #ffd9b8;
+  text-shadow: 0 1px 2px rgba(10, 6, 2, 0.9);
+}
+
+@keyframes threatTierFlash {
+  0% { box-shadow: 0 0 4px rgba(255, 148, 96, 0.4); }
+  30% { box-shadow: 0 0 22px rgba(255, 196, 110, 1); filter: brightness(1.9); }
+  100% { box-shadow: 0 0 4px rgba(255, 148, 96, 0.4); filter: brightness(1); }
+}
+
+@media (max-width: 760px) {
+  #threatTrack {
+    width: 190px;
+  }
+}
+
+/* -----------------------------------------------------------------------
+   敌情预告读数：显示“下一名敌兵 X.X 秒后抵达”，快到达时脉冲闪烁。
+   数据来源与敌方增员完全一致（respawnTimers），玩家因此可以判断
+   补给抢夺与转点时机；标记 .escalating 时表示 3 秒内会有增援抵达。
+   ----------------------------------------------------------------------- */
+#intakeReadout {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 3px 10px;
+  border: 1px solid rgba(255, 214, 130, 0.28);
+  border-radius: 5px;
+  background: rgba(6, 10, 14, 0.66);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: #ffd9b8;
+  text-shadow: 0 1px 2px rgba(10, 6, 2, 0.9);
+  transition: color 0.2s ease-out, border-color 0.2s ease-out;
+}
+
+#intakeReadout.hidden {
+  display: none;
+}
+
+#intakeReadout .intake-pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #8fffc9;
+  box-shadow: 0 0 8px rgba(143, 255, 201, 0.8);
+  flex: none;
+}
+
+#intakeReadout.escalating {
+  border-color: rgba(255, 96, 64, 0.6);
+  color: #ffb3a0;
+}
+
+#intakeReadout.escalating .intake-pulse {
+  background: #ff5a3c;
+  box-shadow: 0 0 10px rgba(255, 90, 60, 0.95);
+  animation: intakePulse 0.62s ease-in-out infinite;
+}
+
+@keyframes intakePulse {
+  0%, 100% { transform: scale(0.7); opacity: 0.55; }
+  50% { transform: scale(1.35); opacity: 1; }
+}
+
+@media (max-width: 760px) {
+  #intakeReadout {
+    font-size: 9px;
+  }
+}
+
+/* -----------------------------------------------------------------------
+   补给抵达预告读数：显示“下一补给（X）X.X 秒后抵达”，临近投放时脉冲闪烁。
+   数据与 updatePickups 的补给刷新计时完全一致，玩家可据此规划抢点与转点；
+   标记 .escalating 时表示 5 秒内将有补给投放。配色取小地图物资图例的
+   绿色系，警示态用金色，与敌情读数的红色警示区分开。
+   ----------------------------------------------------------------------- */
+#supplyReadout {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 3px 10px;
+  border: 1px solid rgba(104, 232, 153, 0.3);
+  border-radius: 5px;
+  background: rgba(6, 10, 14, 0.66);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: #c8f5da;
+  text-shadow: 0 1px 2px rgba(10, 6, 2, 0.9);
+  transition: color 0.2s ease-out, border-color 0.2s ease-out;
+}
+
+#supplyReadout.hidden {
+  display: none;
+}
+
+#supplyReadout .supply-pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #68e899;
+  box-shadow: 0 0 8px rgba(104, 232, 153, 0.8);
+  flex: none;
+}
+
+#supplyReadout.escalating {
+  border-color: rgba(255, 214, 130, 0.65);
+  color: #ffe9c2;
+}
+
+#supplyReadout.escalating .supply-pulse {
+  background: #ffd682;
+  box-shadow: 0 0 10px rgba(255, 214, 130, 0.95);
+  animation: supplyPulse 0.62s ease-in-out infinite;
+}
+
+@keyframes supplyPulse {
+  0%, 100% { transform: scale(0.7); opacity: 0.55; }
+  50% { transform: scale(1.35); opacity: 1; }
+}
+
+@media (max-width: 760px) {
+  #supplyReadout {
+    font-size: 9px;
+  }
+}
+
+/* -----------------------------------------------------------------------
+   音效系统（WebAudio 程序音效）：HUD 静音开关
+   每一行都是一行可点击的按钮：状态文字 + 快捷键提示，播放时随节拍闪烁。
+   ----------------------------------------------------------------------- */
+#audioToggle {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  background: rgba(10, 16, 24, 0.78);
+  border: 1px solid rgba(94, 234, 212, 0.35);
+  border-radius: 6px;
+  color: #9ef7e5;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease,
+    color 0.15s ease, transform 0.1s ease;
+}
+
+#audioToggle:hover {
+  background: rgba(20, 34, 46, 0.9);
+  border-color: rgba(94, 234, 212, 0.7);
+  transform: translateY(-1px);
+}
+
+#audioToggle:focus-visible {
+  outline: 2px solid #5eead4;
+  outline-offset: 2px;
+}
+
+#audioToggle .audio-bars {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 13px;
+}
+
+#audioToggle .audio-bars i {
+  width: 3px;
+  height: 4px;
+  background: currentColor;
+  border-radius: 1px;
+  transition: height 0.12s ease;
+}
+
+#audioToggle.playing .audio-bars i:nth-child(1) {
+  height: 8px;
+}
+
+#audioToggle.playing .audio-bars i:nth-child(2) {
+  height: 13px;
+}
+
+#audioToggle.playing .audio-bars i:nth-child(3) {
+  height: 6px;
+}
+
+#audioToggle.muted {
+  color: #ff7d6a;
+  border-color: rgba(255, 125, 106, 0.45);
+}
+
+#audioToggle.muted .audio-bars {
+  opacity: 0.35;
+}
+
+@media (max-width: 900px) {
+  #audioToggle {
+    top: 14px;
+    right: 14px;
+    padding: 5px 10px;
+    font-size: 12px;
+  }
+}
+
+/* -----------------------------------------------------------------------
+   最佳纪录追踪条：无尽模式实时显示“本局分数 / 历史最佳”的推进百分比。
+   跨过历史最佳的那一刻加 .record-broken 类：金色高亮闪烁 1.6 秒，
+   追踪条永久切换为“领先纪录”形态（发光金条 + 上箭头）。
+   ----------------------------------------------------------------------- */
+#recordTrack {
+  position: relative;
+  width: 260px;
+  height: 8px;
+  margin-top: 5px;
+  border: 1px solid rgba(120, 200, 255, 0.4);
+  border-radius: 5px;
+  background: rgba(6, 10, 14, 0.72);
+  overflow: hidden;
+  box-shadow: 0 0 12px rgba(0, 0, 0, 0.5);
+}
+
+#recordTrackFill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0%;
+  border-radius: 5px;
+  background: linear-gradient(90deg, #4fb8ff 0%, #7fd4ff 100%);
+  box-shadow: 0 0 10px rgba(120, 200, 255, 0.6);
+  transition: width 0.25s ease-out;
+}
+
+#recordTrack.record-broken {
+  border-color: rgba(255, 214, 110, 0.85);
+}
+
+#recordTrack.record-broken #recordTrackFill {
+  background: linear-gradient(90deg, #ffc94d 0%, #ffe9a3 100%);
+  box-shadow: 0 0 14px rgba(255, 214, 110, 0.95);
+}
+
+#recordTrack.record-flash #recordTrackFill {
+  animation: recordTrackFlash 1.6s ease-out;
+}
+
+#recordTrackLabel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  color: #cfe9ff;
+  text-shadow: 0 1px 2px rgba(10, 6, 2, 0.9);
+  white-space: nowrap;
+}
+
+#recordTrack.record-broken #recordTrackLabel {
+  color: #ffe9a3;
+}
+
+@keyframes recordTrackFlash {
+  0% { box-shadow: 0 0 4px rgba(255, 214, 110, 0.4); }
+  30% { box-shadow: 0 0 26px rgba(255, 232, 160, 1); filter: brightness(2.1); }
+  100% { box-shadow: 0 0 14px rgba(255, 214, 110, 0.95); filter: brightness(1.15); }
+}
+
+@media (max-width: 760px) {
+  #recordTrack {
+    width: 190px;
+  }
+}
+
+/* 结算界面：本次对局与历史最佳的对照行（破纪录时金色高亮）。 */
+#resultRecordSummary.record-new {
+  color: #ffd76a;
+  text-shadow: 0 0 12px rgba(255, 214, 110, 0.55);
+}

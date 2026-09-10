@@ -170,6 +170,13 @@ class GameCraftBenchScoringTests(unittest.TestCase):
         self.assertIn('"HOME": str(home)', source)
         self.assertIn('env=_godot_runtime_env()', source)
 
+    def test_probe_tools_browser_probe_uses_macos_safe_chrome_flags(self) -> None:
+        source = (ROOT / "game_loop" / "probe_tools.py").read_text(encoding="utf-8")
+        self.assertIn("--password-store=basic", source)
+        self.assertIn("--use-mock-keychain", source)
+        self.assertIn("--no-first-run", source)
+        self.assertIn("--no-default-browser-check", source)
+
     def test_localize_build_cmd_uses_project_and_godot(self) -> None:
         _import_gcbench_verifier()
         from gamecraft_bench.verifier import score as score_mod

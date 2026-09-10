@@ -1,0 +1,538 @@
+/* lobby.css — the pre-deal negotiation: the ruleset picker.
+   Owner: lobby agent. Scope is the ruleset picker and nothing else; the rest of
+   the lobby (title, seats, timers, buttons) is ui.css's and is not touched here.
+
+   No literal colour appears below. Every value is a variables.css token, so the
+   picker follows the APRON palette in both themes without knowing either one.
+
+   THE MATERIAL ARGUMENT (ART-DIRECTION §1, §3.2, §4).
+   Selection is the one thing this screen has to say, and it has to survive the
+   grayscale gate and a colourblind player. So it is said TWICE, in two
+   independent channels:
+     · MATERIAL — an unchosen preset is a plate RAISED off the apron (--emboss
+       + a 2px hard offset). The chosen one is PRESSED INTO it (--deboss over
+       --ground-deep, offset collapsed to 0). That difference is pure luminance
+       and geometry: it reads with the hue removed.
+     · COLOUR — the cobalt ring, 2px, OUTSIDE the object, never a fill.
+   Neither channel is load-bearing alone, which is the whole point of §1.
+
+   Zero `border: 1px solid` anywhere in this file (§3.2): the recesses are cut,
+   not outlined. */
+
+/* ── the borrowed selector is GONE, and so is what it was patching ──────
+ *
+ * This file used to carry `.screen-lobby { justify-content: safe center }`,
+ * flagged in its own comment as not-mine and as a request to fold into
+ * base.css. It was patching a centred flex item taller than its scroll
+ * container, which overflows in BOTH directions and strands its top half above
+ * the scrollport. `safe center` demoted that to overflowing in ONE direction.
+ *
+ * ui.css now lays the lobby out as three grid registers with the body as the
+ * only scroller, so there is no centred over-tall item left to align safely,
+ * and the rule has been deleted rather than kept as a no-op. The measurement
+ * that says the patch was never enough is in ui.css's lobby block: with the
+ * picker present and four seats, Launch Mission was still 85px below a 720px
+ * fold and the room code 197px above the top.
+ */
+
+/* ── the block ────────────────────────────────────────────────────────── */
+
+.ruleset {
+  display: flex;
+  flex-direction: column;
+  gap: .45em;
+  min-width: 0;
+}
+
+/* The rule under it is ui.css's `.lobby-legend` marking, on the other column's
+   head. Both halves of the lobby now open the same way — a name, and a line
+   under it that runs the width of its column.
+
+   That sameness is load-bearing at phone widths now, not just tidy. This head
+   is the FIRST thing in a host's body (ui.css THE DECISION LEADS), so the seat
+   list arrives second, directly under "Change individual rules ▸". An
+   unlabelled list of names there reads as part of the disclosure, which is why
+   ui.css stopped hiding .lobby-legend on a phone and paid 26px for it. */
+.ruleset-head {
+  display: flex;
+  align-items: baseline;
+  gap: .5em;
+  flex-wrap: wrap;
+  min-width: 0;
+  box-shadow: inset 0 -2px 0 var(--shade);
+  padding-bottom: .2em;
+}
+.ruleset-title { margin: 0; font-size: var(--t-lede); font-weight: 700; color: var(--fg); }
+
+/* The resolved name, live. It is computed by ui/ruleset.js matchPreset(), which
+   is game.js resolveRules()'s detection loop — so it says "Custom" exactly when
+   the server's next broadcast will say `preset: 'custom'`, and never before or
+   after. A label that can lie about the rules is worse than no label. */
+.ruleset-now {
+  display: flex;
+  align-items: baseline;
+  gap: .45em;
+  flex-wrap: wrap;
+  margin-left: auto;
+  min-width: 0;
+}
+.ruleset-name {
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: var(--track-display);
+  color: var(--fg);
+}
+.ruleset-bits {
+  font-size: var(--t-micro);
+  font-weight: 700;
+  color: var(--fg-mute);
+}
+
+/* The one sentence about the ending, straight out of winRuleSummary() — the
+   same function the help screen and the win overlay read, so this screen cannot
+   describe a rule the rest of the client contradicts (§3.9). */
+.ruleset-win { margin: 0; }
+
+/* ── presets: four plates ─────────────────────────────────────────────── */
+
+/* THE PRESETS ARE THE DECISION THIS SCREEN EXISTS FOR, so they get the width
+   the screen now has. The previous rule here was one column at every width, and
+   its reasoning was correct for the layout it was written against: ui.css
+   capped .lobby-panel at `min(27em, 100%)`, so the picker's container was 431px
+   at 1280×720 and 387px at 390×844 — the container did NOT widen on a desktop,
+   only the dead apron around it did. Two columns of that were 185px each, where
+   "≈67 turns" stopped fitting on the name row.
+
+   That cap is gone (ui.css's lobby block). The rules column is 570px at
+   1280×720 and 840px at 1920×1080, so the same two columns are 275px and 410px
+   — wider than the 431px the WHOLE picker used to get.
+
+   auto-fit + minmax rather than a media query, because the breakpoint that
+   matters is this column's width and not the viewport's: the same grid has to
+   be right in a 570px desktop column, an 840px wide-screen one, a 342px phone
+   and a 300px landscape half. 15em is the measured floor — below it the name
+   row ("Long Game" + "Longest" + "≈67 turns") wraps.
+
+   It buys height as well as prominence, which is what puts all four in view at
+   once: 4 stacked tiles at 1280 were 356px; the same four in 2×2 are ~190px. */
+.preset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15em, 1fr));
+  gap: .35em;
+  min-width: 0;
+}
+
+.preset {
+  position: relative;
+  display: block;
+  min-height: var(--tap);
+  padding: .42em .6em;
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--fg);
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+  box-shadow: var(--emboss), var(--press-soft);
+  transform: translate(0, 0);
+  transition: transform .07s ease, box-shadow .07s ease, background-color .12s ease;
+}
+.preset:active { transform: translate(2px, 2px); box-shadow: var(--emboss); }
+
+/* CHOSEN = pressed into the apron. Luminance and geometry, not hue. */
+.preset:has(input:checked) {
+  background: var(--ground-deep);
+  box-shadow: var(--deboss-deep);
+  transform: translate(2px, 2px);
+}
+/* …and the ring, outside the object, as the second channel. */
+.preset:has(input:checked)::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: calc(var(--radius) + 3px);
+  outline: var(--ring);
+  pointer-events: none;
+}
+
+.preset-body { display: flex; flex-direction: column; gap: .12em; min-width: 0; }
+.preset-top {
+  display: flex;
+  align-items: baseline;
+  gap: .4em;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.preset-name {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.02em;
+  letter-spacing: var(--track-display);
+  color: var(--fg);
+}
+/* A stencil on the plate, not a coloured pill: it qualifies the name, it does
+   not compete with it (§3.6). */
+.preset-tag {
+  font-size: var(--t-micro);
+  font-weight: 700;
+  color: var(--fg-mute);
+}
+/* The measured length. A FIGURE, so it is mono and tabular like every other
+   figure in the app (§4) — and it is the number that actually decides which of
+   these four a table picks. */
+.preset-turns {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  font-size: var(--t-micro);
+  font-weight: 700;
+  color: var(--fg-mute);
+  white-space: nowrap;
+}
+.preset-line {
+  font-size: var(--t-small);
+  line-height: 1.28;
+  text-wrap: pretty;
+  color: var(--fg-mute);
+}
+.preset:has(input:checked) .preset-line { color: var(--fg); }
+
+/* ── the disclosure ───────────────────────────────────────────────────── */
+
+.ruleset-adv { min-width: 0; }
+.ruleset-summary {
+  display: flex;
+  align-items: center;
+  gap: .4em;
+  min-height: var(--tap);
+  padding: 0 .2em;
+  list-style: none;
+  cursor: pointer;
+  font-size: var(--t-small);
+  font-weight: 700;
+  color: var(--fg-mute);
+}
+.ruleset-summary::-webkit-details-marker { display: none; }
+.ruleset-summary:hover { color: var(--fg); }
+.ruleset-caret {
+  display: inline-block;
+  transition: transform .12s ease;
+}
+.ruleset-adv[open] .ruleset-caret { transform: rotate(90deg); }
+
+/* ── the phone fold (P10) ─────────────────────────────────────────────────
+   ui/lobby.js wraps the preset grid, the win sentence and the advanced
+   disclosure in `details.ruleset-fold`, closed below 720px — the measurement
+   and the reasoning live on that block. Here it only has to LOOK like what it
+   is: the same summary row the advanced disclosure already taught, and on a
+   pointer screen (where it ships open) no summary row at all, so the desktop
+   screen is unchanged from round 9. */
+.ruleset-fold { min-width: 0; }
+.ruleset-fold > *:not(summary) { margin-top: .45em; }
+.ruleset-fold[open] > .ruleset-fold-summary .ruleset-caret { transform: rotate(90deg); }
+@media (min-width: 720px) {
+  .ruleset-fold > .ruleset-fold-summary { display: none; }
+}
+
+/* ROUND-2 LOOK #6 (lobby-custom@desktop): the open disclosure was a floor-to-
+   fold near-black panel — "a dark left column that reads as a login form". The
+   panel is gone: advanced rules are STENCILLED ON THE APRON, inside the same
+   3px painted rule .fl-note and .jr-prose already use, so the column reads as
+   markings on the ground the presets stand on rather than as a second chassis
+   (§3.2, §3.7). Every ink here was already measured against --ground
+   (--fg 12.65 light, --fg-mute 8.87 light / 8.82 dark — variables.css), so
+   dropping the well RAISES the worst pair; the controls inside keep their own
+   material (deboss wells, ink-slab marks, --surface stepper plates). */
+.adv-body {
+  display: flex;
+  flex-direction: column;
+  gap: .55em;
+  padding: .55em .6em .55em .8em;
+  background: linear-gradient(var(--stencil-hi), var(--stencil-hi)) left / 3px 100% no-repeat;
+}
+.adv-group { margin: 0; padding: 0; border: 0; min-width: 0; }
+.adv-group-inline { display: flex; align-items: center; gap: .6em; flex-wrap: wrap; }
+.adv-legend {
+  padding: 0;
+  margin-bottom: .15em;
+  font-size: var(--t-micro);
+  font-weight: 700;
+  color: var(--fg-mute);
+}
+/* A <legend> inside a flex fieldset still lays out as a legend; float it back
+   into the row so "Sets to win" sits beside its own control rather than above
+   a 44px segmented strip with 40px of dead space next to it. */
+.adv-group-inline .adv-legend { float: none; margin-bottom: 0; }
+
+/* ── a rule row: a real control, drawn ────────────────────────────────── */
+
+/* The native input is the control — it keeps arrow-key group traversal, Space
+   to toggle, the accessible name from its own <label>, and the checked state a
+   screen reader announces. It is only ever made invisible, never replaced by a
+   <div role="checkbox">.
+
+   IT FILLS ITS LABEL RATHER THAN BEING CLIPPED TO 1×1, and that is a §0.9 fix
+   with a gate behind it. The old rule was the classic screen-reader clip
+   (`width: 1px; clip-path: inset(50%)`), which leaves a real, focusable,
+   pointer-accepting 1×1 input sitting under a 44px plate. tools/lib/audit.mjs
+   auditTapTargets measures the INPUT — deliberately, and its own comment says
+   why: "the element with opacity: 0 IS the hit target, and refusing to measure
+   it means refusing to measure the control". Measured: touchtest reported
+   `settings sheet: input.rule-input 1×1` the moment a radiogroup built with
+   this class appeared on a surface the gate visits.
+
+   The lobby's picker has always had the same defect and it has never been
+   caught, because no gate can reach a HOST lobby: a lobby broadcast carries no
+   `game`, so store.self.id is null, the host block stays hidden, and
+   touchtest's lobby surface is the guest view. This one rule fixes the theme
+   strip, all four presets, three win-rule rows, three sets segments and four
+   sudden-death rows at once.
+
+   `inset: 0` needs a positioned ancestor and has one in all three wrappers by
+   construction — .preset, .rule-row and .seg are each `position: relative` and
+   each is the input's own <label> parent. opacity, not visibility: the element
+   must keep taking pointer events, which is the whole point. */
+.rule-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  opacity: 0;
+  cursor: inherit;
+}
+
+.rule-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1.35em 1fr;
+  align-items: start;
+  gap: .5em;
+  min-height: var(--tap);
+  padding: .4em .3em;
+  border-radius: var(--radius);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.rule-row::before {
+  content: "";
+  width: 1.35em;
+  height: 1.35em;
+  margin-top: .05em;
+  border-radius: 2px;
+  background: var(--surface);
+  box-shadow: var(--deboss);
+}
+/* Radios are round, checkboxes are square — the shape says "one of these" vs
+   "on or off" before any text is read. */
+.rule-row:has(input[type="radio"])::before { border-radius: 50%; }
+
+/* CHECKED = the achromatic ink slab, the same fill the primary action uses.
+   No hue, so it collides with nothing on the screen or in grayscale. */
+.rule-row:has(input:checked)::before {
+  background: var(--act);
+  box-shadow: none;
+}
+/* The mark itself: a tick for a checkbox, a hole for a radio. Drawn in CSS,
+   because §0.3 means there is no glyph file to reach for. */
+.rule-row:has(input[type="checkbox"]:checked)::after {
+  content: "";
+  position: absolute;
+  left: .68em;
+  top: .78em;
+  width: .3em;
+  height: .62em;
+  border-right: 2px solid var(--act-fg);
+  border-bottom: 2px solid var(--act-fg);
+  transform: rotate(42deg);
+}
+.rule-row:has(input[type="radio"]:checked)::after {
+  content: "";
+  position: absolute;
+  left: .72em;
+  top: .84em;
+  width: .5em;
+  height: .5em;
+  border-radius: 50%;
+  background: var(--act-fg);
+}
+
+.rule-body { display: flex; flex-direction: column; gap: .1em; min-width: 0; }
+.rule-name { font-weight: 700; font-size: var(--t-small); color: var(--fg); }
+.rule-line { font-size: var(--t-micro); line-height: 1.35; color: var(--fg-mute); }
+
+/* ── sets-to-win: a stamped segmented strip ───────────────────────────── */
+
+/* SHARED WITH THE SETTINGS SHEET (ui/settings.js's Theme row), deliberately.
+   It is a segmented strip of mutually exclusive values drawn from the app's
+   material vocabulary — deboss for unchosen, the achromatic ink slab for
+   chosen — and building a second one in another file for the same job is the
+   duplication ART §3.2 is about. It lives here because this is where it was
+   first needed; if a third caller appears it wants promoting to base.css, and
+   that is a standing request in this agent's report. */
+.rule-seg {
+  display: flex;
+  gap: .3em;
+  padding: 0;
+  min-width: 0;
+}
+.seg { position: relative; display: block; cursor: pointer; touch-action: manipulation; }
+/* A strip of WORDS, not digits: "System" needs more than the 44px square that
+   holds a "3". flex: 1 keeps the three faces equal, which is what makes them
+   read as one control rather than three buttons of different weights. */
+.seg-wide { flex: 1 1 0; min-width: 0; }
+.seg-wide .seg-face { width: 100%; padding: 0 .6em; font-family: var(--font-display); }
+.seg-face {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--tap);
+  min-height: var(--tap);
+  border-radius: var(--radius);
+  /* --ground-deep, not --surface. ROUND-2 LOOK: on the settings and flight-log
+     sheets (whose panel IS --surface) a --surface face left only the deboss's
+     1px inset edge visible, and the critic read the strip as "1px-bordered
+     pill tabs". A well steps DOWN from whatever plate it is cut into.
+     --fg on light --ground-deep measured 7.2:1; dark 17:1. */
+  background: var(--ground-deep);
+  box-shadow: var(--deboss);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--fg);
+}
+.seg:has(input:checked) .seg-face {
+  background: var(--act);
+  color: var(--act-fg);
+  box-shadow: none;
+}
+/* The strip is the ROW's control in the settings sheet, so it takes the space
+   .settings-label leaves rather than hugging three words. content.css owns
+   .settings-row and is not this agent's file; this reaches it from the strip's
+   own side, which is the half that has to change anyway. */
+.settings-row > .rule-seg { flex: 1 1 auto; }
+
+/* ── focus: the same cobalt ring the rest of the app uses ─────────────── */
+
+.preset:has(.rule-input:focus-visible),
+.rule-row:has(.rule-input:focus-visible),
+.seg:has(.rule-input:focus-visible),
+.ruleset-summary:focus-visible {
+  outline: var(--ring);
+  outline-offset: 2px;
+}
+
+/* ── what a non-host sees ─────────────────────────────────────────────── */
+
+/* Not a picker, and deliberately not a GUESS at one. The lobby broadcast
+   (server/broadcast.js broadcastRoom) carries no ruleset field before a game
+   exists, so the pending choice is unreadable from any other seat; printing the
+   default here would be right only when the host leaves it alone. */
+.ruleset-guest { margin: 0; }
+
+/* ── the deck editor (§3 deck knob) ───────────────────────────────────────
+ *
+ * A stepper per card. The counts are the point of the control, so they are set
+ * in the mono face at tabular width — the column cannot reflow as 9 becomes 10,
+ * which is exactly the moment a host is watching the number.
+ *
+ * Both buttons are real <button>s at the --tap floor (§0.9), and both are
+ * DISABLED at the bounds rather than silently refusing, so the deck's total
+ * limit is legible as "the + went dead" instead of "nothing happened".
+ */
+.adv-group-deck .adv-legend {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: .6em;
+}
+/* THE TOTAL RIDES THE SCROLL. The head row (built as a div in ui/lobby.js —
+   the note there records why a <legend> cannot stick) pins to the top of
+   .lobby-body while the thirteen steppers pass under it, so "why did the +
+   go dead" is answerable at the row where it happened. Opaque in the apron's
+   own colour with a hairline under it, the same contract every other sticky
+   register in the app states: a row passing under it is a scroll, not a
+   collision. */
+.adv-legend-deck {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  margin-bottom: 0;
+  padding: .3em 0 .35em;
+  background: var(--ground);
+  box-shadow: 0 1px 0 var(--shade);
+}
+.deck-total {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--fg-mute);
+}
+/* The stock 106 is unremarkable; anything else is a decision the host made and
+   should be able to see they made. */
+.deck-total[data-stock='custom'] { color: var(--act); }
+
+.deck-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .6em;
+  padding: .15em 0;
+  min-width: 0;
+}
+.deck-name {
+  font-size: var(--t-small);
+  color: var(--fg-mute);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A count that is no longer the stock one is the whole state of this control,
+   so it is carried by weight and colour on the NAME as well as the number —
+   colour alone would be the only signal for a monochrome or colour-blind read. */
+.deck-row.is-changed .deck-name { color: var(--fg); font-weight: 700; }
+
+.deck-ctl { display: flex; align-items: center; gap: .25em; flex: 0 0 auto; }
+.deck-count {
+  min-width: 2ch;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: var(--t-small);
+  color: var(--fg);
+}
+.deck-row.is-changed .deck-count { color: var(--act); }
+
+.deck-step {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--tap);
+  min-height: var(--tap);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--deboss);
+  color: var(--fg);
+  font-size: var(--t-body);
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+@media (hover: hover) {
+  .deck-step:not(:disabled):hover { background: var(--surface-hi, var(--surface)); color: var(--act); }
+}
+.deck-step:not(:disabled):active { box-shadow: none; transform: translateY(1px); }
+/* Disabled is a BOUND, not an error: it reads as unavailable rather than wrong,
+   and it keeps its focus ring so keyboard traversal does not fall into a hole. */
+.deck-step:disabled { opacity: .35; cursor: default; }
+.deck-step:focus-visible { outline: var(--ring); outline-offset: 2px; }

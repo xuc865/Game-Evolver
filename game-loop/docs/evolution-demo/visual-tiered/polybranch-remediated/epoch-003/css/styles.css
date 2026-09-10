@@ -1,0 +1,365 @@
+body {
+  background-color: #333; color: #646464; line-height: normal;
+  font-family: Lucida Grande, Lucida Sans, Arial, Helvetica Neue, Verdana, Geneva, sans-serif;
+  font-size: 11px; font-weight: normal; text-decoration: none;
+	  line-height: 1.5em;
+}
+a img { 
+	border: 0px solid transparent;
+}
+a, a:link, a:visited, a:active, a:hover { 
+	color: #cdcdcd; text-decoration: underline;
+	cursor: pointer;
+}
+
+h1,h2,h3,h4, .button, .button:link, .button:active, .button:visited{
+	font-family: 'Wire One', sans-serif;
+	letter-spacing: 1px;
+	text-shadow: 0px 1px 0px #ffffff;
+	color: #323232;
+    filter: dropshadow(color=#ffffff, offx=0, offy=1);
+}
+
+.button{
+	color: #323232;
+}
+
+.button:hover{
+	text-decoration: none;
+	color: #633d3d;
+}
+
+
+#game-wrapper{
+	position: relative;
+}
+
+	#loading{
+		width: 100%;
+		height: 100%;
+		background: #f1f1f1;
+	}
+		#loading h2{
+			font-size: 80px;
+			line-height: 80px;
+			text-align: center;
+			margin-top: 290px;
+		}
+
+	#arrowkeys{
+		position: absolute;
+		display: none;
+		width: 338px;
+		opacity: 0.7;
+		top: 300px;
+		left: 231px;
+	}
+
+	#main-menu{
+		text-align: center;
+		background: #f1f1f1;
+		background: rgba(100,100,100,0.2);
+	}
+		#main-menu h1{
+			font-size: 120px;
+			line-height: 120px;
+			margin-bottom: 348px;
+			margin-top: 55px;
+		}
+	#gameover-menu{
+		display: none;
+		background: #f1f1f1;
+		background: rgba(100,100,100,0.2);
+		text-align: center;
+		opacity: 0;
+	}
+		#gameover-menu .content{
+			display: none;
+			opacity: 0;
+			width: 400px;
+			height: 620px;
+			margin: 0px auto;
+			background: #f1f1f1;
+			background: rgba(240,240,240,0.7);
+		}
+		#gameover-menu #score{
+			font-size: 120px;
+			line-height: 120px;
+			margin-bottom: 0px;
+			padding-top: 20px;
+		}
+			#gameover-menu #score #L{
+				font-size: 60px;
+			}
+		#gameover-menu #highscore{
+			font-size: 30px;
+			line-height: 30px;
+			margin-bottom: 230px;
+			margin-top: -20px;
+		}
+			#gameover-menu #highscore #L{
+				font-size: 20px;
+			}
+		#gameover-menu #nextlevel{
+			font-size: 20px;
+			line-height: 20px;
+		}
+		#gameover-menu #run-summary{
+			max-width: 340px;
+			margin: 10px auto 0px auto;
+			font-size: 15px;
+			line-height: 21px;
+		}
+		#gameover-menu #retry{
+			margin-bottom: 0px;
+		}
+
+	#hud{
+		position: absolute;
+		display: none;
+		width: 100%;
+		top: 0px;
+		left: 0px;
+	}
+		#hud #score{
+			float: left;
+			font-size: 70px;
+			line-height: 70px;
+			margin: 20px 0px 0px 20px;
+		}
+		#hud #level{
+			float: right;
+			font-size: 70px;
+			line-height: 70px;
+			margin: 20px 20px 0px 0px;
+		}
+		#hud #best{
+			float: left;
+			clear: left;
+			font-size: 18px;
+			line-height: 18px;
+			margin: 2px 0px 0px 20px;
+			opacity: 0.7;
+		}
+
+.button{
+	font-size: 50px;
+	line-height: 50px;
+	text-decoration: none;
+}
+
+.overlay{
+	position: absolute;
+	top: 0px;
+	left: 0px;
+	width: 100%;
+	height: 100%;
+}
+
+#flash{
+	background: #fff;
+	display: none;
+}
+
+canvas { 
+	display: block; 
+	outline: 0px; 
+	margin-bottom: 1.5em; 
+}
+
+#page{
+	color: #f1f1f1;
+}
+
+	#page h1{
+		color: #f1f1f1;
+		text-shadow: none;
+	    filter: none;
+		font-size: 60px;
+		line-height: 60px;
+	}
+
+	#page p{
+		font-size: 16px;
+		line-height: 22px;
+	}
+
+#content {
+	margin: 50px auto 0px auto; padding: 25px 25px 15px 25px;
+	width: 800px; min-width: 300px; overflow: auto;
+	border-left: 1px solid #444; border-top: 1px solid #444;
+	border-right: 1px solid #333; border-bottom: 1px solid #333;
+	background-color: #3d3d3d;
+}
+
+/* --- progression clarity & pause / sound controls --- */
+	#hud #next-level-hint{
+		clear: both;
+		float: left;
+		font-size: 22px;
+		line-height: 22px;
+		margin: 4px 0px 0px 20px;
+		opacity: 0.75;
+	}
+	.hud-button{
+		float: right;
+		clear: right;
+		font-family: 'Wire One', sans-serif;
+		font-size: 22px;
+		line-height: 22px;
+		letter-spacing: 1px;
+		color: #323232;
+		text-decoration: none;
+		opacity: 0.75;
+		margin: 6px 20px 0px 0px;
+		text-shadow: 0px 1px 0px #ffffff;
+		cursor: pointer;
+	}
+	.hud-button:hover{
+		opacity: 1;
+		text-decoration: none;
+		color: #633d3d;
+	}
+	#hud #sound-icon{
+		font-size: 18px;
+		margin-right: 6px;
+	}
+	.hud-button.muted{
+		opacity: 0.4;
+	}
+	/* --- velocity gauge: makes the "terminal velocity" hook visible --- */
+	#hud #speed-box{
+		position: absolute;
+		top: 24px;
+		left: 50%;
+		margin-left: -110px;
+		width: 220px;
+		text-align: center;
+	}
+		#hud #speed-label{
+			font-family: 'Wire One', sans-serif;
+			font-size: 20px;
+			line-height: 20px;
+			letter-spacing: 2px;
+			color: #323232;
+			text-shadow: 0px 1px 0px #ffffff;
+		}
+		#hud #speed-value{
+			display: inline-block;
+			min-width: 30px;
+			font-size: 20px;
+			line-height: 20px;
+			color: #323232;
+			text-shadow: 0px 1px 0px #ffffff;
+		}
+		#hud #speed-track{
+			position: relative;
+			height: 8px;
+			margin-top: 3px;
+			background: rgba(255,255,255,0.55);
+			border: 1px solid rgba(0,0,0,0.25);
+		}
+			#hud #speed-fill{
+				position: absolute;
+				top: 0px; left: 0px; bottom: 0px;
+				width: 0%;
+				background: linear-gradient(to right, #8fbf5f, #d9534f);
+				transition: width 0.4s ease-out;
+			}
+			#hud #speed-track #speed-max-tick{
+				position: absolute;
+				top: -3px; bottom: -3px;
+				left: 0%;
+				width: 2px;
+				background: #323232;
+				opacity: 0.6;
+				transition: left 0.4s ease-out;
+			}
+		#hud #speed-box .speed-caption{
+			margin-top: 2px;
+			font-size: 12px;
+			line-height: 14px;
+			opacity: 0.7;
+		}
+	#pause-menu{
+		display: none;
+		text-align: center;
+		background: rgba(100,100,100,0.2);
+	}
+		#pause-menu h1{
+			font-size: 100px;
+			line-height: 100px;
+			margin-bottom: 340px;
+			margin-top: 250px;
+		}
+		#pause-menu .hint, #main-menu .hint{
+			clear: both;
+			font-size: 18px;
+			line-height: 24px;
+			margin: 0px 0px 30px 0px;
+		}
+		#main-menu .hint strong{
+			font-size: 20px;
+		}
+		#main-menu .content{
+			height: 800px;
+		}	/* --- progression clarity: live bar toward the next level --- */
+	#hud #level-progress{
+		position: absolute;
+		top: 76px;
+		left: 50%;
+		margin-left: -110px;
+		width: 220px;
+		text-align: center;
+	}
+		#hud #level-progress-track{
+			position: relative;
+			display: block;
+			height: 8px;
+			width: 180px;
+			margin: 0px auto;
+			background: rgba(255,255,255,0.55);
+			border: 1px solid rgba(0,0,0,0.25);
+		}
+			#hud #level-progress-fill{
+				position: absolute;
+				top: 0px; left: 0px; bottom: 0px;
+				width: 0%;
+				background: #8fbf5f;
+				transition: width 0.4s ease-out;
+			}
+		#hud #progress-pct{
+			display: inline-block;
+			margin-top: 2px;
+			font-size: 12px;
+			line-height: 14px;
+			opacity: 0.7;
+		}
+	/* --- risk/reward feedback: close-call streak badge --- */
+	#hud #streak-badge{
+		position: absolute;
+		top: 116px;
+		left: 50%;
+		margin-left: -110px;
+		width: 220px;
+		display: none;
+		text-align: center;
+		font-family: 'Wire One', sans-serif;
+		font-size: 22px;
+		line-height: 24px;
+		letter-spacing: 1px;
+		color: #633d3d;
+		text-shadow: 0px 1px 0px #ffffff;
+	}
+/* --- pointer / touch steering: drag anywhere on the tunnel --- */
+#game-wrapper.steering canvas{
+	cursor: grabbing;
+}
+#game-wrapper canvas{
+	touch-action: none;
+	-ms-touch-action: none;
+	cursor: grab;
+}
+#game-wrapper #arrowkeys{
+	pointer-events: none;
+}

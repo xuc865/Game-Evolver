@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chudopoly — card art proof sheet</title>
+
+<!-- ONLY cardart.css. variables.css is deliberately NOT loaded: this page is the
+     standalone proof that the sheet's --card-* / --set-* fallbacks (the measured
+     ART-DIRECTION §2 values) stand on their own, and it is where the card is
+     reviewed independently of whatever the table happens to be doing. -->
+<link rel="stylesheet" href="/style/cardart.css">
+
+<style>
+  :root { --ground: #E8E2D4; --ground-deep: #D5CDBB; --fg: #14161A; --fg-mute: #5C6470; }
+  [data-table="night"] { --ground: #15171C; --ground-deep: #0B0D10; --fg: #F2EEE4; --fg-mute: #8E97A3; }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 28px 24px 80px;
+    background: var(--ground-deep);
+    color: var(--fg);
+    font: 14px/1.5 "Avenir Next", system-ui, sans-serif;
+  }
+  h1 { font-size: 19px; letter-spacing: .16em; text-transform: uppercase; margin: 0 0 4px; }
+  h2 {
+    font-size: 11px; letter-spacing: .18em; text-transform: uppercase;
+    color: var(--fg-mute); margin: 34px 0 12px;
+    border-bottom: 1px solid currentColor; padding-bottom: 6px;
+  }
+  p.note { color: var(--fg-mute); max-width: 76ch; margin: 0 0 6px; font-size: 12.5px; }
+  code { font-family: ui-monospace, Menlo, monospace; font-size: .92em; }
+
+  .bar { display: flex; gap: 10px; align-items: center; margin-bottom: 18px; flex-wrap: wrap; }
+  button {
+    font: inherit; font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+    padding: 7px 13px; border-radius: 4px; cursor: pointer;
+    background: var(--fg); color: var(--ground); border: none;
+  }
+  button[aria-pressed="false"] { background: none; color: var(--fg); box-shadow: inset 0 0 0 1px currentColor; }
+
+  .grid { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
+
+  /* The REAL host structure from table/cardnode.js, so the container queries in
+     cardart.css fire against exactly what they will fire against in the game. */
+  .card {
+    position: relative; width: var(--card-w, 110px); aspect-ratio: 5 / 7;
+    border-radius: calc(var(--card-w, 110px) * .075);
+    overflow: hidden; flex: none;
+    box-shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 16px rgba(0,0,0,.18);
+  }
+  .card-inner, .card-face, .card-back { position: absolute; inset: 0; }
+  .card-face { display: flex; flex-direction: column; }
+  .card-back { display: flex; align-items: center; justify-content: center; }
+
+  .tier { margin-bottom: 26px; }
+  .tier > h3 {
+    font: 10px/1 ui-monospace, Menlo, monospace; letter-spacing: .12em;
+    color: var(--fg-mute); text-transform: uppercase; margin: 0 0 10px;
+  }
+  .t-hand  { --card-w: 110px; }
+  .t-crowd { --card-w:  58px; }
+  .t-table { --card-w:  44px; }
+  .t-mini  { --card-w:  30px; }
+  .t-28    { --card-w:  28px; }
+  .t-38    { --card-w:  38px; }
+
+  .peekrow { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+
+  /* The 1-bit silhouette proof — the ART §6 gate, taken literally: every glyph
+     (set AND action) rasterised on a real 14×14 canvas, thresholded to pure
+     black/white at 50% luminance, then blown up 8× nearest-neighbour so the
+     surviving pixels can be judged. The vector at 44px rides above it for
+     shape reference; the canvas below is the gate. */
+  .sil { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; }
+  .sil figure { margin: 0; text-align: center; }
+  .sil .big { width: 44px; height: 44px; color: #000; background: #fff; margin: 0 auto 5px; }
+  .sil .big svg { width: 44px; height: 44px; display: block; }
+  .sil canvas {
+    width: 112px; height: 112px; display: block; margin: 0 auto 5px;
+    image-rendering: pixelated; background: #fff;
+  }
+  .sil figcaption { font: 9px/1.3 ui-monospace, Menlo, monospace; color: var(--fg-mute); letter-spacing: .06em; }
+</style>
+</head>
+<body data-table="day">
+
+<h1>Chudopoly — card art proof sheet</h1>
+<p class="note">
+  Every card is cream printed stock in <em>both</em> themes (ART-DIRECTION §0): the toggle below
+  changes the <strong>table</strong>, not the objects on it. One face markup per card is degraded by
+  container queries at ≤82 / ≤66 / ≤60 / ≤34px — nothing is re-rendered, which is what lets
+  <code>table/cardnode.js</code> build a face once and only reparent it.
+</p>
+
+<div class="bar">
+  <button id="theme" aria-pressed="false">Table: daylight</button>
+  <button id="which" aria-pressed="true">Showing: every card</button>
+</div>
+
+<h2>1 — The owner defect: rent vs wild, no text, 28px</h2>
+<p class="note">
+  A <strong>rent</strong> bleeds its colour to the trim and has no cream chassis. A <strong>wild
+  property</strong> keeps the cream property chassis and contains its colour. So the wild rent and the
+  wild property are told apart by <em>chassis</em>, not by colour — which is the confusion the owner hit.
+  Rents are the first row, wilds the second.
+</p>
+<div class="tier t-28"><h3>28px · no text rendered</h3><div class="grid" id="p-rent28"></div></div>
+<div class="tier t-28"><h3>28px · wild properties</h3><div class="grid" id="p-wild28"></div></div>
+<div class="tier t-hand"><h3>110px · the same eight cards</h3><div class="grid" id="p-rentbig"></div></div>
+
+<h2>2 — Ten sets at 38px</h2>
+<p class="note">
+  The set must be nameable with no text. 38px falls in the ≤60px tier — three marks: the set band,
+  the glyph at 58% of the card, and the value coin. Below 34px it collapses further, to a flood of the
+  set colour with the glyph knocked out in white (see tier 4).
+</p>
+<div class="tier t-38"><h3>38px</h3><div class="grid" id="p-sets38"></div></div>
+
+<h2>3 — Every glyph as a 1-bit silhouette at 14×14</h2>
+<p class="note">
+  The ART §6 gate, taken literally: each glyph — the ten sets AND the eleven actions — rasterised on a
+  real 14×14 canvas, thresholded to pure black and white, shown at 8×. If two of these squares can be
+  confused, the glyphs are confusable in a 20px upgrade chip on an opponent's board. The 44px vector
+  above each square is reference only; the pixels are the gate.
+</p>
+<div class="sil" id="p-sil"></div>
+<div class="sil" id="p-sil-act" style="margin-top:14px"></div>
+
+<h2>4 — Every card, four tiers</h2>
+<div class="tier t-hand"><h3>110px · hand / deck / discard</h3><div class="grid" id="p-t1"></div></div>
+<div class="tier t-crowd"><h3>58px · crowded hand, discard browser</h3><div class="grid" id="p-t2"></div></div>
+<div class="tier t-table"><h3>44px · your own board</h3><div class="grid" id="p-t3"></div></div>
+<div class="tier t-mini"><h3>30px · opponent boards, upgrade rows</h3><div class="grid" id="p-t4"></div></div>
+
+<h2>5 — Peek tier</h2>
+<div class="peekrow" id="p-peek"></div>
+
+<script type="module">
+import { faceNode, backNode, SET_GLYPHS, ACTION_GLYPHS } from '/src/table/cardart.js';
+import { COLORS, COLOR_KEYS, cardText } from '/src/core/cards.js';
+
+/* A representative deck: every family, every set, every action, drawn from the
+   real names in game.js buildDeck(). */
+let id = 0;
+const c = (o) => ({ id: id++, ...o });
+
+const PROPS = [
+  ['brown', 'Creech AFB', 1], ['lightblue', 'Lackland AFB (BMT)', 1],
+  ['pink', 'Peterson SFB', 2], ['orange', 'Nellis AFB', 2],
+  ['red', 'F-35 Lightning II', 3], ['yellow', 'C-17 Globemaster III', 3],
+  ['green', 'Thunderbirds', 4], ['darkblue', 'The Pentagon', 4],
+  ['base', 'Ramstein AB', 2], ['intel', 'PAVE PAWS Radar', 1],
+];
+const RENTS = [
+  ['brown', 'lightblue'], ['pink', 'orange'], ['red', 'yellow'],
+  ['green', 'darkblue'], ['base', 'intel'], ['any'],
+];
+const WILDS = [
+  [['any'], 'Wild Property', 0], [['brown', 'lightblue'], 'Wild: Drone/Training', 1],
+  [['pink', 'orange'], 'Wild: Space/Test', 2], [['red', 'yellow'], 'Wild: Fighter/Mobility', 3],
+  [['green', 'darkblue'], 'Wild: Elite/Command', 4], [['base', 'intel'], 'Wild: Bases/Intel', 2],
+];
+const ACTIONS = [
+  ['inspector_general', 'Inspector General', 5], ['opsec', 'OPSEC', 4],
+  ['midnight_requisition', 'Midnight Requisition', 3], ['tdy_orders', 'TDY Orders', 3],
+  ['finance_office', 'Finance Office', 3], ['roll_call', 'Roll Call', 2],
+  ['pcs_orders', 'PCS Orders', 1], ['upgrade', 'Upgrade (House)', 3],
+  ['foc', 'Full Operational Capability (Hotel)', 4], ['surge_ops', 'Surge Operations', 1],
+  ['chud', 'THE CHUD CARD', 4],
+];
+
+const properties = PROPS.map(([color, name, value]) => c({ type: 'property', color, name, value }));
+const rents = RENTS.map((colors) => c({ type: 'rent', colors, name: 'Rent: ' + colors.join('/'), value: colors[0] === 'any' ? 3 : 1 }));
+const wilds = WILDS.map(([colors, name, value]) => c({ type: 'wild_property', colors, name, value }));
+const money = [1, 2, 3, 4, 5, 10].map((v) => c({ type: 'money', name: v + 'M', value: v }));
+const actions = ACTIONS.map(([action, name, value]) => c({ type: 'action', action, name, value }));
+
+const DECK = [...properties, ...wilds, ...rents, ...money, ...actions];
+
+/** The real host structure from table/cardnode.js. */
+function hostCard(card) {
+  const node = document.createElement('div');
+  node.className = 'card';
+  const inner = document.createElement('div');
+  inner.className = 'card-inner';
+  const face = document.createElement('div');
+  face.className = 'card-face';
+  face.appendChild(faceNode(card, 'hand'));
+  inner.appendChild(face);
+  node.appendChild(inner);
+  return node;
+}
+
+function hostBack() {
+  const node = document.createElement('div');
+  node.className = 'card';
+  const back = document.createElement('div');
+  back.className = 'card-back';
+  back.appendChild(backNode('hand'));
+  node.appendChild(back);
+  return node;
+}
+
+function fill(id, cards, withBack) {
+  const host = document.getElementById(id);
+  if (!host) return;
+  for (const card of cards) host.appendChild(hostCard(card));
+  if (withBack) host.appendChild(hostBack());
+}
+
+fill('p-rent28', rents);
+fill('p-wild28', wilds);
+fill('p-rentbig', [...rents, ...wilds]);
+fill('p-sets38', properties);
+for (const t of ['p-t1', 'p-t2', 'p-t3', 'p-t4']) fill(t, DECK, true);
+
+/* 1-bit silhouette proof — a REAL 14×14 raster, thresholded, at 8×. */
+function standaloneSVG(body) {
+  // knockouts must punch to the white ground; currentColor becomes flat black.
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="#000" fill-rule="evenodd">`
+    + body.replaceAll('var(--ca-knock)', '#fff').replaceAll('currentColor', '#000') + `</svg>`;
+}
+
+function oneBit(fig, body) {
+  const cv = document.createElement('canvas');
+  cv.width = 14; cv.height = 14;
+  fig.appendChild(cv);
+  const img = new Image();
+  img.onload = () => {
+    const ctx = cv.getContext('2d', { willReadFrequently: true });
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 14, 14);
+    ctx.drawImage(img, 0, 0, 14, 14);
+    const px = ctx.getImageData(0, 0, 14, 14);
+    for (let i = 0; i < px.data.length; i += 4) {
+      const lum = 0.2126 * px.data[i] + 0.7152 * px.data[i + 1] + 0.0722 * px.data[i + 2];
+      const v = lum < 128 ? 0 : 255;
+      px.data[i] = px.data[i + 1] = px.data[i + 2] = v; px.data[i + 3] = 255;
+    }
+    ctx.putImageData(px, 0, 0);
+  };
+  img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(standaloneSVG(body));
+}
+
+function silFigure(host, body, caption) {
+  const fig = document.createElement('figure');
+  const big = document.createElement('div');
+  big.className = 'big';
+  const doc = new DOMParser().parseFromString(
+    `<body><svg viewBox="0 0 48 48" fill="currentColor" fill-rule="evenodd" style="--ca-knock:#fff">`
+    + `${body}</svg></body>`, 'text/html');
+  big.appendChild(doc.body.firstElementChild);
+  fig.appendChild(big);
+  oneBit(fig, body);
+  const cap = document.createElement('figcaption');
+  cap.textContent = caption;
+  fig.appendChild(cap);
+  host.appendChild(fig);
+}
+
+const sil = document.getElementById('p-sil');
+for (const key of COLOR_KEYS) silFigure(sil, SET_GLYPHS[key], COLORS[key].short);
+
+const silAct = document.getElementById('p-sil-act');
+for (const [key, glyph] of Object.entries(ACTION_GLYPHS)) silFigure(silAct, glyph, key.replace(/_/g, ' '));
+
+/* peek tier */
+const peekHost = document.getElementById('p-peek');
+for (const card of [properties[4], wilds[0], wilds[3], rents[2], rents[5], money[5], actions[10], actions[1]]) {
+  peekHost.appendChild(faceNode(card, 'peek', { rule: cardText(card) }));
+}
+peekHost.appendChild(backNode('peek'));
+
+/* controls */
+const themeBtn = document.getElementById('theme');
+themeBtn.addEventListener('click', () => {
+  const night = document.body.dataset.table === 'night';
+  document.body.dataset.table = night ? 'day' : 'night';
+  themeBtn.textContent = night ? 'Table: daylight' : 'Table: night';
+  themeBtn.setAttribute('aria-pressed', night ? 'false' : 'true');
+});
+
+const whichBtn = document.getElementById('which');
+whichBtn.addEventListener('click', () => {
+  const on = whichBtn.getAttribute('aria-pressed') === 'true';
+  whichBtn.setAttribute('aria-pressed', on ? 'false' : 'true');
+  whichBtn.textContent = on ? 'Showing: rents + wilds' : 'Showing: every card';
+  for (const t of ['p-t1', 'p-t2', 'p-t3', 'p-t4']) {
+    const host = document.getElementById(t);
+    [...host.children].forEach((node, i) => {
+      const card = DECK[i];
+      const keep = !on || (card && (card.type === 'rent' || card.type === 'wild_property'));
+      node.style.display = keep ? '' : 'none';
+    });
+  }
+});
+</script>
+</body>
+</html>

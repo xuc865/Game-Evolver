@@ -1,0 +1,370 @@
+/* variables.css — the "APRON" token set (ART-DIRECTION §2).
+   Owner: art-direction agent. This file is the ONLY place a literal colour is
+   allowed to appear; every other file in public/style/ reads semantic tokens.
+
+   THE THESIS (§0): real printed cards on a real airfield apron.
+   Light  = the apron in daylight — warm concrete, never pure white.
+   Dark   = the apron at night    — NEUTRAL near-black, never navy.
+   THE CARDS DO NOT CHANGE. --card-stock / --ink / --card-edge / --card-back are
+   declared once, outside both themes, because a printed card is the same object
+   in a lit room and a dark one. The TABLE changes; the OBJECTS don't.
+
+   MUST-PRESERVE (client depends on these): --s is the one scale unit,
+   --card-ratio is 5/7 everywhere, --card-w is set per context, --tap is the
+   44px floor (ARCHITECTURE §0.9).
+
+   DELETED this wave, per §2: --felt-*, --steel-*, --gold-dim, --go, --warn.
+   The hue-collision table the previous agent left here is why. Measured HSL
+   angles, all of them signals sitting inside a set's hue band:
+       --go     152° vs Elite  136°  — 16°
+       --warn    31° vs T&E     29°  —  2°
+       --gold    42° vs Mobility 46° —  4°
+       --danger   3° vs Fighters 353° — 10°
+   Ten categorical hues plus four semantic ones do not fit in 360°. §1 fixes it
+   by making colour and MATERIAL two independent channels: sets own colour-as-
+   fill; signals own material (ink slab / cobalt ring / hazard stripe / foil).
+   Nothing below is allowed to reintroduce a semantic hue.
+
+   Every ratio in a comment here was computed by the WCAG 2.x relative-luminance
+   formula, not estimated. */
+
+:root {
+  /* Both schemes are supported; index.html's <meta name="color-scheme"> is
+     overridden here because the app is no longer dark-only. */
+  color-scheme: light dark;
+
+  /* ── the one scale unit ──────────────────────────────────────────────────
+     Width AND height bound it: at 1280×720 the vh term wins (720 × 2.3% =
+     16.6) so a short desktop window cannot push the table taller than it is;
+     at 390×844 the vw term wins (14.35px). Measured at a flat 17px the
+     1280×720 mid-game shot left 70px of dead table under the self board. */
+  --s: calc(clamp(12px, min(1.5vw + 8.5px, 2.3vh), 18px) * var(--ui-scale));
+
+  /* ── UI SCALE ────────────────────────────────────────────────────────────
+     A player-set multiplier on --s, written by ui/settings.js, which carries
+     the measured sweep that fixed its 0.8–1.3 bounds. Applied to --s ONLY and
+     deliberately NOT to --tap below: that separation is the whole §0.9 defence,
+     because it means shrinking the table shrinks the CARD and never the THUMB.
+     Every interactive floor in table.css is already written against --tap
+     (`min-height: var(--tap)`, `max(var(--card-tap), calc(var(--s) * N))`,
+     `minmax(var(--tap), 1fr)`), so a card slides down its own max() until --tap
+     takes over and the target stops shrinking. Default 1 keeps the expression
+     arithmetically identical to the one that shipped before the setting, so
+     the screenshot hashes do not move. */
+  --ui-scale: 1;
+
+  /* ══ THE CARD — identical in both themes ══════════════════════════════ */
+  --card-stock: #FBF8F1;
+  --card-edge:  #D9D2C4;
+  --card-back:  #14161A;
+  --ink:        #14161A;             /* 17.08:1 on stock */
+  --ink-mute:   #5C6470;             /*  5.64:1 on stock */
+  /* The card-art system (style/cardart.css, owned by the card agent) consumes
+     the same two values under card-scoped names. Declared here, not aliased
+     there, so there is exactly one place either can be changed. */
+  --card-ink:      var(--ink);
+  --card-ink-mute: var(--ink-mute);
+  /* white-on-set is 5.07–11.04 across the ten sets; stock-on-set is 4.71–9.7,
+     so the band label is legible on every one of them. */
+  --band-ink:   #FBF8F1;
+
+  /* ══ THE TEN SETS — one set, both themes (§2) ═════════════════════════
+     Certified ≥4.5:1 on card stock AND ≥4.5:1 for stock-on-them. They appear
+     ONLY as: a solid band on stock, a 3px mat rail, a mat wash, and the glyph.
+     Never as a glow, a gradient, a ring or an animation. */
+  --set-brown:     #8A4B1E;          /* Drone Ops      6.37 on stock */
+  --set-lightblue: #136C90;          /* Training       5.54 */
+  --set-pink:      #B01C63;          /* Space Force    6.20 */
+  --set-orange:    #A85200;          /* Test & Eval    5.11 */
+  --set-red:       #B81A33;          /* Fighters       6.12 */
+  --set-yellow:    #8A6A00;          /* Mobility       4.78 */
+  --set-green:     #1B6E37;          /* Elite Programs 5.94 */
+  --set-darkblue:  #26308F;          /* Command       10.41 */
+  --set-base:      #0C5F5B;          /* Overseas Bases 7.06 */
+  --set-intel:     #465767;          /* Intelligence   7.02 */
+
+  /* ══ LIGHT — "apron, daylight" ════════════════════════════════════════
+     A white UI is a flashlight in the face. Warm concrete instead.
+
+     ROUND-4, and this supersedes §2's published light values with measurement,
+     from two gates that failed for the same reason:
+
+     1. FIGURE-GROUND. Cream stock #FBF8F1 on §2's concrete #E8E2D4 is 1.218:1,
+        and on the §2 mat surface #F3EEE3 — which is what a card stands on for
+        most of the game — 1.091:1. At 1.09 the card and the mat are the same
+        value and the whole read was resting on a 1px edge.
+     2. ART §10's grayscale gate, rebuilt to measure ADJACENT PAIRS: "property
+        mat on #table" separated by 1.8 L* of field, "chrome panel on #table" by
+        6.8. It needs 12.
+
+     The cards cannot move (§0: a printed card is the same object in both
+     themes), so the TABLE moves — which is the thesis, not a compromise. The
+     apron stays daylight concrete and the FURNITURE steps down off it, the way
+     a rubber-matted steel tray sits on a concrete apron:
+
+         apron   --ground       #DFD7C5   L* 86  (paints 84.6 through the grain)
+         plates  --surface      #B1AB9B   L* 70  (-16: seats, HUD, sheets, bank)
+         wells   --ground-deep  #A19B8C   L* 64  (-22: the dock, chips, the log)
+         mats    derived        ~L* 65    (-21, set hue at 14% over the plate)
+         stock   --card-stock   L* 98     (+28 over a mat, +34 over the dock)
+
+     Every ink then has to hold 4.5:1 against a plate at L*70 rather than a
+     near-white one, so the ink family goes down with it — measured below. */
+  --ground:      #DFD7C5;
+  --ground-deep: #A19B8C;
+  --surface:     #B1AB9B;
+  --fg:          #14161A;            /* 12.65 on ground ·  7.91 on surface */
+  /* MEASURED CORRECTION to §2, twice over. The brief publishes #5C6470, whose
+     "5.1:1" is its ratio against the OLD near-white surface; the stencil labels
+     that carry it (Bank, Hand, the pile captions, the hint marks) live on the
+     recessed furniture, which is now L*64-70. #2E333B holds all of it:
+     ground 8.87 · surface 5.55 · ground-deep 4.59 · stock 11.98.
+     --ink-mute keeps §2 verbatim because it is a CARD token and a card only
+     ever sits on stock, where 5.64 is correct. */
+  --fg-mute:     #2E333B;
+  --act:         #14161A;            /* the achromatic ink slab */
+  --act-fg:      #FBF8F1;            /* 17.08 on --act */
+  --accent:      #073FAF;            /* AF cobalt, one step deeper than §2's
+                                        #0B4FD8 because the furniture it rings
+                                        now sits at L*70: 6.27 on ground, 3.92
+                                        on surface, 8.46 on stock. RING ONLY. */
+  --danger:      #AB2707;            /* hazard MATERIAL only, always with
+                                        stripes; never bare text. 4.71 on
+                                        ground, 3.00 on the new surface — a
+                                        graphical mark at the 3:1 floor. */
+  --danger-ink:  #791904;            /* 7.51 on ground · 4.69 on surface — the
+                                        text weight of danger */
+  --foil:        #6E4E19;            /* 3.38 on the new surface, 5.28 on
+                                        ground. VICTORY MODAL ONLY. */
+  /* --foil is a MATERIAL value (rims, the flood). As lettering it failed the
+     win tag and the recap, so brass text gets its own ink:
+     7.55 on ground · 4.72 on surface · 10.20 on stock. */
+  --foil-ink:    #51390F;
+
+  /* material: how a surface is cut into or raised off the apron */
+  --shade:   rgba(74, 62, 44, .22);
+  --shade-2: rgba(74, 62, 44, .34);
+  --sheen:   rgba(255, 255, 255, .70);
+  --press-ink: #8B8474;              /* the hard-edged shadow a painted plate
+                                        throws on concrete */
+  --stencil: rgba(20, 22, 26, .15);  /* markings PAINTED on the apron */
+  --stencil-hi: rgba(20, 22, 26, .30);
+  /* A sheet held over the apron in DAYLIGHT scatters light: the table behind
+     it goes lighter, not darker. A dark veil over a light UI is what dropped
+     36 runs of table text under 3:1 in the win and discard-browser shots —
+     dark ink on a darkened light ground. Measured through this scrim: --fg
+     15.27, --accent 5.67, --danger-ink 5.98. At night the veil is dark, which
+     is the same physics with the light source removed. */
+  --scrim:   rgba(237, 231, 218, .78);
+  --grain-alpha: .30;
+  --rail-lift: 0%;                   /* set rails need no lift in daylight */
+  /* The first stop is a CONTACT term: a 1px hairline of the concrete's own
+     shadow, hard against the trim. Paper lying on a surface has one; it is what
+     separates the sheet from the surface before any value difference does. */
+  --card-drop:
+    0 0 0 1px rgba(60, 50, 32, .16),
+    0 1px 2px rgba(60, 50, 32, .30),
+    0 3px 6px rgba(60, 50, 32, .18),
+    0 10px 24px rgba(60, 50, 32, .13);
+  --card-drop-air:
+    0 0 0 1px rgba(60, 50, 32, .18),
+    0 3px 3px rgba(60, 50, 32, .22),
+    0 8px 15px rgba(60, 50, 32, .18),
+    0 25px 60px rgba(60, 50, 32, .16);
+
+  /* ══ geometry — hard, printed, not app-rounded ════════════════════════ */
+  --radius:    4px;                  /* chrome */
+  --radius-lg: 8px;                  /* sheets, panels, modals */
+  --tap:       44px;                 /* §0.9 floor */
+  /* The floor for a CARD that is itself a control (your bank notes, your
+     property cards during payment). 44px exactly renders at 43.99 and
+     tools/touchtest.mjs measures 43×62; +2px is the smallest value that
+     survives sub-pixel layout and a 2× device ratio. */
+  --card-tap:  calc(var(--tap) + 2px);
+  --hairline:  1px;
+  --card-ratio: 5 / 7;
+  --card-w:     calc(var(--s) * 2.6);
+  /* §6: 6px. Not 0 (a spreadsheet cell), not 12 (an app card). Capped so a
+     28px mini tier does not turn into a lozenge. */
+  --card-r:     clamp(2px, calc(var(--card-w) * .06), 6px);
+
+  /* ══ type (§4) — hierarchy from SIZE and WEIGHT, never from tracking ═══
+     No webfonts (§0.3). ui-rounded on Apple platforms is distinctive, costs
+     zero bytes, and is nothing like Inter. Tracked caps survive in exactly one
+     place in the whole app — the set name on a card band — which lives in the
+     card agent's file, so in these files: nowhere. */
+  --font-display: ui-rounded, "SF Pro Rounded", "Segoe UI Variable Display",
+                  system-ui, -apple-system, sans-serif;
+  --font-body: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  /* Money, rent, counters, timers and room codes. Mono + tabular-nums IS the
+     character of this app and is an instant non-Inter signal. */
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, "Cascadia Mono", Menlo,
+               Consolas, monospace;
+
+  --t-display: 2.6em;
+  --t-title:   1.45em;
+  --t-lede:    1.06em;
+  --t-small:    .85em;
+  --t-micro:    .74em;
+  --track-display: -.02em;
+
+  /* ══ procedural textures — authored as text (§0.3) ════════════════════ */
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23g)'/%3E%3C/svg%3E");
+  /* concrete aggregate: two out-of-phase dot fields so no tile edge shows */
+  --aggregate:
+    radial-gradient(circle at 17% 31%, var(--stencil) 0 1px, transparent 1.6px),
+    radial-gradient(circle at 63% 11%, var(--stencil) 0 1.2px, transparent 1.8px),
+    radial-gradient(circle at 41% 77%, var(--stencil) 0 .9px, transparent 1.4px),
+    radial-gradient(circle at 88% 59%, var(--stencil) 0 1.1px, transparent 1.7px);
+  --aggregate-size: 37px 41px, 53px 47px, 29px 31px, 61px 59px;
+}
+
+/* ══ DARK — "apron, night" ══════════════════════════════════════════════
+   NEUTRAL near-black. #15171C is 219° at 12% saturation; the retired identity
+   sat at #102542, 214° at 61%, which is what made the whole app read navy. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ground:      #15171C;
+    --ground-deep: #0B0D10;
+    /* ROUND-4, ART §10 grayscale: the night furniture sat at L*14.1 against an
+       apron that paints at L*14.1 — a 0.1 L* field step, and every seat, mat
+       and the HUD were being told apart by a hairline alone. L*30 is +16. */
+    --surface:     #404753;
+    --fg:          #F2EEE4;          /* 15.48 on ground ·  8.08 on surface */
+    --fg-mute:     #ACB7C5;          /*  8.82 on ground ·  4.60 on surface */
+    --act:         #F2EEE4;
+    --act-fg:      #14161A;          /* 15.63 on --act */
+    --accent:      #84B9FF;          /*  8.85 on ground ·  4.62 on surface */
+    --danger:      #FF8C53;          /*  7.79 on ground ·  4.07 on surface */
+    --danger-ink:  #FF9F5E;          /*  8.86 on ground ·  4.62 on surface */
+    --foil:        #C9A253;          /*  7.49 on ground ·  3.91 on surface */
+    --foil-ink:    #DAB05B;          /*  8.83 on ground ·  4.61 on surface */
+
+    --shade:   rgba(0, 0, 0, .45);
+    --shade-2: rgba(0, 0, 0, .68);
+    --sheen:   rgba(255, 255, 255, .07);
+    --press-ink: #000000;
+    --stencil:    rgba(242, 238, 228, .11);
+    --stencil-hi: rgba(242, 238, 228, .22);
+    --scrim:   rgba(4, 5, 7, .74);
+    --grain-alpha: .16;
+    /* A painted set rail on night asphalt needs the same lift a real marking
+       gets from a landing light. 38% toward --fg keeps the hue and puts the
+       worst case (Command, 1.41 raw against --surface) at 3.74 — above the
+       3:1 floor for a graphical object. Nothing about the ten TOKENS changes;
+       only how a rail is rendered on a dark table. */
+    --rail-lift: 38%;
+    --card-drop:
+      0 1px 2px rgba(0, 0, 0, .55),
+      0 4px 9px rgba(0, 0, 0, .48),
+      0 12px 28px rgba(0, 0, 0, .42);
+    --card-drop-air:
+      0 3px 5px rgba(0, 0, 0, .6),
+      0 10px 22px rgba(0, 0, 0, .55),
+      0 30px 70px rgba(0, 0, 0, .5);
+  }
+}
+
+/* [data-theme] on <html> overrides both. Declared twice, in this order, so
+   neither one can be "the fallback": each is a full statement of its theme. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --ground: #DFD7C5; --ground-deep: #A19B8C; --surface: #B1AB9B;
+  --fg: #14161A; --fg-mute: #2E333B;
+  --act: #14161A; --act-fg: #FBF8F1;
+  --accent: #073FAF; --danger: #AB2707; --danger-ink: #791904;
+  --foil: #6E4E19; --foil-ink: #51390F;
+  --shade: rgba(74, 62, 44, .22); --shade-2: rgba(74, 62, 44, .34);
+  --sheen: rgba(255, 255, 255, .70); --press-ink: #8B8474;
+  --stencil: rgba(20, 22, 26, .15); --stencil-hi: rgba(20, 22, 26, .30);
+  --scrim: rgba(237, 231, 218, .78); --grain-alpha: .30; --rail-lift: 0%;
+  --card-drop:
+    0 0 0 1px rgba(60, 50, 32, .16),
+    0 1px 2px rgba(60, 50, 32, .30),
+    0 3px 6px rgba(60, 50, 32, .18),
+    0 10px 24px rgba(60, 50, 32, .13);
+  --card-drop-air:
+    0 0 0 1px rgba(60, 50, 32, .18),
+    0 3px 3px rgba(60, 50, 32, .22),
+    0 8px 15px rgba(60, 50, 32, .18),
+    0 25px 60px rgba(60, 50, 32, .16);
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: #15171C; --ground-deep: #0B0D10; --surface: #404753;
+  --fg: #F2EEE4; --fg-mute: #ACB7C5;
+  --act: #F2EEE4; --act-fg: #14161A;
+  --accent: #84B9FF; --danger: #FF8C53; --danger-ink: #FF9F5E;
+  --foil: #C9A253; --foil-ink: #DAB05B;
+  --shade: rgba(0, 0, 0, .45); --shade-2: rgba(0, 0, 0, .68);
+  --sheen: rgba(255, 255, 255, .07); --press-ink: #000000;
+  --stencil: rgba(242, 238, 228, .11); --stencil-hi: rgba(242, 238, 228, .22);
+  --scrim: rgba(4, 5, 7, .74); --grain-alpha: .16; --rail-lift: 38%;
+  --card-drop:
+    0 1px 2px rgba(0, 0, 0, .55),
+    0 4px 9px rgba(0, 0, 0, .48),
+    0 12px 28px rgba(0, 0, 0, .42);
+  --card-drop-air:
+    0 3px 5px rgba(0, 0, 0, .6),
+    0 10px 22px rgba(0, 0, 0, .55),
+    0 30px 70px rgba(0, 0, 0, .5);
+}
+
+/* ══ DERIVED — every component reads these, never a literal ═════════════ */
+:root {
+  /* MATERIAL, not outline. §3.2: zero `border: 1px solid` on table furniture;
+     a zone is CUT INTO the apron. */
+  --deboss:
+    inset 0 2px 3px var(--shade-2),
+    inset 0 -1px 0 var(--sheen);
+  --deboss-deep:
+    inset 0 3px 6px var(--shade-2),
+    inset 0 1px 0 var(--shade),
+    inset 0 -1px 0 var(--sheen);
+  /* raised chrome (the HUD bar, a seat plate): the inverse cut */
+  --emboss:
+    inset 0 1px 0 var(--sheen),
+    inset 0 -2px 3px var(--shade);
+  /* PRESSABLES ONLY — hard offset, zero blur, collapses on :active. Never on
+     a card, a panel or a decoration; those are becoming the next cliché. */
+  --press:      4px 4px 0 var(--press-ink);
+  --press-soft: 2px 2px 0 var(--press-ink);
+
+  /* the ring: selection / your turn / valid drop. Outline, never a fill. */
+  --ring: 2px solid var(--accent);
+
+  /* hazard MATERIAL: 45° caution stripes. Danger is never a plain chip. */
+  --hazard: repeating-linear-gradient(45deg,
+    var(--danger) 0 9px, var(--ink) 9px 18px);
+  --hazard-fine: repeating-linear-gradient(45deg,
+    var(--danger) 0 5px, var(--ink) 5px 10px);
+
+  /* the set rail, rendered for the table it is painted on (see --rail-lift) */
+  --rail: color-mix(in oklab,
+          var(--band, var(--fg-mute)) calc(100% - var(--rail-lift)),
+          var(--fg) var(--rail-lift));
+  /* the mat wash: same hue as the rail, laid over the surface it sits in.
+     ROUND-5, MEASURED and this supersedes §2's published 14%/22%. Sampled off
+     mid-game@desktop-light at 14% over the L*70 plate, the ten mats came back:
+         Drone  175,164,146   T&E  177,165,146   Fighters 180,163,148
+         Mobility/Overseas/Intelligence within 4 of the same taupe
+     — six sets rendering as ONE colour, which makes the glyph the only channel
+     and leaves an occupied mat (whose name this file's caps budget had removed)
+     with no set identity at all. §2's 14% was derived against the near-white
+     surface the light theme had BEFORE the furniture stepped down to L*70; a
+     wash is a fraction of the distance between the plate and the hue, and that
+     distance halved. 32% restores the separation the number was buying.
+     Dark keeps a lower figure because the night plate (L*30) is far from every
+     set hue already; 26% is one step for parity, not a rescue.
+     ROUND-6, DARK ONLY, 26% → 34%: with the mat rail replaced by a full
+     nameplate plate (table.css), the grayscale gate's worst adjacent pair
+     became the mat against the seat it is cut into — 25.3 vs 30.0 L*, a 4.7 L*
+     field step carried by a 9.6 edge, under §10's 12. The night plate is L*30
+     and a 26% wash of a mid-value hue lands within 5 of it; 34% puts the cut
+     back where a cut belongs. Light is untouched: it measured 29.4 field / 32.4
+     edge at 32% and is the pair this figure was derived for. */
+  --mat-alpha: 32%;
+}
+@media (prefers-color-scheme: dark) { :root { --mat-alpha: 34%; } }
+:root[data-theme="light"] { --mat-alpha: 32%; }
+:root[data-theme="dark"]  { --mat-alpha: 34%; }

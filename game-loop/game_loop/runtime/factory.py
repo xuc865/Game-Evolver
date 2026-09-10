@@ -4,6 +4,11 @@ from collections.abc import Mapping
 from typing import Any
 
 from game_loop.runtime.base import MakerRuntime
+from game_loop.runtime.codex import (
+    CodexCliRunner,
+    CodexRuntime,
+    CodexRuntimeConfig,
+)
 from game_loop.runtime.circuit import DeepSeekCircuitRuntime
 from game_loop.runtime.deepseek_harness import (
     DeepSeekHarnessRunner,
@@ -16,13 +21,17 @@ from game_loop.runtime.opengame import (
     OpenGameRuntimeConfig,
 )
 
-RuntimeConfig = OpenGameRuntimeConfig | DeepSeekHarnessRuntimeConfig
-RuntimeRunner = OpenGameRunner | DeepSeekHarnessRunner
+RuntimeConfig = OpenGameRuntimeConfig | DeepSeekHarnessRuntimeConfig | CodexRuntimeConfig
+RuntimeRunner = OpenGameRunner | DeepSeekHarnessRunner | CodexCliRunner
 
 
 def load_runtime_config(value: Mapping[str, Any]) -> RuntimeConfig:
     runtime_type = str(value.get("runtime_type", "")).strip().casefold()
     runtime_id = str(value.get("runtime_id", "")).strip().casefold()
+    if runtime_type in {"codex", "codex-cli", "codex_cli"} or runtime_id.startswith(
+        "codex-source"
+    ):
+        return CodexRuntimeConfig.from_dict(value)
     if runtime_type in {"deepseek-harness", "deepseek_harness", "dsh"} or runtime_id.startswith(
         "deepseek-harness"
     ):
@@ -37,6 +46,8 @@ def build_runtime(
     *,
     runner: RuntimeRunner | None = None,
 ) -> MakerRuntime:
+    if isinstance(config, CodexRuntimeConfig):
+        return CodexRuntime(config, runner=runner)  # type: ignore[arg-type]
     if isinstance(config, DeepSeekHarnessRuntimeConfig):
         if config.agent_circuit is not None:
             return DeepSeekCircuitRuntime(config, runner=runner)  # type: ignore[arg-type]

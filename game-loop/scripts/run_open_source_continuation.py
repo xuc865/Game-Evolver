@@ -130,7 +130,7 @@ def main() -> int:
             prompt += charter_section(load_design_charter(args.design_charter))
         prompt += "\n\n## Evolution goal\n\n" + GOAL
         command = [sys.executable, "-m", "game_loop.inner_loop", "run", "--benchmark", args.benchmark, "--task-source", str(args.task_file.resolve()), "--seed-artifact", str(seed), "--run-dir", str(episode), "--profile", str(profile_path), "--prompt", prompt, "--artifact-relpath", args.artifact_relpath]
-        env = dict(os.environ); env.setdefault("DEEPSEEK_ROUTE_MODE", "mixed")
+        env = dict(os.environ)
         child = subprocess.Popen(command, cwd=ROOT, env=env, start_new_session=True)
         result_code = child.wait()
         result = subprocess.CompletedProcess(command, result_code)

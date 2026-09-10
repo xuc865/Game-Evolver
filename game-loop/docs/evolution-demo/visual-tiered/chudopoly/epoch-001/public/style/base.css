@@ -1,0 +1,375 @@
+/* base.css — reset, the apron itself, the type scale, THE BUTTON SYSTEM.
+   Owner: art-direction agent (ART-DIRECTION §3, §4).
+
+   Two rules govern everything below and they are the whole point of the wave:
+
+   1. FURNITURE GETS MATERIAL, NOT AN OUTLINE. §3.2 diagnosed nine rounded-rect
+      panels with a 1px border on a slightly-lighter ground per screen — that is
+      a dashboard, not a table. A zone is CUT INTO the apron (var(--deboss)); a
+      pressable is RAISED OFF it (var(--press)). There is no third option and
+      there is no `border: 1px solid` on any table furniture in this file.
+
+   2. TWO SHADOW LANGUAGES, EACH EARNED (§4). Paper has mass and casts a soft
+      three-stop shadow (--card-drop, table.css). Painted steel does not: it
+      casts a hard offset with ZERO blur that collapses to nothing on :active.
+      Offset shadows appear only on pressables, only as a press mechanic. */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--ground-deep);
+  color: var(--fg);
+  font-family: var(--font-body);
+  font-size: var(--s);
+  line-height: 1.4;
+  overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+[hidden] { display: none !important; }
+
+#app { position: relative; height: 100%; isolation: isolate; }
+
+.screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+/* ══ THE APRON ════════════════════════════════════════════════════════════
+   One substrate for the whole app: home, lobby and table stand on the same
+   concrete. Three layers, no gradient-as-lighting:
+     ::before  grain + aggregate — the difference between concrete and a fill
+     ::after   the painted markings — expansion joints on a 4-bay grid
+   No vignette, no radial "pool of hangar light", no glow. §3.5: glow is not a
+   personality. What makes it read as a place is TEXTURE and MARKINGS. */
+
+.apron, .screen-home, .screen-lobby, .table { background-color: var(--ground); }
+
+.apron::before,
+.screen-home::before, .screen-lobby::before, .table::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background-image: var(--grain), var(--aggregate);
+  background-size: 180px 180px, var(--aggregate-size);
+  opacity: var(--grain-alpha);
+  pointer-events: none;
+}
+
+/* The markings. A concrete apron is POURED IN BAYS; the joints are the single
+   cheapest thing that says "this is a real surface at a real scale" and they
+   cost one gradient. Bay size scales with --s so a phone gets 4 bays across,
+   not 40. */
+.apron::after,
+.screen-home::after, .screen-lobby::after, .table::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background-image:
+    repeating-linear-gradient(90deg, var(--stencil) 0 1px, transparent 1px calc(var(--s) * 11)),
+    repeating-linear-gradient(180deg, var(--stencil) 0 1px, transparent 1px calc(var(--s) * 11));
+  background-position: calc(var(--s) * -1.5) calc(var(--s) * -3);
+  opacity: .8;
+  pointer-events: none;
+}
+
+.screen-home, .screen-lobby {
+  align-items: center;
+  justify-content: center;
+  overflow-y: auto;
+}
+.screen-home > *, .screen-lobby > * { position: relative; z-index: 1; }
+
+/* ══ TYPE (§4) ════════════════════════════════════════════════════════════
+   Hierarchy comes from SIZE and WEIGHT. Tracking is not a hierarchy tool and
+   this app used it ~40 times per screen. It survives in exactly one place in
+   the whole product — the set name in a card's colour band — and that lives in
+   the card agent's file, so in these files: nowhere. */
+
+h1, h2, h3, h4 {
+  margin: 0 0 .4em;
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: var(--track-display);
+  line-height: 1.04;
+}
+h1 { font-size: var(--t-display); }
+h2 { font-size: var(--t-title); }
+h3 { font-size: var(--t-lede); }
+h4 { font-size: 1em; }
+p { margin: 0 0 .5em; }
+ul { margin: 0 0 .8em; padding-left: 1.15em; }
+li { margin-bottom: .3em; }
+
+/* EVERY FIGURE IN THE APP IS MONO + TABULAR. Money, rent, counters, timers,
+   room codes, set tallies. This is the character of the thing (§4) and it is
+   also correct: a counter that reflows as it counts is a bug you can see. */
+.mono, .board-worth, .board-sets, .card-coin, .card-ladder,
+.pile-label span, .hand-label span, .timer-text, .propcol-count,
+.lobby-code, .field-code, .chip, .dv-count, .win-sets, .win-worth,
+.brief-table .num, .dt-value, .peek-rows .dt-value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* The small caption on a piece of furniture is a STENCIL PAINTED ON THE APRON,
+   not a tracked micro-label floating over it (§3.6, §3.7). Small, quiet, and
+   it never competes with a card. */
+.field-label, .zone-tag, .pile-label, .hand-label, .propcol-head,
+.side-head, .details-kind, .brand-sub, .lobby-seat-tag {
+  font-size: var(--t-micro);
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--fg-mute);
+}
+
+button, input, select { font: inherit; color: inherit; }
+
+/* ══ THE BUTTON SYSTEM ════════════════════════════════════════════════════
+   ONE geometry, one press mechanic. Role is carried by FILL, and the primary
+   fill is ACHROMATIC — a solid ink slab (§1). It carries no hue at all, so it
+   cannot collide with any of the ten set colours no matter what it is standing
+   next to. The old primary was a green metallic gradient 16° from Elite green;
+   payment@desktop put a green CONFIRM 40px from a green ELITE and they read as
+   one family.
+
+     .btn          outline slab   "another way out of here"
+     .btn-primary  INK slab       "the thing to do next"
+     .btn-danger   hazard slab    irreversible
+     .btn-ghost    painted mark   tertiary / dismiss
+     .btn-icon     square         HUD furniture
+
+   §3.4: no gradients. "If you need gradients to make it look good, you can't
+   design." The press is the whole affordance: 4px hard offset, zero blur,
+   collapsing to 0 while the finger is down. */
+
+.btn {
+  --btn-face: transparent;
+  --btn-ink: var(--fg);
+  --btn-edge: var(--fg);
+  --btn-drop: 4px;
+
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .4em;
+  min-height: var(--tap);
+  min-width: var(--tap);
+  padding: 0 1em;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--btn-face);
+  color: var(--btn-ink);
+  font-family: var(--font-display);
+  font-size: .95em;
+  font-weight: 800;
+  letter-spacing: -.01em;
+  white-space: nowrap;
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  box-shadow:
+    inset 0 0 0 2px var(--btn-edge),
+    var(--btn-drop) var(--btn-drop) 0 var(--press-ink);
+  transform: translate(0, 0);
+  transition: transform .07s ease, box-shadow .07s ease, background-color .12s ease, color .12s ease;
+}
+.btn:active:not(:disabled) {
+  transform: translate(var(--btn-drop), var(--btn-drop));
+  box-shadow: inset 0 0 0 2px var(--btn-edge), 0 0 0 var(--press-ink);
+}
+/* NOT opacity. tools/checkContrast.mjs measured END TURN at 2.62:1 (dark) and
+   3.08:1 (light) and Rematch at 1.55:1 — all three were simply the slab at 34%
+   alpha over the dock. A disabled control still has to be READ; what changes is
+   that it is inert. So it sheds its fill and its press travel and keeps a
+   legible mute (4.98:1 light, 6.58:1 dark on the deepest surface it sits on).
+   This is also the treatment content.css's the .is-refusing note asks for: the
+   old 0.38-opacity variant "reads as nothing here". */
+.btn:disabled {
+  cursor: not-allowed;
+  --btn-face: transparent;
+  --btn-ink: var(--fg-mute);
+  --btn-edge: var(--fg-mute);
+  --btn-drop: 0px;
+  box-shadow: inset 0 0 0 1px var(--fg-mute);
+}
+
+/* the ink slab: solid --ink in light, solid --paper in dark. 17.08:1 / 15.63:1 */
+.btn-primary {
+  --btn-face: var(--act);
+  --btn-ink: var(--act-fg);
+  --btn-edge: transparent;
+}
+/* Danger is MATERIAL, not a coloured chip (§1): the slab is struck through
+   with 45° caution stripes, so it reads as hazard in grayscale and to a
+   colourblind player, not merely as "the red one". */
+.btn-danger {
+  --btn-face: var(--danger);
+  --btn-ink: var(--card-stock);
+  --btn-edge: transparent;
+  background-image: var(--hazard-fine);
+  background-blend-mode: normal;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .55);
+}
+.btn-ghost {
+  --btn-edge: var(--fg-mute);
+  --btn-ink: var(--fg-mute);
+  --btn-drop: 0px;
+  box-shadow: inset 0 0 0 1px var(--btn-edge);
+}
+.btn-ghost:active:not(:disabled) { transform: translate(1px, 1px); box-shadow: inset 0 0 0 1px var(--fg); }
+
+.btn-icon {
+  --btn-drop: 2px;
+  width: var(--tap);
+  padding: 0;
+  font-family: var(--font-body);
+  font-size: 1.05em;
+}
+/* §0.9 floor. Kick/Remove in the lobby are destructive buttons. */
+.btn-small { min-height: var(--tap); padding: 0 .7em; font-size: .8em; --btn-drop: 2px; }
+
+/* §1 names three primary actions by name: CONFIRM, **END TURN**, REMATCH. END
+   TURN carries class="btn" in public/index.html (architect-owned), so it is
+   promoted here rather than by editing the markup.
+   This is not cosmetic. tools/grayscale.mjs measures the frame's tonal tiers
+   and the ink slab IS the third tier: with END TURN as the outline variant the
+   dark frame collapsed to 2 tiers (card 66 · mat 32 · cta 22 · apron 20 ·
+   chrome 16) and the light frame to 1 (chrome 91 · mat 81 · card 73 · cta 67 ·
+   apron 60). The slab puts the CTA at L* 94 in dark and L* 6 in light, which is
+   where the hierarchy comes from. */
+#btn-end-turn {
+  --btn-face: var(--act);
+  --btn-ink: var(--act-fg);
+  --btn-edge: transparent;
+}
+@media (hover: hover) {
+  #btn-end-turn:hover:not(:disabled) { background-color: color-mix(in oklab, var(--act), var(--accent) 22%); }
+}
+
+@media (hover: hover) {
+  .btn:hover:not(:disabled) { background-color: color-mix(in oklab, var(--btn-face, transparent), var(--fg) 12%); }
+  .btn-primary:hover:not(:disabled) { background-color: color-mix(in oklab, var(--act), var(--accent) 22%); }
+  .btn-ghost:hover:not(:disabled) { --btn-edge: var(--fg); --btn-ink: var(--fg); background-color: transparent; }
+}
+/* The one selection colour in the app: a cobalt ring OUTSIDE the object (§1).
+   Never a fill, never a glow, never the same geometry as the alarm. */
+.btn:focus-visible,
+[data-card-id]:focus-visible,
+.board:focus-visible,
+.field:focus-visible,
+.propcol:focus-visible {
+  outline: var(--ring);
+  outline-offset: 2px;
+}
+
+/* ══ fields — cut into the apron, not floated on it ═══════════════════════ */
+
+/* ── iOS FOCUS-ZOOM, and why no gate we own can catch it ─────────────────
+   MOBILE REVIEW round 5, measured: every text control in the app inherited
+   `font-size: var(--s)`, which is 14.35px on a 390px phone — name-input,
+   code-input, the three settings selects and chat-input. Mobile Safari zooms
+   the page in on focus of ANY control under 16px and never zooms back out, so
+   the first thing a player ever taps ("Call sign") leaves them stuck at 1.3×
+   for the rest of the session. The other half of the fix — no `maximum-scale`
+   in the viewport meta — is already right and must stay right, because
+   defeating pinch-zoom to dodge this is an accessibility regression.
+   Chromium emulation does not implement the zoom, so this survived three
+   mobile audits and cannot be gated here; it is a rule, not a measurement.
+   `max()` and not a flat 16px: on a desktop where --s is 18 the field should
+   still track the type scale. */
+.field {
+  min-height: var(--tap);
+  width: 100%;
+  font-size: max(16px, 1em);
+  padding: 0 .8em;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--fg);
+  box-shadow: var(--deboss-deep);
+  transition: box-shadow .14s ease;
+}
+.field::placeholder { color: var(--fg-mute); }
+.field:focus { outline: none; box-shadow: var(--deboss-deep), 0 0 0 2px var(--accent); }
+select.field { padding-right: .4em; }
+/* A room code is a FIGURE: mono, tabular, no tracking games. The empty field
+   looks like the call-sign field, because that is what it is. */
+.field-code { text-transform: uppercase; text-align: center; font-weight: 700; }
+.field-code::placeholder { font-family: var(--font-body); font-weight: 400; text-transform: none; }
+.field-label { display: block; margin-bottom: -.1em; }
+
+.row { display: flex; gap: .45em; align-items: center; min-width: 0; }
+.row > .field { flex: 1 1 auto; min-width: 0; }
+
+/* ── chip: the one small readout. A STAMPED PLATE, not a pill. ─────────── */
+
+/* ROUND-5: the fill was --ground-deep, the DEEPEST tone in the theme, which in
+   dark is #0B0D10 — so four or five readouts per frame (a worth plate per seat,
+   the plays plate, the set tally) rendered as solid near-black slabs beside an
+   End turn that is the one thing entitled to read as a slab. §1 reserves the
+   ink slab for the primary action and nothing else; a readout is a plate
+   STAMPED INTO the furniture it sits on, which is one tone, not two. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: .3em;
+  padding: .24em .55em;
+  border-radius: 2px;
+  background: var(--ground);
+  color: var(--fg);
+  font-size: var(--t-micro);
+  font-weight: 700;
+  letter-spacing: 0;
+  white-space: nowrap;
+  box-shadow: var(--deboss);
+}
+.chip:empty { display: none; }
+
+.hint { color: var(--fg-mute); font-size: var(--t-small); }
+.error { color: var(--danger-ink); min-height: 1.2em; font-size: var(--t-small); font-weight: 700; }
+
+/* ── .sr-only: in the document, not on the apron ──────────────────────────
+   For text that must EXIST for a crawler and a screen reader but must not be
+   drawn — today, the h1's words behind the wordmark. The clip-path/1px recipe
+   rather than `display:none` or `visibility:hidden`, both of which take the
+   text out of the accessibility tree and out of most crawlers' text extraction
+   with it, which would defeat the entire point.
+
+   NOT for anything interactive: a focusable element hidden this way scrolls
+   the viewport to a spot with nothing in it. Static text only. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── §0.9: motion collapses; ambient loops stop entirely ──────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+  }
+}

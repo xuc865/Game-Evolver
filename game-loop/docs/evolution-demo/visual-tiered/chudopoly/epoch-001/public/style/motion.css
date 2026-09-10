@@ -1,0 +1,321 @@
+/* motion.css — owned by the motion agent (P4).
+   ONLY what JS-driven card motion needs to work. No colour, no chrome, no
+   shadow: the design agent owns the look, including how .is-flying reads.
+
+   The .card transform contract (§5) is
+       translate(var(--fx),var(--fy)) rotate(var(--tilt)) scale(var(--fs))
+   and its home is table.css. This file never claims transform on a .card
+   except to RESTATE that exact contract where a zone-local rule would
+   otherwise win (see .is-flying below). anim/flight.js is the only writer of
+   those four variables while a card is moving. */
+
+/* ── the flip ────────────────────────────────────────────────────────────
+   A card turns over on an inner wrapper so the outer transform stays exactly
+   the contract above. .card-inner is built by table/cardnode.js; a pooled card
+   back has no wrapper (it never flips) and is untouched by any of this. */
+
+.card { perspective: 800px; }
+
+/* --fsx is the ONE thing the .card transform contract cannot express:
+   ART-DIRECTION §4's `scaleX(1 + |v| * 0.08)` on a card being thrown. .card's
+   transform is a single uniform `scale(var(--fs))` and widening it would break
+   the contract for every other writer, so the non-uniform part rides here — on
+   the wrapper that already exists for the flip, for the same reason it exists.
+   anim/flight.js (setDragPose / relaxDrag) is its only writer. */
+.card-inner {
+  position: absolute;
+  inset: 0;
+  transform: rotateY(var(--flip, 0deg)) scaleX(var(--fsx, 1));
+  transform-style: preserve-3d;
+}
+
+/* Both faces exist at all times — the flip is real geometry, not a swap.
+   backface-visibility does the hiding, so nothing has to be display:none at
+   the exact frame the card is edge-on. */
+.card-inner > .card-face,
+.card-inner > .card-back {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+.card[data-facing] .card-inner > .card-back {
+  display: flex;
+  transform: rotateY(180deg);
+}
+.card[data-facing="down"] { --flip: 180deg; }
+
+/* ── the press has weight (§4; P9 FEEL round 1) ──────────────────────────
+   MEASURED before this existed: `.is-pressed` was `filter: brightness(1.16)
+   saturate(1.05); z-index: 28` and nothing else, so the card's
+   getBoundingClientRect() was BYTE-IDENTICAL hovered vs pressed
+   (x 414.77 y 565.44 w 124.01 both). On a real-touch 390×844 phone the card
+   changed 37.2% of its pixels at a mean delta of 26/765 — about 8.7 levels per
+   channel. That is the interaction a player performs ~200 times a game, and it
+   was a brightness nudge.
+
+   ART §4 gives a pressable a real press MECHANIC (`translate(4px,4px)`, shadow
+   → 0). A card is not chrome — §4 also forbids the hard offset shadow on cards
+   — so the same idea is spent in the card's own material language: the card is
+   pushed INTO the felt (it gets smaller and sits 2px lower), its drop shadow
+   contracts to the paper-touching-surface form, and the RELEASE springs it back
+   through 1.0 on a back-out curve so the pop is where the weight reads.
+
+   Down rather than up is not a preference, it is the geometry: `#zone-hand` is
+   `overflow-x:auto`, which computes `overflow-y:auto`, so it CLIPS. A lift out
+   of the fan is cut off at the dock's top edge unless the whole ancestor chain
+   is opened (table.liftCard), which is a drag-weight operation and must not run
+   on every pointerdown. A card that gets smaller can never be clipped.
+
+   THE TRANSFORM CONTRACT IS NOT BROKEN. The rule below restates §5's contract
+   verbatim and appends the press, exactly as the file header allows, and the
+   two press channels are registered so they interpolate rather than flipping at
+   50%. --fx/--fy/--tilt/--fs stay anim/flight.js's alone; interact/drag.js
+   drives only the classes. Both selectors exclude .is-dragging and .is-flying
+   so the transition can never smooth a per-frame pose write (the drag's
+   velocity lean is the best thing in the build and this must not touch it). */
+@property --press-s { syntax: '<number>'; inherits: false; initial-value: 1; }
+@property --press-y { syntax: '<length>'; inherits: false; initial-value: 0px; }
+
+/* The shared half is the TRANSFORM ONLY, and that is not tidiness — a
+   `transition` here would silently delete the release animation below.
+   Transitions sit ABOVE animations in the cascade (CSS Cascading 5 §6.6.2), so
+   a `transition: --press-s` that also matched `.is-unpressing` overrode every
+   keyframe of `card-unpress`: measured, the whole release read a flat
+   `--press-s: 1` on every rAF sample for 190ms while the class was on the node.
+   Each state therefore declares its OWN timing mechanism, and only its own. */
+.card.is-pressed:not(.is-dragging):not(.is-flying),
+.card.is-unpressing:not(.is-dragging):not(.is-flying) {
+  transform:
+    translate(var(--fx, 0px), var(--fy, 0px)) rotate(var(--tilt, 0deg)) scale(var(--fs, 1))
+    translateY(var(--press-y)) scale(var(--press-s));
+}
+
+/* Pushed in. The shadow is a REQUEST to the design agent, not a colour decision:
+   --card-drop-press is theirs to define in variables.css (per theme) and the
+   fallback is the smallest honest "paper is touching the table" drop. */
+.card.is-pressed:not(.is-dragging):not(.is-flying) {
+  --press-s: .955;
+  --press-y: 2px;
+  box-shadow: 0 0 0 1px var(--card-edge), var(--card-drop-press, 0 1px 1px rgba(0, 0, 0, .22));
+  transition:
+    --press-s 80ms cubic-bezier(.3, .8, .4, 1),
+    --press-y 80ms cubic-bezier(.3, .8, .4, 1),
+    box-shadow 80ms ease-out,
+    filter .06s linear;
+}
+
+/* Coming back — and OVERSHOOTING, which is where the mass actually reads.
+   A back-out easing was tried first and measured 1.0042 at its peak: a
+   spring-back bezier scales its overshoot by the DELTA, and the delta here is
+   only 0.045, so the pop was 0.4px on a 97px card — arithmetically present and
+   perceptually absent. An explicit keyframe states the overshoot instead of
+   deriving it: 1.028 and −3px at 46%, which is 2.7px of growth, the same order
+   as the hover, and comfortably inside the 13px of headroom the card has above
+   it inside #zone-hand. interact/drag.js holds this class for UNPRESS_MS and
+   never puts it on a card that became a drag (the drag owns the pose then). */
+@keyframes card-unpress {
+  0%   { --press-s: .955; --press-y: 2px; }
+  46%  { --press-s: 1.028; --press-y: -3px; }
+  100% { --press-s: 1; --press-y: 0px; }
+}
+.card.is-unpressing:not(.is-dragging):not(.is-flying) {
+  animation: card-unpress 190ms cubic-bezier(.33, 0, .2, 1) both;
+}
+
+/* ── the hovered card (§P9 polish 6) ─────────────────────────────────────
+   MEASURED: rest → hover on a hand card was `changedPx 0`. The peek was the
+   only desktop affordance, so a mouse got no answer at all from the object it
+   was pointing at until 140ms later, somewhere else on the screen.
+
+   Same channel, a third of the amount, and OUTWARD rather than inward: hover is
+   "this one is live", press is "I have hold of it". Pointer devices only (§2) —
+   a touch device synthesises :hover on tap and would fight the press. The
+   z-index is between the fan's own stacking (table.css tops out at 25) and
+   .is-pressed's 28, so the hovered card comes out of the fan without ever
+   outranking the one under a finger. 1.035 of a 174px card is 3px of growth per
+   edge, which the dock's clip absorbs. */
+@media (hover: hover) {
+  #hand-dock .card[data-card-id]:hover:not(.is-pressed):not(.is-unpressing):not(.is-dragging):not(.is-flying) {
+    --press-s: 1.035;
+    --press-y: -1px;
+    z-index: 27;
+    box-shadow: 0 0 0 1px var(--card-edge), var(--card-drop-air, var(--card-drop));
+    transform:
+      translate(var(--fx, 0px), var(--fy, 0px)) rotate(var(--tilt, 0deg)) scale(var(--fs, 1))
+      translateY(var(--press-y)) scale(var(--press-s));
+    transition:
+      --press-s 110ms cubic-bezier(.22, 1, .36, 1),
+      --press-y 110ms cubic-bezier(.22, 1, .36, 1),
+      box-shadow 110ms ease-out;
+  }
+}
+
+/* ── in flight ───────────────────────────────────────────────────────────
+   Nothing restates the transform here: table.css declares the contract once
+   and no longer lets a zone-local rule (the old `.zone-deck .card` stack
+   depth) override it — the deck's depth is a rest-pose --fy from
+   table/cardnode.js syncBacks() instead, so the shuffle riffle moves.
+
+   will-change discipline is all that is left, and it is the whole rule: a
+   5-player table is 60+ card nodes, and promoting all of them holds 60+
+   compositor layers for a whole game to buy nothing while they sit still.
+   A/B over a full 60s animated playthrough (headless Chromium 1280×720,
+   frame dt with ≥4 cards in the air): promote-all p95 9.7ms / max 14.3ms,
+   promote-on-takeoff p95 10.0ms / max 12.7ms — no measurable frame-time
+   difference either way at this table size. What is NOT measurable in
+   headless is layer memory on a real phone, so promotion stays scoped to the
+   cards actually moving (anim/flight.js adds and removes .is-flying, and
+   interact/ owns .is-dragging). Re-measure on device before widening it. */
+.card.is-flying,
+.card.is-riffling,
+.card.is-held,
+.card.is-pressed,
+.card.is-unpressing,
+.card.is-dragging { will-change: transform; }
+
+/* ── the held card (table.liftCard) ──────────────────────────────────────
+   A card a human is holding renders above the entire table. The occlusion half
+   of that is already solved by interact.css (`.is-dragging { z-index: 60 }`),
+   and it works because neither `#table` nor `#hand-dock` creates a stacking
+   context — both are `position:relative; z-index:auto`, so a card's z-index
+   competes directly in `#app`'s context against `.self-board`'s 1.
+
+   The CLIPPING half cannot be done in CSS at all: `#zone-hand` is
+   `overflow-x:auto`, `.table` is `overflow:hidden`, `.board-props` is a scroll
+   box. Measured on the shipped build, a card dragged out of the fan was cut off
+   at the dock's top edge and then INVISIBLE for the whole gesture — 9 of 11
+   burst frames with no card under the cursor, on desktop and on a real-touch
+   390×844 phone alike. table/index.js opens exactly the ancestor chain and
+   refcounts it for the life of the lift (openChain/closeChain).
+
+   So this rule is only the floor for a lift that is NOT also a pointer drag
+   (a programmatic lift, a keyboard grab): 60 matches interact.css so the two
+   cannot disagree about which is higher. */
+.card.is-held { z-index: 60; }
+
+/* ── hero flights ────────────────────────────────────────────────────────
+   A stolen card swells to a readable ~92px at mid-flight (table/index.js
+   HERO_APEX_PX; anim/flight.js `bump`). Two things have to be true for that to
+   be visible rather than merely large:
+
+     • it must paint over the boards it passes. table.css gives .is-flying
+       z-index 40, which is above the cards but level with the chrome inside a
+       board; 46 is the same rung .is-dragging sits on and it is the top of the
+       felt.
+     • its ancestors must not clip it — a 92px card inside a 14px property slot
+       is otherwise entirely inside overflow:hidden. That one cannot be done in
+       CSS without opening the scroll boxes for the whole game, so
+       table/index.js opens exactly the ancestor chain, for exactly the length
+       of the flight, and restores the scroll offsets (see unclip()).
+
+   pointer-events go off for the duration: a card three times its resting size
+   is a three-times-larger hit target sliding across the boards you are trying
+   to tap. */
+.card.is-hero {
+  z-index: 46;
+  pointer-events: none;
+}
+
+/* ── the two screen changes (ART §4; §P9 FEEL round 3) ───────────────────
+   MEASURED: the win overlay appeared between two consecutive frames with no
+   transition of any kind, and lobby → table was a 33ms cut. §4 asks for a view
+   transition on exactly these, and `grep startViewTransition public/` returned
+   nothing. anim/transition.js now wraps ui/screens.js's screen swap; this is
+   the LOOK of it, and it is deliberately short — a screen change the player
+   asked for must never feel like waiting.
+
+   Card motion is NOT in here and must never be: a view transition freezes a
+   snapshot of the old page and swallows input for its duration, which is the
+   opposite of §10's interruptible flights. */
+::view-transition-old(root) {
+  animation: vt-out 170ms cubic-bezier(.4, 0, 1, 1) both;
+}
+::view-transition-new(root) {
+  animation: vt-in 260ms cubic-bezier(.22, 1, .36, 1) both;
+}
+@keyframes vt-out { to { opacity: 0; transform: scale(.985); } }
+@keyframes vt-in { from { opacity: 0; transform: scale(1.012); } }
+
+/* Arriving AT the table is the one screen change that should feel like sitting
+   down: the felt comes up from under, the lobby lifts away. */
+html.vt-screen-game::view-transition-old(root) {
+  animation: vt-lift 190ms cubic-bezier(.4, 0, 1, 1) both;
+}
+html.vt-screen-game::view-transition-new(root) {
+  animation: vt-seat 320ms cubic-bezier(.22, 1, .36, 1) both;
+}
+@keyframes vt-lift { to { opacity: 0; transform: translateY(-1.4%) scale(.99); } }
+@keyframes vt-seat { from { opacity: 0; transform: translateY(2.2%) scale(1.008); } }
+
+/* ── the ending arrives, and then it KEEPS MOVING (§P9 FEEL round 3) ──────
+   MEASURED: the victory overlay hard-cut in, ~2.1s of confetti ran, and then
+   the screen was BYTE-IDENTICAL for 1.8s — a frozen PDF at the emotional peak
+   of the game.
+
+   Two halves. The arrival is a scrim that fades and a panel that rises into
+   place under it (300ms — the fanfare's held fifth is still ringing). The
+   second half is the part that fixes the freeze: the result rows deal
+   themselves in, one every 70ms, so a 5-player table is still resolving 1.2s
+   after the panel lands, right through the dead window the capture found. It
+   is the same gesture as the cards being turned over at the end of a hand.
+
+   #win-overlay's colour, layout and z-index belong to the design agent — this
+   touches transform and opacity only. */
+#win-overlay:not([hidden]) { animation: win-scrim 260ms ease-out both; }
+#win-overlay:not([hidden]) > * { animation: win-panel 320ms cubic-bezier(.22, 1, .36, 1) both; }
+@keyframes win-scrim { from { opacity: 0; } }
+@keyframes win-panel {
+  from { opacity: 0; transform: translateY(16px) scale(.972); }
+}
+
+/* The stagger is counted with sibling combinators rather than an index the
+   markup would have to carry: ui/overlays.js builds these rows and is owned by
+   the clarity agent, so the choreography may not ask it for a --row-i. */
+#win-overlay:not([hidden]) .win-row {
+  animation: win-row 420ms cubic-bezier(.22, 1, .36, 1) both;
+  animation-delay: 320ms;
+}
+#win-overlay:not([hidden]) .win-row + .win-row { animation-delay: 390ms; }
+#win-overlay:not([hidden]) .win-row + .win-row + .win-row { animation-delay: 460ms; }
+#win-overlay:not([hidden]) .win-row + .win-row + .win-row + .win-row { animation-delay: 530ms; }
+#win-overlay:not([hidden]) .win-row + .win-row + .win-row + .win-row + .win-row { animation-delay: 600ms; }
+#win-overlay:not([hidden]) .win-row + .win-row + .win-row + .win-row + .win-row + .win-row { animation-delay: 670ms; }
+@keyframes win-row {
+  from { opacity: 0; transform: translateX(-14px); }
+}
+/* The recap and the one-line stats close the sequence out, after the boards. */
+#win-overlay:not([hidden]) .win-stats,
+#win-overlay:not([hidden]) .win-recap {
+  animation: win-row 420ms cubic-bezier(.22, 1, .36, 1) both;
+  animation-delay: 900ms;
+}
+
+/* ── reduced motion (§0.9) ───────────────────────────────────────────────
+   Flights are already collapsed to a ≤120ms in-place fade in JS
+   (table/moveCard), and the FX cue vocabulary is unchanged — sound and
+   haptics do not go quiet just because the table stopped moving. All that is
+   left here is the flip, which becomes an instant face swap. */
+@media (prefers-reduced-motion: reduce) {
+  .card-inner { transform: none; }
+  /* The press POSE is a state, not motion, and it is the only acknowledgement a
+     pointerdown has — it stays. What goes is the tween and the release pop. */
+  .card.is-pressed, .card.is-unpressing, #hand-dock .card[data-card-id]:hover { transition: none; }
+  .card.is-unpressing:not(.is-dragging):not(.is-flying) {
+    animation: none;
+    --press-s: 1;
+    --press-y: 0px;
+  }
+  /* the drag stretch is motion; the lift's clip escape is not, and stays */
+  .card { --fsx: 1; }
+  .card[data-facing="down"] .card-inner > .card-face { visibility: hidden; }
+  .card[data-facing="down"] .card-inner > .card-back { transform: none; }
+  .card[data-facing="up"] .card-inner > .card-back { visibility: hidden; }
+  /* anim/transition.js already refuses to start a view transition under reduce,
+     so these are belt and braces for a browser that starts one anyway. The
+     ending's entrance collapses to a plain fade — the ARRIVAL is information
+     ("this screen is new"), the travel is not. */
+  ::view-transition-old(root), ::view-transition-new(root) { animation: none; }
+  #win-overlay:not([hidden]) > * { animation: win-scrim 200ms ease-out both; }
+  #win-overlay:not([hidden]) .win-row,
+  #win-overlay:not([hidden]) .win-stats,
+  #win-overlay:not([hidden]) .win-recap { animation: none; }
+}

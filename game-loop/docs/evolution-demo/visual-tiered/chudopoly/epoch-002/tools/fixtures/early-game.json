@@ -1,0 +1,302 @@
+{
+ "$schema": "chud-fixture/1",
+ "name": "early-game",
+ "description": "First play phase of the opening turn — small hands, empty boards, full deck.",
+ "seed": 1337,
+ "selfId": "114ca9dc-3332-4b0e-9bae-687b35d36e31",
+ "room": "ZAED",
+ "recordedAt": "2026-08-07T01:41:56.894Z",
+ "stateIndex": 0,
+ "states": [
+  {
+   "type": "state",
+   "code": "ZAED",
+   "phase": "playing",
+   "players": [
+    {
+     "id": "114ca9dc-3332-4b0e-9bae-687b35d36e31",
+     "name": "HARNESS",
+     "connected": true,
+     "isBot": false,
+     "botMode": null
+    },
+    {
+     "id": "8942246c-dd67-4bd8-9c31-d87a5002f7cf",
+     "name": "Coyote",
+     "connected": true,
+     "isBot": true,
+     "botMode": "chud"
+    },
+    {
+     "id": "6149dfbd-fbaa-4600-84ea-b5a85ec74d84",
+     "name": "Iceman",
+     "connected": true,
+     "isBot": true,
+     "botMode": "aggressive"
+    }
+   ],
+   "hostId": "114ca9dc-3332-4b0e-9bae-687b35d36e31",
+   "game": {
+    "phase": "playing",
+    "turnPhase": "play",
+    "currentPlayerId": "114ca9dc-3332-4b0e-9bae-687b35d36e31",
+    "playsRemaining": 3,
+    "deckCount": 89,
+    "discardTop": null,
+    "discardPile": [],
+    "pendingAction": null,
+    "responders": [],
+    "winner": null,
+    "endReason": null,
+    "armedIds": [],
+    "surgeOps": false,
+    "handLimit": 7,
+    "setsToWin": 3,
+    "deckCycle": 0,
+    "deckCycleLimit": 16,
+    "turnNumber": 0,
+    "stats": {
+     "turns": 1,
+     "cardsPlayed": {},
+     "payments": {
+      "count": 0,
+      "total": 0,
+      "biggest": 0
+     },
+     "propertiesStolen": {}
+    },
+    "log": [
+     "Game started! HARNESS, Coyote, Iceman are playing.",
+     "HARNESS drew 2 cards."
+    ],
+    "stalemateBasis": null,
+    "events": [
+     {
+      "seq": 1,
+      "t": "game_start",
+      "order": [
+       "114ca9dc-3332-4b0e-9bae-687b35d36e31",
+       "8942246c-dd67-4bd8-9c31-d87a5002f7cf",
+       "6149dfbd-fbaa-4600-84ea-b5a85ec74d84"
+      ],
+      "names": {
+       "114ca9dc-3332-4b0e-9bae-687b35d36e31": "HARNESS",
+       "8942246c-dd67-4bd8-9c31-d87a5002f7cf": "Coyote",
+       "6149dfbd-fbaa-4600-84ea-b5a85ec74d84": "Iceman"
+      }
+     },
+     {
+      "seq": 2,
+      "t": "deal",
+      "to": "114ca9dc-3332-4b0e-9bae-687b35d36e31",
+      "count": 5,
+      "cards": [
+       {
+        "id": 46,
+        "type": "money",
+        "name": "2M",
+        "value": 2
+       },
+       {
+        "id": 61,
+        "type": "action",
+        "name": "OPSEC",
+        "value": 4,
+        "action": "opsec",
+        "description": "Counter any action card played against you. Can itself be countered by another OPSEC."
+       },
+       {
+        "id": 77,
+        "type": "action",
+        "name": "PCS Orders",
+        "value": 1,
+        "action": "pcs_orders",
+        "description": "Draw 2 extra cards from the deck"
+       },
+       {
+        "id": 6,
+        "type": "property",
+        "name": "Schriever SFB",
+        "value": 2,
+        "color": "pink"
+       },
+       {
+        "id": 64,
+        "type": "action",
+        "name": "Midnight Requisition",
+        "value": 3,
+        "action": "midnight_requisition",
+        "description": "Steal a single property from any player. Cannot touch a complete set."
+       }
+      ]
+     },
+     {
+      "seq": 3,
+      "t": "deal",
+      "to": "8942246c-dd67-4bd8-9c31-d87a5002f7cf",
+      "count": 5
+     },
+     {
+      "seq": 4,
+      "t": "deal",
+      "to": "6149dfbd-fbaa-4600-84ea-b5a85ec74d84",
+      "count": 5
+     },
+     {
+      "seq": 5,
+      "t": "turn_start",
+      "actor": "114ca9dc-3332-4b0e-9bae-687b35d36e31",
+      "plays": 3,
+      "finalApproach": false
+     },
+     {
+      "seq": 6,
+      "t": "draw",
+      "to": "114ca9dc-3332-4b0e-9bae-687b35d36e31",
+      "count": 2,
+      "cards": [
+       {
+        "id": 4,
+        "type": "property",
+        "name": "Goodfellow AFB",
+        "value": 1,
+        "color": "lightblue"
+       },
+       {
+        "id": 97,
+        "type": "rent",
+        "name": "Rent: green/darkblue",
+        "value": 1,
+        "colors": [
+         "green",
+         "darkblue"
+        ]
+       }
+      ]
+     }
+    ],
+    "eventSeq": 6,
+    "players": [
+     {
+      "id": "114ca9dc-3332-4b0e-9bae-687b35d36e31",
+      "name": "HARNESS",
+      "handCount": 7,
+      "hand": [
+       {
+        "id": 46,
+        "type": "money",
+        "name": "2M",
+        "value": 2
+       },
+       {
+        "id": 61,
+        "type": "action",
+        "action": "opsec",
+        "name": "OPSEC",
+        "value": 4,
+        "description": "Counter any action card played against you. Can itself be countered by another OPSEC."
+       },
+       {
+        "id": 77,
+        "type": "action",
+        "action": "pcs_orders",
+        "name": "PCS Orders",
+        "value": 1,
+        "description": "Draw 2 extra cards from the deck"
+       },
+       {
+        "id": 6,
+        "type": "property",
+        "color": "pink",
+        "name": "Schriever SFB",
+        "value": 2
+       },
+       {
+        "id": 64,
+        "type": "action",
+        "action": "midnight_requisition",
+        "name": "Midnight Requisition",
+        "value": 3,
+        "description": "Steal a single property from any player. Cannot touch a complete set."
+       },
+       {
+        "id": 4,
+        "type": "property",
+        "color": "lightblue",
+        "name": "Goodfellow AFB",
+        "value": 1
+       },
+       {
+        "id": 97,
+        "type": "rent",
+        "colors": [
+         "green",
+         "darkblue"
+        ],
+        "name": "Rent: green/darkblue",
+        "value": 1
+       }
+      ],
+      "bank": [],
+      "properties": {},
+      "upgrades": {},
+      "completedSets": 0,
+      "eliminated": false,
+      "finalApproach": false,
+      "finalApproachIn": null,
+      "opponentTurnsRemaining": null,
+      "checkpointTurn": null,
+      "bankValue": 0,
+      "propertyValue": 0,
+      "upgradeValue": 0,
+      "payableValue": 0,
+      "netWorth": 0
+     },
+     {
+      "id": "8942246c-dd67-4bd8-9c31-d87a5002f7cf",
+      "name": "Coyote",
+      "handCount": 5,
+      "bank": [],
+      "properties": {},
+      "upgrades": {},
+      "completedSets": 0,
+      "eliminated": false,
+      "finalApproach": false,
+      "finalApproachIn": null,
+      "opponentTurnsRemaining": null,
+      "checkpointTurn": null,
+      "bankValue": 0,
+      "propertyValue": 0,
+      "upgradeValue": 0,
+      "payableValue": 0,
+      "netWorth": 0
+     },
+     {
+      "id": "6149dfbd-fbaa-4600-84ea-b5a85ec74d84",
+      "name": "Iceman",
+      "handCount": 5,
+      "bank": [],
+      "properties": {},
+      "upgrades": {},
+      "completedSets": 0,
+      "eliminated": false,
+      "finalApproach": false,
+      "finalApproachIn": null,
+      "opponentTurnsRemaining": null,
+      "checkpointTurn": null,
+      "bankValue": 0,
+      "propertyValue": 0,
+      "upgradeValue": 0,
+      "payableValue": 0,
+      "netWorth": 0
+     }
+    ]
+   },
+   "turnTimer": {
+    "timeout": 60,
+    "startedAt": 1786066833463
+   },
+   "responseTimer": null
+  }
+ ]
+}

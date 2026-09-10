@@ -60,6 +60,14 @@ from scripts.run_v030_complex_10_epochs import _epoch_provider_salt
 
 
 class OptionalForkAdmissionTests(unittest.TestCase):
+    def test_non_regressing_candidate_is_accepted_even_when_cost_is_negative(self):
+        admission = _evolution_admission(
+            infrastructure_ok=True, rubric_accepted=True,
+            quality_delta=0.0, net_utility=-0.25,
+        )
+        self.assertTrue(admission["accepted"])
+        self.assertEqual(admission["reasons"], [])
+
     def test_improving_candidate_can_be_accepted_without_fork_evidence(self):
         admission = _evolution_admission(
             infrastructure_ok=True, rubric_accepted=True,
@@ -73,9 +81,7 @@ class OptionalForkAdmissionTests(unittest.TestCase):
                      quality_delta=0.1, net_utility=0.05)
         for failure in [
             {"infrastructure_ok": False}, {"rubric_accepted": False},
-            {"quality_delta": 0.0}, {"quality_delta": -0.1},
-            {"net_utility": -0.01}, {"quality_delta": float("nan")},
-            {"net_utility": float("nan")},
+            {"quality_delta": -0.1}, {"quality_delta": float("nan")},
         ]:
             with self.subTest(failure=failure):
                 admission = _evolution_admission(**{**valid, **failure})

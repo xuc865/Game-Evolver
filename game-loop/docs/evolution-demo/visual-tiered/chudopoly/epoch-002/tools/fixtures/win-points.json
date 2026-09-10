@@ -1,0 +1,1148 @@
+{
+ "$schema": "chud-fixture/1",
+ "name": "win-points",
+ "description": "A game DECIDED ON POINTS: dry deck and discard, a full idle round, and endTurn's own stalemate ending ranks the table (sets, then net worth). The win screen's ATTRITION copy and .is-decider emphasis exist only under endReason 'stalemate', which no recorded game reaches (measured 1.79% over 2,400 sims).",
+ "builtBy": "tools/buildfixtures.mjs (engine calls, §0.7; validateState-checked)",
+ "seed": "build:win-points",
+ "selfId": "p1",
+ "room": "BUILT",
+ "recordedAt": "2026-08-08T01:19:12.660Z",
+ "states": [
+  {
+   "type": "state",
+   "code": "BUILT",
+   "phase": "finished",
+   "players": [
+    {
+     "id": "p1",
+     "name": "HARNESS",
+     "connected": true,
+     "isBot": false
+    },
+    {
+     "id": "p2",
+     "name": "KESTREL",
+     "connected": true,
+     "isBot": true
+    },
+    {
+     "id": "p3",
+     "name": "VULTURE",
+     "connected": true,
+     "isBot": true
+    }
+   ],
+   "hostId": "p1",
+   "game": {
+    "phase": "finished",
+    "turnPhase": "finished",
+    "currentPlayerId": "p3",
+    "playsRemaining": 3,
+    "rearrangesRemaining": 12,
+    "rearrangeBudget": 12,
+    "deckCount": 0,
+    "discardTop": null,
+    "discardPile": [],
+    "pendingAction": null,
+    "responders": [],
+    "winner": "p1",
+    "endReason": "stalemate",
+    "armedIds": [],
+    "surgeOps": 0,
+    "surgeMultiplier": 1,
+    "handLimit": 7,
+    "rules": {
+     "preset": "chudopoly",
+     "winRule": "finalApproach",
+     "setsToWin": 3,
+     "pureSetRequired": false,
+     "passGoRestartsTurn": false,
+     "suddenDeath": "off",
+     "deck": {
+      "inspector_general": 2,
+      "opsec": 3,
+      "midnight_requisition": 3,
+      "tdy_orders": 3,
+      "finance_office": 3,
+      "roll_call": 3,
+      "pcs_orders": 10,
+      "upgrade": 3,
+      "foc": 2,
+      "surge_ops": 2,
+      "chud": 2,
+      "wildAny": 2,
+      "wildPairs": 7
+     }
+    },
+    "setsToWin": 3,
+    "winRule": "finalApproach",
+    "deckCycle": 0,
+    "deckCycleLimit": 16,
+    "contested": false,
+    "contestLaps": 0,
+    "contestLapCap": 2,
+    "contestBar": 3,
+    "turnNumber": 2,
+    "stats": {
+     "turns": 3,
+     "cardsPlayed": {},
+     "payments": {
+      "count": 0,
+      "total": 0,
+      "biggest": 0
+     },
+     "propertiesStolen": {}
+    },
+    "log": [
+     "Game started! HARNESS, KESTREL, VULTURE are playing.",
+     "HARNESS drew 2 cards.",
+     "KESTREL's turn",
+     "KESTREL drew 0 cards.",
+     "VULTURE's turn",
+     "VULTURE drew 0 cards.",
+     "Deck and discard are empty and nobody can move — HARNESS wins on completed sets (2)."
+    ],
+    "stalemateBasis": "sets",
+    "events": [
+     {
+      "seq": 1,
+      "t": "game_start",
+      "order": [
+       "p1",
+       "p2",
+       "p3"
+      ],
+      "names": {
+       "p1": "HARNESS",
+       "p2": "KESTREL",
+       "p3": "VULTURE"
+      },
+      "winRule": "finalApproach",
+      "setsToWin": 3,
+      "rules": {
+       "preset": "chudopoly",
+       "winRule": "finalApproach",
+       "setsToWin": 3,
+       "pureSetRequired": false,
+       "passGoRestartsTurn": false,
+       "suddenDeath": "off",
+       "deck": {
+        "inspector_general": 2,
+        "opsec": 3,
+        "midnight_requisition": 3,
+        "tdy_orders": 3,
+        "finance_office": 3,
+        "roll_call": 3,
+        "pcs_orders": 10,
+        "upgrade": 3,
+        "foc": 2,
+        "surge_ops": 2,
+        "chud": 2,
+        "wildAny": 2,
+        "wildPairs": 7
+       }
+      }
+     },
+     {
+      "seq": 2,
+      "t": "deal",
+      "to": "p1",
+      "count": 5,
+      "cards": [
+       {
+        "id": 100,
+        "type": "rent",
+        "name": "Rent: base/intel",
+        "value": 1,
+        "colors": [
+         "base",
+         "intel"
+        ]
+       },
+       {
+        "id": 21,
+        "type": "property",
+        "name": "Air Force One",
+        "value": 4,
+        "color": "darkblue"
+       },
+       {
+        "id": 61,
+        "type": "action",
+        "name": "OPSEC",
+        "value": 4,
+        "action": "opsec",
+        "description": "Counter any action card played against you. Can itself be countered by another OPSEC."
+       },
+       {
+        "id": 71,
+        "type": "action",
+        "name": "Roll Call",
+        "value": 2,
+        "action": "roll_call",
+        "description": "All other players pay you 2M each"
+       },
+       {
+        "id": 28,
+        "type": "wild_property",
+        "name": "Wild Property",
+        "value": 0,
+        "colors": [
+         "any"
+        ]
+       }
+      ]
+     },
+     {
+      "seq": 3,
+      "t": "deal",
+      "to": "p2",
+      "count": 5
+     },
+     {
+      "seq": 4,
+      "t": "deal",
+      "to": "p3",
+      "count": 5
+     },
+     {
+      "seq": 5,
+      "t": "turn_start",
+      "actor": "p1",
+      "plays": 3,
+      "finalApproach": false
+     },
+     {
+      "seq": 6,
+      "t": "draw",
+      "to": "p1",
+      "count": 2,
+      "cards": [
+       {
+        "id": 9,
+        "type": "property",
+        "name": "Eglin AFB",
+        "value": 2,
+        "color": "orange"
+       },
+       {
+        "id": 20,
+        "type": "property",
+        "name": "The Pentagon",
+        "value": 4,
+        "color": "darkblue"
+       }
+      ]
+     },
+     {
+      "seq": 7,
+      "t": "turn_end",
+      "actor": "p1"
+     },
+     {
+      "seq": 8,
+      "t": "turn_start",
+      "actor": "p2",
+      "plays": 3,
+      "finalApproach": false
+     },
+     {
+      "seq": 9,
+      "t": "draw",
+      "to": "p2",
+      "count": 0
+     },
+     {
+      "seq": 10,
+      "t": "turn_end",
+      "actor": "p2"
+     },
+     {
+      "seq": 11,
+      "t": "turn_start",
+      "actor": "p3",
+      "plays": 3,
+      "finalApproach": false
+     },
+     {
+      "seq": 12,
+      "t": "draw",
+      "to": "p3",
+      "count": 0
+     },
+     {
+      "seq": 13,
+      "t": "turn_end",
+      "actor": "p3"
+     },
+     {
+      "seq": 14,
+      "t": "stalemate",
+      "winner": "p1",
+      "sets": 2,
+      "reason": "deck_dry",
+      "basis": "sets"
+     }
+    ],
+    "eventSeq": 14,
+    "players": [
+     {
+      "id": "p1",
+      "name": "HARNESS",
+      "handCount": 4,
+      "hand": [
+       {
+        "id": 6,
+        "type": "property",
+        "color": "pink",
+        "name": "Schriever SFB",
+        "value": 2
+       },
+       {
+        "id": 7,
+        "type": "property",
+        "color": "pink",
+        "name": "Buckley SFB",
+        "value": 2
+       },
+       {
+        "id": 8,
+        "type": "property",
+        "color": "orange",
+        "name": "Nellis AFB",
+        "value": 2
+       },
+       {
+        "id": 9,
+        "type": "property",
+        "color": "orange",
+        "name": "Eglin AFB",
+        "value": 2
+       }
+      ],
+      "bank": [
+       {
+        "id": 105,
+        "type": "action",
+        "action": "chud",
+        "name": "THE CHUD CARD",
+        "value": 4,
+        "description": "Commandeer Hardware Under Directive — Steal ANY property from any player, even out of a complete set. OPSEC can block it."
+       },
+       {
+        "id": 102,
+        "type": "rent",
+        "colors": [
+         "any"
+        ],
+        "name": "Rent: any",
+        "value": 3
+       },
+       {
+        "id": 99,
+        "type": "rent",
+        "colors": [
+         "base",
+         "intel"
+        ],
+        "name": "Rent: base/intel",
+        "value": 1
+       },
+       {
+        "id": 96,
+        "type": "rent",
+        "colors": [
+         "red",
+         "yellow"
+        ],
+        "name": "Rent: red/yellow",
+        "value": 1
+       },
+       {
+        "id": 93,
+        "type": "rent",
+        "colors": [
+         "pink",
+         "orange"
+        ],
+        "name": "Rent: pink/orange",
+        "value": 1
+       },
+       {
+        "id": 90,
+        "type": "action",
+        "action": "surge_ops",
+        "name": "Surge Operations",
+        "value": 1,
+        "description": "Double the next charge you make this turn — rent or any demand"
+       },
+       {
+        "id": 87,
+        "type": "action",
+        "action": "foc",
+        "name": "Full Operational Capability (Hotel)",
+        "value": 4,
+        "description": "Add to a complete set with Upgrade: +4M rent"
+       },
+       {
+        "id": 84,
+        "type": "action",
+        "action": "upgrade",
+        "name": "Upgrade (House)",
+        "value": 3,
+        "description": "Add to a complete set: +3M rent"
+       },
+       {
+        "id": 81,
+        "type": "action",
+        "action": "pcs_orders",
+        "name": "PCS Orders",
+        "value": 1,
+        "description": "Draw 2 extra cards from the deck"
+       },
+       {
+        "id": 78,
+        "type": "action",
+        "action": "pcs_orders",
+        "name": "PCS Orders",
+        "value": 1,
+        "description": "Draw 2 extra cards from the deck"
+       },
+       {
+        "id": 75,
+        "type": "action",
+        "action": "pcs_orders",
+        "name": "PCS Orders",
+        "value": 1,
+        "description": "Draw 2 extra cards from the deck"
+       },
+       {
+        "id": 72,
+        "type": "action",
+        "action": "roll_call",
+        "name": "Roll Call",
+        "value": 2,
+        "description": "All other players pay you 2M each"
+       },
+       {
+        "id": 69,
+        "type": "action",
+        "action": "finance_office",
+        "name": "Finance Office",
+        "value": 3,
+        "description": "Collect 5M from any one player"
+       },
+       {
+        "id": 66,
+        "type": "action",
+        "action": "tdy_orders",
+        "name": "TDY Orders",
+        "value": 3,
+        "description": "Swap one of your properties for one of another player's. Neither card may come from a complete set."
+       },
+       {
+        "id": 63,
+        "type": "action",
+        "action": "midnight_requisition",
+        "name": "Midnight Requisition",
+        "value": 3,
+        "description": "Steal a single property from any player. Cannot touch a complete set."
+       },
+       {
+        "id": 60,
+        "type": "action",
+        "action": "opsec",
+        "name": "OPSEC",
+        "value": 4,
+        "description": "Counter any action card played against you. Can itself be countered by another OPSEC."
+       },
+       {
+        "id": 57,
+        "type": "action",
+        "action": "inspector_general",
+        "name": "Inspector General",
+        "value": 5,
+        "description": "Steal a complete property set from any player. OPSEC can block it."
+       },
+       {
+        "id": 54,
+        "type": "money",
+        "name": "5M",
+        "value": 5
+       },
+       {
+        "id": 51,
+        "type": "money",
+        "name": "4M",
+        "value": 4
+       },
+       {
+        "id": 48,
+        "type": "money",
+        "name": "3M",
+        "value": 3
+       },
+       {
+        "id": 45,
+        "type": "money",
+        "name": "2M",
+        "value": 2
+       },
+       {
+        "id": 42,
+        "type": "money",
+        "name": "1M",
+        "value": 1
+       },
+       {
+        "id": 39,
+        "type": "money",
+        "name": "1M",
+        "value": 1
+       },
+       {
+        "id": 36,
+        "type": "wild_property",
+        "colors": [
+         "lightblue",
+         "brown"
+        ],
+        "name": "Wild: Training/Drone",
+        "value": 1
+       },
+       {
+        "id": 33,
+        "type": "wild_property",
+        "colors": [
+         "green",
+         "darkblue"
+        ],
+        "name": "Wild: Elite/Command",
+        "value": 4
+       },
+       {
+        "id": 30,
+        "type": "wild_property",
+        "colors": [
+         "brown",
+         "lightblue"
+        ],
+        "name": "Wild: Drone/Training",
+        "value": 1
+       },
+       {
+        "id": 27,
+        "type": "property",
+        "color": "intel",
+        "name": "GPS Constellation",
+        "value": 1
+       },
+       {
+        "id": 24,
+        "type": "property",
+        "color": "base",
+        "name": "Osan AB",
+        "value": 2
+       }
+      ],
+      "properties": {
+       "darkblue": [
+        {
+         "id": 20,
+         "type": "property",
+         "color": "darkblue",
+         "name": "The Pentagon",
+         "value": 4,
+         "placedColor": "darkblue"
+        },
+        {
+         "id": 21,
+         "type": "property",
+         "color": "darkblue",
+         "name": "Air Force One",
+         "value": 4,
+         "placedColor": "darkblue"
+        }
+       ],
+       "brown": [
+        {
+         "id": 0,
+         "type": "property",
+         "color": "brown",
+         "name": "Creech AFB",
+         "value": 1,
+         "placedColor": "brown"
+        },
+        {
+         "id": 1,
+         "type": "property",
+         "color": "brown",
+         "name": "Cannon AFB",
+         "value": 1,
+         "placedColor": "brown"
+        }
+       ],
+       "red": [
+        {
+         "id": 11,
+         "type": "property",
+         "color": "red",
+         "name": "F-22 Raptor",
+         "value": 3,
+         "placedColor": "red"
+        }
+       ]
+      },
+      "upgrades": {},
+      "completedSets": 2,
+      "eliminated": false,
+      "finalApproach": false,
+      "finalApproachIn": null,
+      "opponentTurnsRemaining": null,
+      "checkpointTurn": null,
+      "bankValue": 66,
+      "propertyValue": 13,
+      "upgradeValue": 0,
+      "payableValue": 79,
+      "netWorth": 79
+     },
+     {
+      "id": "p2",
+      "name": "KESTREL",
+      "handCount": 4,
+      "bank": [
+       {
+        "id": 104,
+        "type": "action",
+        "action": "chud",
+        "name": "THE CHUD CARD",
+        "value": 4,
+        "description": "Commandeer Hardware Under Directive — Steal ANY property from any player, even out of a complete set. OPSEC can block it."
+       },
+       {
+        "id": 101,
+        "type": "rent",
+        "colors": [
+         "any"
+        ],
+        "name": "Rent: any",
+        "value": 3
+       },
+       {
+        "id": 98,
+        "type": "rent",
+        "colors": [
+         "green",
+         "darkblue"
+        ],
+        "name": "Rent: green/darkblue",
+        "value": 1
+       },
+       {
+        "id": 95,
+        "type": "rent",
+        "colors": [
+         "red",
+         "yellow"
+        ],
+        "name": "Rent: red/yellow",
+        "value": 1
+       },
+       {
+        "id": 92,
+        "type": "rent",
+        "colors": [
+         "brown",
+         "lightblue"
+        ],
+        "name": "Rent: brown/lightblue",
+        "value": 1
+       },
+       {
+        "id": 89,
+        "type": "action",
+        "action": "surge_ops",
+        "name": "Surge Operations",
+        "value": 1,
+        "description": "Double the next charge you make this turn — rent or any demand"
+       },
+       {
+        "id": 86,
+        "type": "action",
+        "action": "upgrade",
+        "name": "Upgrade (House)",
+        "value": 3,
+        "description": "Add to a complete set: +3M rent"
+       },
+       {
+        "id": 83,
+        "type": "action",
+        "action": "pcs_orders",
+        "name": "PCS Orders",
+        "value": 1,
+        "description": "Draw 2 extra cards from the deck"
+       },
+       {
+        "id": 80,
+        "type": "action",
+        "action": "pcs_orders",
+        "name": "PCS Orders",
+        "value": 1,
+        "description": "Draw 2 extra cards from the deck"
+       },
+       {
+        "id": 77,
+        "type": "action",
+        "action": "pcs_orders",
+        "name": "PCS Orders",
+        "value": 1,
+        "description": "Draw 2 extra cards from the deck"
+       },
+       {
+        "id": 74,
+        "type": "action",
+        "action": "pcs_orders",
+        "name": "PCS Orders",
+        "value": 1,
+        "description": "Draw 2 extra cards from the deck"
+       },
+       {
+        "id": 71,
+        "type": "action",
+        "action": "roll_call",
+        "name": "Roll Call",
+        "value": 2,
+        "description": "All other players pay you 2M each"
+       },
+       {
+        "id": 68,
+        "type": "action",
+        "action": "finance_office",
+        "name": "Finance Office",
+        "value": 3,
+        "description": "Collect 5M from any one player"
+       },
+       {
+        "id": 65,
+        "type": "action",
+        "action": "tdy_orders",
+        "name": "TDY Orders",
+        "value": 3,
+        "description": "Swap one of your properties for one of another player's. Neither card may come from a complete set."
+       },
+       {
+        "id": 62,
+        "type": "action",
+        "action": "midnight_requisition",
+        "name": "Midnight Requisition",
+        "value": 3,
+        "description": "Steal a single property from any player. Cannot touch a complete set."
+       },
+       {
+        "id": 59,
+        "type": "action",
+        "action": "opsec",
+        "name": "OPSEC",
+        "value": 4,
+        "description": "Counter any action card played against you. Can itself be countered by another OPSEC."
+       },
+       {
+        "id": 56,
+        "type": "money",
+        "name": "10M",
+        "value": 10
+       },
+       {
+        "id": 53,
+        "type": "money",
+        "name": "4M",
+        "value": 4
+       },
+       {
+        "id": 50,
+        "type": "money",
+        "name": "3M",
+        "value": 3
+       },
+       {
+        "id": 47,
+        "type": "money",
+        "name": "2M",
+        "value": 2
+       },
+       {
+        "id": 44,
+        "type": "money",
+        "name": "2M",
+        "value": 2
+       },
+       {
+        "id": 41,
+        "type": "money",
+        "name": "1M",
+        "value": 1
+       },
+       {
+        "id": 38,
+        "type": "money",
+        "name": "1M",
+        "value": 1
+       },
+       {
+        "id": 35,
+        "type": "wild_property",
+        "colors": [
+         "base",
+         "green"
+        ],
+        "name": "Wild: Bases/Elite",
+        "value": 4
+       },
+       {
+        "id": 32,
+        "type": "wild_property",
+        "colors": [
+         "red",
+         "yellow"
+        ],
+        "name": "Wild: Fighter/Mobility",
+        "value": 3
+       },
+       {
+        "id": 29,
+        "type": "wild_property",
+        "colors": [
+         "any"
+        ],
+        "name": "Wild Property",
+        "value": 0
+       },
+       {
+        "id": 26,
+        "type": "property",
+        "color": "intel",
+        "name": "PAVE PAWS Radar",
+        "value": 1
+       },
+       {
+        "id": 23,
+        "type": "property",
+        "color": "base",
+        "name": "Kadena AB",
+        "value": 2
+       }
+      ],
+      "properties": {
+       "lightblue": [
+        {
+         "id": 2,
+         "type": "property",
+         "color": "lightblue",
+         "name": "Lackland AFB (BMT)",
+         "value": 1,
+         "placedColor": "lightblue"
+        },
+        {
+         "id": 3,
+         "type": "property",
+         "color": "lightblue",
+         "name": "Keesler AFB",
+         "value": 1,
+         "placedColor": "lightblue"
+        },
+        {
+         "id": 4,
+         "type": "property",
+         "color": "lightblue",
+         "name": "Goodfellow AFB",
+         "value": 1,
+         "placedColor": "lightblue"
+        }
+       ],
+       "green": [
+        {
+         "id": 17,
+         "type": "property",
+         "color": "green",
+         "name": "Thunderbirds",
+         "value": 4,
+         "placedColor": "green"
+        }
+       ]
+      },
+      "upgrades": {},
+      "completedSets": 1,
+      "eliminated": false,
+      "finalApproach": false,
+      "finalApproachIn": null,
+      "opponentTurnsRemaining": null,
+      "checkpointTurn": null,
+      "bankValue": 66,
+      "propertyValue": 7,
+      "upgradeValue": 0,
+      "payableValue": 73,
+      "netWorth": 73
+     },
+     {
+      "id": "p3",
+      "name": "VULTURE",
+      "handCount": 4,
+      "bank": [
+       {
+        "id": 103,
+        "type": "rent",
+        "colors": [
+         "any"
+        ],
+        "name": "Rent: any",
+        "value": 3
+       },
+       {
+        "id": 100,
+        "type": "rent",
+        "colors": [
+         "base",
+         "intel"
+        ],
+        "name": "Rent: base/intel",
+        "value": 1
+       },
+       {
+        "id": 97,
+        "type": "rent",
+        "colors": [
+         "green",
+         "darkblue"
+        ],
+        "name": "Rent: green/darkblue",
+        "value": 1
+       },
+       {
+        "id": 94,
+        "type": "rent",
+        "colors": [
+         "pink",
+         "orange"
+        ],
+        "name": "Rent: pink/orange",
+        "value": 1
+       },
+       {
+        "id": 91,
+        "type": "rent",
+        "colors": [
+         "brown",
+         "lightblue"
+        ],
+        "name": "Rent: brown/lightblue",
+        "value": 1
+       },
+       {
+        "id": 88,
+        "type": "action",
+        "action": "foc",
+        "name": "Full Operational Capability (Hotel)",
+        "value": 4,
+        "description": "Add to a complete set with Upgrade: +4M rent"
+       },
+       {
+        "id": 85,
+        "type": "action",
+        "action": "upgrade",
+        "name": "Upgrade (House)",
+        "value": 3,
+        "description": "Add to a complete set: +3M rent"
+       },
+       {
+        "id": 82,
+        "type": "action",
+        "action": "pcs_orders",
+        "name": "PCS Orders",
+        "value": 1,
+        "description": "Draw 2 extra cards from the deck"
+       },
+       {
+        "id": 79,
+        "type": "action",
+        "action": "pcs_orders",
+        "name": "PCS Orders",
+        "value": 1,
+        "description": "Draw 2 extra cards from the deck"
+       },
+       {
+        "id": 76,
+        "type": "action",
+        "action": "pcs_orders",
+        "name": "PCS Orders",
+        "value": 1,
+        "description": "Draw 2 extra cards from the deck"
+       },
+       {
+        "id": 73,
+        "type": "action",
+        "action": "roll_call",
+        "name": "Roll Call",
+        "value": 2,
+        "description": "All other players pay you 2M each"
+       },
+       {
+        "id": 70,
+        "type": "action",
+        "action": "finance_office",
+        "name": "Finance Office",
+        "value": 3,
+        "description": "Collect 5M from any one player"
+       },
+       {
+        "id": 67,
+        "type": "action",
+        "action": "tdy_orders",
+        "name": "TDY Orders",
+        "value": 3,
+        "description": "Swap one of your properties for one of another player's. Neither card may come from a complete set."
+       },
+       {
+        "id": 64,
+        "type": "action",
+        "action": "midnight_requisition",
+        "name": "Midnight Requisition",
+        "value": 3,
+        "description": "Steal a single property from any player. Cannot touch a complete set."
+       },
+       {
+        "id": 61,
+        "type": "action",
+        "action": "opsec",
+        "name": "OPSEC",
+        "value": 4,
+        "description": "Counter any action card played against you. Can itself be countered by another OPSEC."
+       },
+       {
+        "id": 58,
+        "type": "action",
+        "action": "inspector_general",
+        "name": "Inspector General",
+        "value": 5,
+        "description": "Steal a complete property set from any player. OPSEC can block it."
+       },
+       {
+        "id": 55,
+        "type": "money",
+        "name": "5M",
+        "value": 5
+       },
+       {
+        "id": 52,
+        "type": "money",
+        "name": "4M",
+        "value": 4
+       },
+       {
+        "id": 49,
+        "type": "money",
+        "name": "3M",
+        "value": 3
+       },
+       {
+        "id": 46,
+        "type": "money",
+        "name": "2M",
+        "value": 2
+       },
+       {
+        "id": 43,
+        "type": "money",
+        "name": "2M",
+        "value": 2
+       },
+       {
+        "id": 40,
+        "type": "money",
+        "name": "1M",
+        "value": 1
+       },
+       {
+        "id": 37,
+        "type": "money",
+        "name": "1M",
+        "value": 1
+       },
+       {
+        "id": 34,
+        "type": "wild_property",
+        "colors": [
+         "base",
+         "intel"
+        ],
+        "name": "Wild: Bases/Intel",
+        "value": 2
+       },
+       {
+        "id": 31,
+        "type": "wild_property",
+        "colors": [
+         "pink",
+         "orange"
+        ],
+        "name": "Wild: Space/Test",
+        "value": 2
+       },
+       {
+        "id": 28,
+        "type": "wild_property",
+        "colors": [
+         "any"
+        ],
+        "name": "Wild Property",
+        "value": 0
+       },
+       {
+        "id": 25,
+        "type": "property",
+        "color": "base",
+        "name": "Thule AB",
+        "value": 2
+       }
+      ],
+      "properties": {
+       "yellow": [
+        {
+         "id": 14,
+         "type": "property",
+         "color": "yellow",
+         "name": "KC-135 Stratotanker",
+         "value": 3,
+         "placedColor": "yellow"
+        }
+       ],
+       "pink": [
+        {
+         "id": 5,
+         "type": "property",
+         "color": "pink",
+         "name": "Peterson SFB",
+         "value": 2,
+         "placedColor": "pink"
+        }
+       ]
+      },
+      "upgrades": {},
+      "completedSets": 0,
+      "eliminated": false,
+      "finalApproach": false,
+      "finalApproachIn": null,
+      "opponentTurnsRemaining": null,
+      "checkpointTurn": null,
+      "bankValue": 61,
+      "propertyValue": 5,
+      "upgradeValue": 0,
+      "payableValue": 66,
+      "netWorth": 66
+     }
+    ]
+   },
+   "turnTimer": null,
+   "responseTimer": null
+  }
+ ]
+}

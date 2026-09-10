@@ -28,6 +28,7 @@ class HarnessRejectionExperience:
     failed_tasks: tuple[str, ...]
     hard_rubric_misses: tuple[str, ...]
     soft_regression_summary: str
+    soft_gap_tags: tuple[str, ...]
     root_cause: str
     do_not_repeat: tuple[str, ...]
     evidence_refs: tuple[str, ...] = ()
@@ -38,6 +39,7 @@ class HarnessRejectionExperience:
         value["failed_tasks"] = list(self.failed_tasks)
         value["hard_rubric_misses"] = list(self.hard_rubric_misses)
         value["do_not_repeat"] = list(self.do_not_repeat)
+        value["soft_gap_tags"] = list(self.soft_gap_tags)
         value["evidence_refs"] = list(self.evidence_refs)
         return value
 
@@ -54,6 +56,7 @@ class HarnessRejectionExperience:
                 str(item) for item in value.get("hard_rubric_misses", [])
             ),
             soft_regression_summary=str(value.get("soft_regression_summary", "")),
+            soft_gap_tags=tuple(str(item) for item in value.get("soft_gap_tags", [])),
             root_cause=str(value.get("root_cause", "")),
             do_not_repeat=tuple(str(item) for item in value.get("do_not_repeat", [])),
             evidence_refs=tuple(str(item) for item in value.get("evidence_refs", [])),
@@ -108,10 +111,39 @@ class HarnessEvolutionMemory:
                 f"- epoch {item.epoch}: {_clip_text(item.harness_delta_summary)}; "
                 f"hard misses={[ _clip_text(value, limit=120) for value in item.hard_rubric_misses[:3] ]}; "
                 f"soft={_clip_text(item.soft_regression_summary, limit=160)}; "
+                f"focus={list(item.soft_gap_tags[:5])}; "
                 f"root_cause={_clip_text(item.root_cause, limit=180)}; "
                 f"avoid={avoid}"
             )
         return "\n".join(lines)
+
+    def recent_focus_tags(
+        self,
+        *,
+        loop_role: str,
+        limit: int = 5,
+    ) -> tuple[str, ...]:
+        recent = [
+            item
+            for item in self.load_recent(limit=limit * 2)
+            if item.loop_role == loop_role
+        ][-limit:]
+        tags: list[str] = []
+        for item in recent:
+            tags.extend(item.soft_gap_tags[:6])
+            for token in item.do_not_repeat[:2]:
+                text = token.casefold()
+                if "probe coverage incomplete" in text or "deep_probe" in text:
+                    tags.extend(["probe_context", "validation", "workflow"])
+                if "demo_coverage" in text:
+                    tags.extend(["gameplay_observability", "validation"])
+                if "interaction_correctness" in text:
+                    tags.extend(["regression_first", "gameplay_observability"])
+                if "playability_and_balance" in text:
+                    tags.extend(["mechanic_depth", "gameplay_observability"])
+                if "runtime_feedback_quality" in text:
+                    tags.extend(["gameplay_observability", "context_history"])
+        return tuple(dict.fromkeys(tags))
 
 
 def build_rejection_experience(
@@ -147,6 +179,48 @@ def build_rejection_experience(
             hard_misses.append(text)
         if "soft rubric total" in text and text not in soft_bits:
             soft_bits.append(text)
+        if "deep probe coverage incomplete" in text and "probe coverage incomplete" not in soft_bits:
+            soft_bits.append("probe coverage incomplete")
+
+    soft_gap_tags: list[str] = []
+    for item in case_results:
+        if not isinstance(item, dict):
+            continue
+        candidate = item.get("candidate")
+        if not isinstance(candidate, dict):
+            continue
+        soft_scores = candidate.get("soft", {})
+        if not isinstance(soft_scores, dict):
+            continue
+        ranked = sorted(
+            (
+                (str(rubric_id), float(score))
+                for rubric_id, score in soft_scores.items()
+                if isinstance(score, (int, float))
+            ),
+            key=lambda pair: (pair[1], pair[0]),
+        )
+        for rubric_id, score in ranked[:3]:
+            if score < 0.95:
+                soft_gap_tags.append(rubric_id)
+    for reason in (*soft_bits, *hard_misses):
+        text = reason.casefold()
+        if "probe coverage incomplete" in text or "deep_probe" in text:
+            soft_gap_tags.extend(["probe_context", "validation", "workflow"])
+        if "demo_coverage" in text:
+            soft_gap_tags.extend(["gameplay_observability", "validation"])
+        if "interaction_correctness" in text:
+            soft_gap_tags.extend(["regression_first", "gameplay_observability"])
+        if "playability_and_balance" in text:
+            soft_gap_tags.extend(["mechanic_depth", "gameplay_observability"])
+        if "runtime_feedback_quality" in text:
+            soft_gap_tags.extend(["gameplay_observability", "context_history"])
+        if "critical_bug_repair_and_stability" in text:
+            soft_gap_tags.extend(["regression_first", "workflow"])
+        if "deep_mechanic_causality" in text:
+            soft_gap_tags.extend(["mechanic_depth"])
+        if "long_horizon_play_progression" in text:
+            soft_gap_tags.extend(["mechanic_depth", "gameplay_observability"])
 
     added = sorted(set(candidate.active_modules) - set(parent.active_modules))
     removed = sorted(set(parent.active_modules) - set(candidate.active_modules))
@@ -194,6 +268,7 @@ def build_rejection_experience(
             " | ".join(soft_bits) or "soft total regressed",
             limit=220,
         ),
+        soft_gap_tags=tuple(dict.fromkeys(soft_gap_tags)),
         root_cause=_clip_text(
             "; ".join(epoch_result.reasons[:4]) or "admission rejected",
             limit=260,

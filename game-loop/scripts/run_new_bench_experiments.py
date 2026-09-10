@@ -41,7 +41,7 @@ SEED_ARTIFACTS = {
 }
 
 BENCHES = ["terminalbench", "taubench", "nl2repo"]
-MODELS = ["kimi", "qwen3.6-27b", "glm5.2", "claude", "gpt55", "deepseek_v4"]
+MODELS = ["kimi", "qwen3.6-27b", "glm5.2", "claude", "gpt55"]
 TAUBENCH_DOMAIN_TASKS = {
     "airline": 50,
     "retail": 114,
@@ -410,7 +410,7 @@ def run_queue(model: str, bench: str, *, taubench_domain: str = "airline") -> No
     config_value = json.loads(cfg.read_text(encoding="utf-8"))
     backend = config_value.setdefault("backend", {})
     backend_env = backend.setdefault("env", {})
-    if model == "glm5.2":
+    if model == "glm5.3":
         backend_env["CODEX_API_BASE"] = os.environ.get(
             "GLM_BASE_URL", backend_env.get("CODEX_API_BASE", "")
         )
@@ -514,7 +514,7 @@ def run_queue(model: str, bench: str, *, taubench_domain: str = "airline") -> No
             historical_dir
             if (
                 historical_dir is not None
-                and model != "glm5.2"
+                and model != "glm5.3"
                 and bench != "terminalbench"
             )
             else out_dir / run_id

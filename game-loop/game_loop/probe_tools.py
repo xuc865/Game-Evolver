@@ -185,20 +185,50 @@ def _browser_game_profile(artifact: Path) -> str | None:
     """Recognize the supported browser-game families without requiring npm."""
     if (artifact / "polybranch.pjs").is_file():
         return "processing"
+    for nested in (
+        artifact / "polybranchweb",
+        artifact / "web-export",
+        artifact / "game",
+        artifact / "dist",
+        artifact / "build",
+        artifact / "site",
+    ):
+        if (nested / "polybranch.pjs").is_file():
+            return "processing"
     if (artifact / "js" / "vendor" / "three.min.js").is_file():
         return "three-fps"
     if (artifact / "src" / "main.js").is_file() and (artifact / "game.js").is_file():
         return "canvas-survivors"
     if (artifact / "server.js").is_file() and (artifact / "public").is_dir():
         return "node-pwa"
-    if (artifact / "index.html").is_file():
+    if (artifact / "index.html").is_file() or any(
+        (nested / "index.html").is_file()
+        for nested in (
+            artifact / "polybranchweb",
+            artifact / "web-export",
+            artifact / "game",
+            artifact / "dist",
+            artifact / "build",
+            artifact / "site",
+            artifact / "public",
+        )
+    ):
         return "static-browser"
     return None
 
 
 def _browser_entrypoint(artifact: Path) -> Path | None:
-    for name in ("index.html", "public/index.html"):
-        path = artifact / name
+    preferred = (
+        artifact / "index.html",
+        artifact / "public" / "index.html",
+        artifact / "dist" / "index.html",
+        artifact / "build" / "index.html",
+        artifact / "site" / "index.html",
+        artifact / "polybranchweb" / "index.html",
+        artifact / "web-export" / "index.html",
+        artifact / "game" / "index.html",
+    )
+    for path in preferred:
         if path.is_file():
             return path
     return next(iter(sorted(artifact.rglob("index.html"))), None)
@@ -261,7 +291,9 @@ def cmd_browser_game_deep_probe(args: argparse.Namespace) -> int:
         browser = subprocess.Popen(
             [chrome, "--headless=new", "--no-sandbox", "--disable-gpu",
              "--enable-unsafe-swiftshader", "--hide-scrollbars",
-             "--remote-allow-origins=*",
+             "--remote-allow-origins=*", "--password-store=basic",
+             "--use-mock-keychain", "--disable-features=AutofillServerCommunication",
+             "--disable-sync", "--no-first-run", "--no-default-browser-check",
              "--window-size=1280,800", f"--remote-debugging-port={port}",
              f"--user-data-dir={temp_root}"],
             stdout=subprocess.DEVNULL,
@@ -1064,6 +1096,10 @@ def cmd_godot_quality_inventory(args: argparse.Namespace) -> int:
 def cmd_verigame_build(args: argparse.Namespace) -> int:
     artifact = Path(args.artifact).expanduser().resolve()
     package = artifact / "package.json"
+    npm = shutil.which("npm")
+    if npm is None:
+        _emit({"passed": False, "score": 0.0, "diagnostics": ["npm not found"]})
+        return 1
     if not package.is_file():
         _emit({"passed": False, "score": 0.0, "diagnostics": ["package.json missing"]})
         return 1
@@ -1106,8 +1142,66 @@ def cmd_verigame_build(args: argparse.Namespace) -> int:
         _emit({"passed": False, "score": 0.0, "diagnostics": ["npm not found"]})
         return 1
     passed = proc.returncode == 0
-    _emit({"passed": passed, "score": 1.0 if passed else 0.0, "diagnostics": [proc.stderr[-500:]]})
-    return 0 if passed else 1
+    diagnostics = [proc.stderr[-500:]]
+    if passed:
+        _emit({"passed": True, "score": 1.0, "diagnostics": diagnostics})
+        return 0
+    smoke_script = next(
+        (
+            name
+            for name in ("smoke", "smoke:extended", "smoke:live", "test-live-deploy")
+            if _package_script(package_json, name)
+        ),
+        None,
+    )
+    if smoke_script is not None:
+        try:
+            if not (artifact / "node_modules").is_dir():
+                install = subprocess.run(
+                    [npm, "install", "--no-audit", "--no-fund"],
+                    cwd=artifact,
+                    capture_output=True,
+                    text=True,
+                    timeout=min(args.timeout, 600),
+                    check=False,
+                )
+                diagnostics.extend(
+                    [
+                        "build script failed; attempted dependency install before smoke",
+                        install.stderr[-500:],
+                    ]
+                )
+            fallback = _run_npm_script(
+                artifact,
+                smoke_script,
+                timeout=min(args.timeout, 300),
+            )
+        except FileNotFoundError:
+            fallback = None
+        else:
+            fallback_ok = fallback.returncode == 0
+            diagnostics.extend(
+                [
+                    f"build script failed; fell back to {smoke_script}",
+                    fallback.stderr[-500:],
+                ]
+            )
+            _emit(
+                {
+                    "passed": fallback_ok,
+                    "score": 1.0 if fallback_ok else 0.0,
+                    "diagnostics": diagnostics,
+                }
+            )
+            return 0 if fallback_ok else 1
+    _emit(
+        {
+            "passed": False,
+            "score": 0.0,
+            "diagnostics": diagnostics,
+        }
+    )
+    return 1
 
 
 def cmd_verigame_screenshot(args: argparse.Namespace) -> int:

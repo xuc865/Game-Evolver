@@ -20,8 +20,8 @@
     "cwd": ".",
     "timeout_seconds": 1800,
     "env": {
-      "CODEX_API_BASE": "http://29.116.237.75:8080/v1",
-      "CODEX_MODEL": "GLM-5.2-W4AFP8-node1",
+      "CODEX_API_BASE": "http://11.213.4.72:80/v1",
+      "CODEX_MODEL": "GLM-5.3-Flash-node1",
       "GAME_LOOP_BACKBONE_PROVIDER": "glm"
     }
   },
@@ -263,7 +263,7 @@
       "require_rubric_validation": true,
       "dynamic_rubric_generation": true,
       "enable_usage_driven_mutation": true,
-      "rubric_provider": "deepseek",
+      "rubric_provider": "glm",
       "element_mutation_policy": {
         "removal_min_usage": 5,
         "removal_min_usage_share": 0.25,

@@ -37,7 +37,7 @@ SEED_ARTIFACTS = {
 }
 
 BENCHES = ["gcbench", "gdbench", "verigame"]
-MODELS = ["glm5.2", "deepseek_v4", "kimi", "qwen3.6-27b", "claude", "gpt55"]
+MODELS = ["glm5.2", "kimi", "qwen3.6-27b", "claude", "gpt55"]
 
 TASK_SOURCES = {
     "gcbench": ROOT.parent / "gcbench" / "tasks",

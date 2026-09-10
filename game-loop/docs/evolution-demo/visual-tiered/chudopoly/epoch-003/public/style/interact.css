@@ -1,0 +1,488 @@
+/* interact.css — owned by the interaction agent (P4).
+   BEHAVIOUR ONLY: what receives pointer input, what the browser is allowed to
+   do with a touch, what the cursor promises. The lift shadow, the glow and
+   every colour belong to the design agent — the rules below reuse the tokens
+   that table.css already spends on [data-targetable] so a droppable zone and a
+   targetable zone cannot drift apart. */
+
+/* ── touch discipline (§P4.4, corrected §P7.5) ──────────────────────────────
+   touch-action is scoped to the two places a drag can begin. The page, the side
+   panel, the chat and the log keep native scrolling.
+
+   The hand was `pan-x` to preserve a sideways hand scroll. MEASURED, real CDP
+   Input.dispatchTouchEvent on 390×844: a 120px drag that moves LEFT before it
+   moves up produced startedDragAfterHorizontal:false and 0 messages to the
+   server — the compositor took the gesture at the first horizontal pixel and
+   the client never saw another pointermove. Vertical-first drags succeeded, so
+   the bug was invisible to anyone who dragged "correctly".
+   The scroll it was protecting does not exist: table/hand.js tighten() shrinks
+   the fan overlap until the hand fits, measured scrollWidth 379 === clientWidth
+   379 with 8 cards on a 390px phone. So: `none`, and every direction is ours.
+   The self board scrolls vertically and is mostly covered by cards, so only the
+   cards that can actually be dragged from it (wilds — free rearranging, §3.8)
+   claim the gesture; every other card there keeps the board scrollable. */
+#hand-dock .card { touch-action: none; }
+#self-board .card[data-type="wild_property"] { touch-action: none; }
+
+/* ── the press acknowledgement (§P7.2) ──────────────────────────────────────
+   Painted synchronously inside the pointerdown handler by interact/drag.js.
+   Before it existed the first feedback of any kind after a pointerdown was the
+   click, measured at 427ms+ with sfx 0 / fx 0 at every sample in between.
+   It is deliberately NOT .is-lifted: the lift is what the SELECTION means, and
+   the machine clears it on every snapshot. This survives exactly as long as the
+   finger is down. */
+.card.is-pressed {
+  transition: filter .06s linear;
+  filter: brightness(1.16) saturate(1.05);
+  z-index: 28;
+}
+@media (prefers-reduced-motion: reduce) {
+  .card.is-pressed { transition: none; }
+}
+
+/* ── refusal: the head-shake (§5, §P7.3) ────────────────────────────────────
+   §5 asks invalid targets to shake their head. The only refusal the client
+   could express was `<button disabled>`; a full measured game produced 0
+   `denied` cues. interact/index.js refuse() drives this class, the DENIED cue
+   (sour sound + haptic) and a sentence, together, for every "no". 320ms so the
+   shake is over before the player's second tap lands. */
+@keyframes refuse-shake {
+  0%   { transform: translateX(0); }
+  15%  { transform: translateX(-6px); }
+  32%  { transform: translateX(5px); }
+  50%  { transform: translateX(-4px); }
+  68%  { transform: translateX(3px); }
+  85%  { transform: translateX(-2px); }
+  100% { transform: translateX(0); }
+}
+/* A .card's transform is anim/flight.js's (§P4 contract) — never animate it.
+   The card refuses with light and rim instead; only non-card chrome shakes. */
+@keyframes refuse-flash {
+  0%, 100% { filter: none; }
+  30%      { filter: brightness(1.35) saturate(.5) hue-rotate(-18deg); }
+  70%      { filter: brightness(.86) saturate(.6); }
+}
+.is-refused { animation: refuse-shake .32s cubic-bezier(.36, .07, .19, .97) both; }
+.card.is-refused {
+  animation: refuse-flash .32s ease both;
+  /* §3.5: no glow anywhere. The rim plus the card's own drop is the whole mark. */
+  box-shadow: 0 0 0 2px var(--danger), var(--card-drop);
+}
+@media (prefers-reduced-motion: reduce) {
+  /* §0.9: motion collapses, the refusal does not go silent — the cue still
+     fires and the danger rim still lands. */
+  .is-refused { animation: none; }
+  .card.is-refused { animation: none; }
+  .is-refused:not(.card) { outline: 2px solid var(--danger); outline-offset: 2px; }
+}
+
+/* ── the held card ─────────────────────────────────────────────────────── */
+.card.is-dragging {
+  /* elementFromPoint must see the zone UNDER the finger, and the held card is
+     drawn on top of it by definition. */
+  pointer-events: none;
+  z-index: 60;
+}
+.card.is-dropping {
+  /* released onto a legal zone, still carrying the drop offset until the
+     choreographer's FLIP takes over (interact/drag.js) */
+  pointer-events: none;
+  z-index: 50;
+}
+
+body.is-dragging-card {
+  cursor: grabbing;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ── drop targets ────────────────────────────────────────────────────────
+   ROUND-4 REVIEW. Every rule below used to name --gold / --gold-dim, which
+   ART §2 DELETED. A custom property that does not resolve makes the whole
+   declaration invalid-at-computed-value, so these did nothing at all and the
+   affordance was being drawn by a specificity bridge in table.css instead —
+   two files claiming the same feedback, one of them silently dead. The tokens
+   are adopted here and the bridge is gone.
+   §1: selection and valid-drop are a COBALT RING — 2px stroke outside the
+   object, never a fill, never a glow (§3.5), never a gradient (§3.4). */
+[data-droppable="1"] {
+  outline: 2px dashed var(--accent);
+  outline-offset: 2px;
+}
+/* The committed target. Owner feedback P7: "which one am I about to hit" was
+   a 2px outline change on a 20px strip. The hovered target is now filled, not
+   merely outlined — it is the single loudest thing on the felt while a card is
+   in the air, because it is the only question being asked. */
+[data-droppable="1"].is-drop-hover {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+  background-image: none;
+  box-shadow: var(--deboss), inset 0 0 0 2px var(--accent);
+}
+
+/* rank 2 — the whole felt as the last-resort "just play it" target. It must
+   NOT draw a dashed box round the entire table; it only reads once it is the
+   thing being hit. */
+#table[data-droppable="2"].is-drop-hover {
+  box-shadow: inset 0 0 0 3px var(--accent);
+}
+
+/* ── cursors (hover-capable pointers only, §2) ─────────────────────────── */
+@media (hover: hover) {
+  #hand-dock .card,
+  #self-board .card[data-type="wild_property"] { cursor: grab; }
+  .card.is-dragging, .card.is-dragging * { cursor: grabbing; }
+  [data-droppable="1"] { cursor: copy; }
+  /* A mouse has no 44px contact patch, so the desktop snap radius is wider
+     (interact/drag.js SNAP_MOUSE 120 vs SNAP_TOUCH 90) and the whole felt
+     advertises that a drop anywhere will be caught. */
+  body.is-dragging-card #table { cursor: copy; }
+}
+
+/* ── a card that is LEAVING (§P8 discard-to-limit) ───────────────────────
+   `.is-picked` means "selected"; it is shared with payment, where the card is
+   buying you out of a demand. A discard is not that — the card is being thrown
+   away — and the two selections used to be pixel-identical. So a card marked
+   for the discard reads as spent: drained of colour, dimmed, struck through by
+   a hazard rail, and stamped.
+
+   No transform: anim/flight.js owns the card's transform (§P4 contract), so the
+   treatment is filter, shadow and a pseudo-element, exactly like .is-refused. */
+.card.is-discarding {
+  filter: grayscale(.72) brightness(.62) contrast(.95);
+  box-shadow: 0 0 0 2px var(--danger), inset 0 0 0 1px rgba(0, 0, 0, .8);
+  opacity: .92;
+}
+.card.is-discarding::after {
+  /* overrides the stock sheen from table.css on the same pseudo-element */
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  border-radius: inherit;
+  /* hazard MATERIAL, in the palette's own vermillion rather than the retired
+     literal — a discard is the one routine action that is irreversible */
+  background: repeating-linear-gradient(45deg,
+    color-mix(in oklab, var(--danger) 34%, transparent) 0 6px,
+    rgba(0, 0, 0, .34) 6px 12px);
+  pointer-events: none;
+}
+.card.is-discarding::before {
+  /* the colour spine becomes the strike */
+  background: var(--danger);
+  width: 100%;
+  opacity: .18;
+  z-index: 4;
+}
+@media (prefers-reduced-motion: reduce) {
+  .card.is-discarding { transition: none; }
+}
+
+/* ── the drag, made physical (ART §4/§5, owner directive P8) ──────────────
+   Owner: "it should go above the board, better feedback for dragging cards,
+   and hovering animation when swapping between them."
+
+   MEASURED before this wave, real CDP touch on 390×844: a held hand card's
+   clipping ancestor chain was `["zone-hand"]` for the whole drag — z-index 60
+   cannot escape `overflow:hidden`, so the card was cut off the moment it left
+   the fan. interact/drag.js now calls table.liftCard()/dragCard()/releaseCard()
+   (the motion agent's generalised unclip), and the same measurement during a
+   drag is `[]`. Everything below is the part that is CSS. */
+
+/* legal mats: ART §5.1 — scale 1.04, accent ring, one elevation rung up.
+   A .propcol is furniture, not a card, so a transform here breaks no contract
+   (§P4 reserves transform on `.card` only). */
+.propcol[data-droppable="1"] {
+  transform: scale(1.04);
+  transition: transform .14s ease, filter .14s ease, opacity .14s ease;
+}
+/* illegal mats: the half that answers "why is nothing happening when I aim
+   here". ART §5.1 says desaturate to 35% and drop a rung. */
+.propcol[data-drop-illegal="1"] {
+  filter: saturate(.35) brightness(.72);
+  opacity: .55;
+  transition: filter .14s ease, opacity .14s ease;
+}
+/* the column a wild is LEAVING — a rearrange reads as an exchange, not as a
+   card vanishing from one place and appearing in another.
+
+   NOT A FILTER ON THE MAT, and this is the one line the second defect of this
+   round turned on. The held card never leaves this column: table.liftCard()
+   opens the clipping chain and deliberately does not reparent (table/index.js
+   "THE HELD CARD"). A `filter` — like the `opacity: .55` the illegal rule used
+   to put here too, before interact/drag.js markIllegal() stopped calling the
+   source column illegal — makes this mat a STACKING CONTEXT, and `z-index: 60`
+   inside a stacking context is 60 against that mat's own children, not against
+   the table. The mat itself is `position: relative; z-index: auto`, so it
+   paints at the z-index-0 step of #self-board in TREE ORDER, and every mat
+   later in document order drew straight over the card the player was holding.
+
+   MEASURED, 1280×720, real CDP, a rainbow wild dragged out of a full Elite
+   Programs mat onto Command: `elementFromPoint` at the held card's own centre
+   returned `card#20` — a card in the mat it was crossing — at all three sample
+   points; ART §5 requires the held card to ride above the table. With the
+   filter moved off the mat and onto its RESTING cards the same three points
+   return the held card, and the stacking-context chain between the card and
+   #app goes from [propcol(green), #self-board] to [#self-board].
+
+   The look is unchanged: the mark was always the dashed outline plus a
+   desaturation of what is left behind, and what is left behind is the cards. */
+.propcol[data-drop-source="1"] {
+  /* --steel-300 was deleted by ART §2; this declaration resolved to nothing,
+     so a rearranging wild left no mark on the column it came from. */
+  outline: 2px dashed var(--fg-mute);
+  outline-offset: 2px;
+}
+.propcol[data-drop-source="1"] .card:not(.is-dragging) { filter: saturate(.5); }
+
+/* ── THE MAT'S ANSWER: wild placement, decided on the table ────────────────
+   §3.8 (free rearranging is a first-class VISIBLE interaction) + §3.9 (state
+   every rule) + ART §1 (hue is the SETS', signals own material).
+
+   Chudopoly has no modal colour picker: `mode.needs = ['myColor']` and the
+   prompt says "Tap the set column to place it on", so the question is asked BY
+   the mats and the answer has to be printed ON them. interact/index.js
+   paintAdvice() builds the chit; the composition and why each mark is there is
+   documented beside it.
+
+   MATERIAL. Not one drop of hue is spent, because there is none left to spend:
+   a mat is already a saturated set-colour ground with a 100%-strength nameplate
+   on it (table.css), and ART §1 bans hue-as-signal outright. So the chit is
+   CARD STOCK WITH INK ON IT — the same printed material as every card in the
+   game, and by ART §0's thesis ("the table changes, the objects don't") it is
+   the SAME material in both themes. That is the whole contrast argument in one
+   move: `--ink` on `--card-stock` is 17.08:1 and `--ink-mute` on it is 5.64:1,
+   both published in ART §2 and both verified for light AND dark at once,
+   over all ten mats, because the chit never touches the mat's colour.
+
+   MEASURED on the mid-game fixture, 390×844 and 1280×720 (both themes):
+     landing rung   17.1:1   ·   spent rungs    5.6:1
+     BEST landing   17.1:1   ·   BEST rungs     6.4:1   ·   BEST word 17.1:1
+   The two BEST figures are the inverted chit and are the only new pair.
+
+   `pointer-events: none` is load-bearing, not tidiness: the MAT is the 44px
+   target (§0.9) and tools/touchtest.mjs hit-tests occlusion by rect overlap
+   skipping `pointer-events:none`. A chit that could be hit would shadow the
+   thing the player is being told to tap. */
+.mat-advice {
+  --chit-bg: var(--card-stock);
+  --chit-ink: var(--ink);
+  --chit-mute: var(--ink-mute);          /* 5.64:1 on stock — ART §2 */
+
+  /* IT COSTS THE MAT NO HEIGHT, and that is not a nicety.
+     MEASURED at 390×844 on the mid-game fixture: as a row of its own the chit
+     took the self board from 254px of mats to 290 in a 254px scrollport, put
+     the last mat row under the prompt bar, and buried 5 text runs that were not
+     buried before — a decision aid that hides two of the eight options it is
+     describing. Laid over the top of the card zone instead: 254px, 0 buried,
+     8/8 options on screen.
+     `grid-area: props` is the NAME table.css declares for the card cell
+     ("head head" / "props ups", both above and below 1024px), so this is a
+     contract rather than a row number — and if that template is ever re-cut the
+     chit degrades to an auto-placed row, which is merely the taller version of
+     the same feature rather than a broken one.
+     It lies across the top of the cards, where a table-tier card face is a
+     solid colour band with NO TEXT on it (ART §6's tier degradation drops the
+     title below 60px and the mats render 46px cards) — verified by counting
+     occluded runs, which stayed at 0. The mat's own nameplate above it is
+     untouched, so the set is still named while the chit is up. */
+  grid-area: props;
+  align-self: start;
+  /* content-sized, not full-bleed: at 200px a desktop mat would otherwise carry
+     a cream banner across the top of its colour plate on all eight legal mats
+     at once, which is a lot of new surface for four figures. Centred over the
+     cards it reads as a marker PLACED on the mat, which is what it is. */
+  justify-self: center;
+  z-index: 3;
+  margin: 1px 0 0;
+  padding: 0 3px;
+  /* ART §4: paper casts a soft shadow, painted steel does not. The chit is a
+     printed chit lying ON the cards, so it gets the paper language — not the
+     hard offset, which that section reserves for pressables. */
+  /* …plus the card's own 1px `--card-edge` trim (ART §6). It is what stops the
+     inverted BEST chit from dissolving into a dark-theme mat: on stock the bone
+     hairline is nearly invisible and the chit is carried by its own value, on
+     ink it is the printed trim and gives the slab an edge. One rule, both
+     directions, no theme branch. */
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 0 0 1px var(--card-edge);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: nowrap;
+  gap: 3px;
+  min-width: 0;
+
+  /* ART §4: figures are mono + tabular. A rent ladder is figures. */
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  /* px floor with an em above it: `--s` carries the a11y interface scale, so
+     the chit grows with the slider, but a mat is 54px wide on a 390px phone and
+     a 7px figure is not a figure. The same `max()` shape the mat's own
+     nameplate uses (table.css .propcol-name::after). */
+  font-size: max(9px, .56em);
+  /* 1.2, measured: the chit costs 12px of mat height at 1.2 and 15px at 1.45,
+     and a self board on a 390px phone has 248px of scrollport for 254px of mats
+     BEFORE this feature exists. Every px is a px of the last mat row. */
+  line-height: 1.2;
+  white-space: nowrap;
+
+  background-color: var(--chit-bg);
+  color: var(--chit-ink);
+  /* square corners: ART §6's technical-order style, and a chit is a printed
+     placard, not a pill. No border — ART §3.2 bans them on table furniture. */
+  border-radius: 0;
+  pointer-events: none;
+}
+
+/* ── AND THE CELL IT SHARES ────────────────────────────────────────────────
+   The chit costs the MAT no height and that measurement still holds — but it
+   was measured on the mat, and the thing that moved was the CELL.
+
+   `grid-area: props` puts the chit in the same grid area as the mat's card
+   zone, so the two share a row. A grid item stretches to its row by default, so
+   on an EMPTY mat — no cards, nothing to be laid over — the zone stopped being
+   0px tall and became exactly as tall as the chit. MEASURED by touchtest on
+   `wild placement (cold)`, 390×844, the first frames any gate has taken of the
+   myColor step (def3dd9): `div.cardzone 46×11` and `div.cardzone 52×11`, both
+   under §0.9's 44px floor, on the brown/orange/red mats the wild could go to.
+
+   Zero was never a defect and 11 is, which is the whole shape of this bug: an
+   empty zone is invisible to the audit (no height, nothing to tap, nothing to
+   zoom) while an 11px one is a control a thumb cannot hit. table.css floors
+   `.board .cardzone:not(:empty)` at 44px on purpose and deliberately leaves
+   `:empty` alone; this restores that. The propcol itself is untouched — it is
+   the 44px drop target (min-height: var(--tap)) and it was never the thing
+   under the floor. */
+.propcol:has(> .mat-advice) > .cardzone:empty { align-self: start; }
+
+/* A rung is one step of the set's rent ladder, so the ladder IS the progress
+   bar: it has exactly `size` rungs and the reversed-out one says which rung you
+   would be standing on. That is two of the four things this feature owes
+   (progress, and the rent row) paid for with one mark. */
+.mat-rung { padding: 0 1px; color: var(--chit-mute); }
+.mat-rung.is-landing {
+  /* ART §6's "solid black reverse-out chips used aggressively", and the card's
+     own value-coin vocabulary: ink disc, bone numerals. */
+  padding: 0 3px;
+  font-weight: 800;
+  background: var(--chit-ink);
+  color: var(--chit-bg);
+}
+
+/* SET / BEST. Weight, never tracking (ART §4) — and never colour. Held at 1em
+   deliberately: tools/checkContrast.mjs files a run under 8px as decorative and
+   stops gating it, and a word that carries the whole recommendation must be on
+   trial like everything else. At the phone tier that is 8.5px. */
+.mat-mark { font-family: var(--font-body); font-weight: 800; font-size: 1em; }
+
+/* BEST is a VALUE INVERSION of the same material, so it survives greyscale,
+   colourblindness and an 8px phone mat, and it reads at a glance across eight
+   mats without asking hue for anything. ART §1 files the achromatic ink slab as
+   "the primary action" — during a myColor step a mat IS the primary action, so
+   this is that vocabulary used for what it means, not a new one. */
+.mat-advice[data-best="1"] {
+  --chit-bg: var(--ink);
+  --chit-ink: var(--card-stock);
+  /* The same relationship the other way up. A LITERAL, and not a
+     `color-mix(in oklab, …)`, for a measured reason: getComputedStyle resolves
+     a mix to `oklab(…)`, and tools/lib/audit.mjs auditTextContrast() parses
+     `rgb()/rgba()` only — a mixed TEXT colour returns null and the run is
+     skipped, so the gate would report a pass over a figure it never read.
+     The value is ART §2's dark `--fg-mute`, which that table measures against
+     `--ground #15171C`; `--ink` is #14161A, so it carries over. Verified in
+     place at 6.18:1 on the inverted chit, both themes (the chit is card stock
+     and ink, so there is only one answer to verify). */
+  --chit-mute: #8E97A3;
+}
+
+/* COMPLETES THE SET: the printed double rule. `.propcol.is-complete
+   .propcol-head` already signs a finished set with a stock-coloured rule along
+   the bottom of its placard — "the double line a stamped placard uses" — so the
+   chit signs a placement that WOULD finish it the same way, in currentColor, so
+   it inverts along with everything else. */
+.mat-advice[data-complete="1"] {
+  padding-bottom: 3px;
+  background-image:
+    linear-gradient(currentColor, currentColor),
+    linear-gradient(currentColor, currentColor);
+  background-size: 100% 1px, 100% 1px;
+  background-position: 0 100%, 0 calc(100% - 2px);
+  background-repeat: no-repeat;
+}
+
+/* THE PHONE CUT, and what it drops.
+   MEASURED at 390×844 on the mid-game fixture: a self mat is 54px wide (61 at
+   the widest) with ~50px inside it. A 4-rung ladder in 9px mono is ~40px and
+   fits; a ladder AND a printed word does not, and a chit wider than its mat
+   drives `.propcol`'s min-content width, which reflows the whole 3-row board.
+   So when a WORD has to be printed the ladder collapses to the single rung the
+   word is about — the brief's own order of value (progress and BEST outrank the
+   ladder) applied literally. You lose the neighbouring rungs, i.e. what the set
+   would pay at other counts; you keep the figure you would actually charge, the
+   fact that it completes, and the recommendation. On a mat with no word — the
+   common case, 7 of 8 columns on the fixture — the full ladder still prints. */
+@media (max-width: 1023px) {
+  .mat-advice { font-size: 8.5px; gap: 2px; }
+  .mat-advice[data-marks="1"] .mat-rung:not(.is-landing) { display: none; }
+}
+
+/* A desktop mat is 200px wide and the readout can be read rather than
+   deciphered. Held BELOW the mat's own nameplate (.62em) on purpose: the set is
+   what the mat IS, the chit is what it would do. */
+@media (min-width: 1024px) {
+  .mat-advice { font-size: .72em; gap: 4px; }
+}
+
+/* ── the landing silhouette (ART §5.3) ──────────────────────────────────
+   "dashed card ghost at the exact final position and rotation." Built by
+   interact/drag.js into the hovered rank-0 target only — a ghost under a
+   "play it, I'll aim later" region would promise a place the card is not
+   going. Inert to the pointer: the drop is hit-tested against the target, and
+   a ghost that could be hit would shadow it. */
+.drop-ghost {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--card-w);
+  aspect-ratio: var(--card-ratio);
+  margin: 0;
+  transform: translate(-50%, -50%) scale(.94);
+  border: 2px dashed var(--accent);
+  border-radius: var(--card-r);
+  background: repeating-linear-gradient(122deg,
+    color-mix(in oklab, var(--accent) 22%, transparent) 0 4px, transparent 4px 9px);
+  box-shadow: none;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 5;
+  transition: opacity .12s ease, transform .16s cubic-bezier(.22, 1, .36, 1);
+}
+.drop-ghost.is-on { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+/* the ghost needs a positioned host; every rank-0 target is one of these */
+.propcol, .board, .board-bank, .table-center { position: relative; }
+
+@media (prefers-reduced-motion: reduce) {
+  /* §0.9: motion collapses to state changes. The ring, the desaturation and
+     the silhouette all stay — they are information, not flourish. */
+  .propcol[data-droppable="1"] { transform: none; transition: none; }
+  .propcol[data-drop-illegal="1"] { transition: none; }
+  .drop-ghost { transition: none; transform: translate(-50%, -50%); }
+  .drop-ghost.is-on { transform: translate(-50%, -50%); }
+}
+
+/* A floating hint over the board is the one thing that must not be in the way
+   while a card is in the air. MEASURED on drag-mid@phone: the first-game hint
+   pill covered two property columns mid-drag, and with a 100ms fade it still
+   overlapped the held card for the first three frames of the gesture. So it
+   goes at once — `visibility`, not opacity, and no transition on the way out —
+   and eases back after the card has landed.
+   (ART §3.7 rules that hints should be STENCILLED into the apron rather than
+   floating at all; that is a palette-wave change and is requested in the
+   report. This is the floor it asks for in the meantime.) */
+.hints { transition: opacity .2s ease .25s, visibility 0s linear .25s; }
+body.is-dragging-card .hints {
+  opacity: 0;
+  visibility: hidden;
+  transition: none;
+}

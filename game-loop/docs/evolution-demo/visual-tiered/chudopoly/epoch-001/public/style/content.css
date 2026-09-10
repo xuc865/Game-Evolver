@@ -1,0 +1,2241 @@
+/* content.css — the explaining surfaces (P6).
+   Owner: content & clarity agent. Everything here is rules copy, card details,
+   the final-approach strip, first-game hints and the settings sheet.
+
+   It loads last on purpose: the only rules that reach outside this file's own
+   classes are two documented overrides, both marked OVERRIDE below.
+
+   Colour: `[data-color="…"]` in table.css already publishes `--band` /
+   `--band-ink` on ANY element carrying the attribute, so every swatch and set
+   column here reads the one set-colour ramp instead of restating it. */
+
+/* ── the brief: paged rules sheet ─────────────────────────────────────── */
+
+.brief { display: flex; flex-direction: column; gap: .55em; min-height: 0; max-width: 100%; }
+
+.brief-tabs {
+  display: flex;
+  gap: .25em;
+  flex: 0 0 auto;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  padding-bottom: .3em;
+  margin: 0 -.2em;
+  padding-left: .2em;
+  padding-right: .2em;
+  scroll-snap-type: x proximity;
+  border-bottom: var(--hairline) solid var(--shade);
+  /* the rail runs off the right edge at 390px — fade it so that reads as
+     "there is more" rather than as a clipped button */
+  -webkit-mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 1.6em), transparent 100%);
+  mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 1.6em), transparent 100%);
+}
+.brief-tabs::-webkit-scrollbar { display: none; }
+
+.brief-tab {
+  flex: 0 0 auto;
+  scroll-snap-align: center;
+  min-height: calc(var(--tap) * .8);
+  /* §0.9 is a floor on BOTH axes: at the display face the shortest label
+     ("GOAL") measured 42px wide and touchtest failed it. */
+  min-width: var(--tap);
+  padding: 0 .8em;
+  border: 0;
+  border-radius: var(--radius);
+  /* ROUND-2 LOOK (help-cards@desktop, flightlog@desktop): "1px-bordered pill
+     tabs" — the exact §3.2 outline this file's own furniture rules refuse. A
+     tab is a WELL stamped into the sheet, one step down (--ground-deep), and
+     the open page is the ink slab. No border anywhere; the deboss is the edge.
+     Ink on the well: --fg-mute measured 4.59:1 on light --ground-deep
+     (variables.css's own figure) and 12.5:1 dark. */
+  background: var(--ground-deep);
+  box-shadow: var(--deboss);
+  color: var(--fg-mute);
+  font-family: var(--font-display);
+  font-size: .84em;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.brief-tab.is-on {
+  color: var(--act-fg);
+  background: var(--act);
+  box-shadow: none;
+}
+@media (hover: hover) {
+  .brief-tab:hover:not(.is-on) { color: var(--fg); }
+}
+.brief-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.brief-page {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  padding-right: .2em;
+  /* P10 LOOK: this scroller carries the shared .scroll-edge treatment (ui.css)
+     — help-cards cut its last sentence mid-line at the fold with no cue. The
+     paddings keep RESTING content clear of the .45em feather, so only a line
+     actually crossing the fold fades. */
+  padding-top: .45em;
+  padding-bottom: .45em;
+  /* One column of prose at a comfortable measure; the sheet is 30em wide. */
+  max-width: 34em;
+}
+.brief-page:focus-visible { outline: none; }
+
+.brief-title {
+  margin: 0 0 .4em;
+  font-size: 1.02em;
+  color: var(--fg);
+  letter-spacing: .01em;
+}
+.brief-sub {
+  margin: 1.1em 0 .4em;
+  font-size: .72em;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.brief-lede {
+  margin: 0 0 .8em;
+  font-size: .92em;
+  font-weight: 700;
+  line-height: 1.4;
+  color: var(--fg);
+  border-left: 2px solid var(--fg-mute);
+  padding-left: .6em;
+}
+.brief-list { margin: 0 0 .6em; padding-left: 1em; }
+.brief-list li { font-size: .84em; line-height: 1.45; color: var(--fg-mute); }
+
+/* the rule list: claim on top, consequence under it */
+.brief-rules { margin: 0 0 .4em; }
+.brief-rules dt {
+  font-size: .82em;
+  font-weight: 800;
+  letter-spacing: .01em;
+  color: var(--fg);
+  margin-top: .7em;
+}
+.brief-rules dt::before {
+  content: "";
+  display: inline-block;
+  width: .34em;
+  height: .34em;
+  margin-right: .5em;
+  vertical-align: .12em;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: none;
+}
+.brief-rules dd {
+  margin: .12em 0 0 1.2em;
+  font-size: .81em;
+  line-height: 1.45;
+  color: var(--fg-mute);
+}
+
+.brief-note {
+  margin: .9em 0 .2em;
+  padding: .5em .65em;
+  font-size: .78em;
+  line-height: 1.42;
+  color: var(--fg-mute);
+  background: var(--ground);
+  border-left: 2px solid var(--fg-mute);
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+.brief-swatch {
+  display: inline-block;
+  width: .72em;
+  height: .72em;
+  flex: 0 0 auto;
+  border-radius: 2px;
+  background: var(--band, var(--fg-mute));
+  box-shadow: 0 0 0 1px var(--shade);
+}
+
+/* ── sets & rent table ────────────────────────────────────────────────── */
+
+.brief-scroll { overflow-x: auto; scrollbar-width: thin; margin-bottom: .5em; }
+.brief-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .78em;
+}
+.brief-table th {
+  text-align: left;
+  padding: .3em .4em;
+  font-size: .88em;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  color: var(--fg-mute);
+  border-bottom: var(--hairline) solid var(--shade);
+  white-space: nowrap;
+}
+.brief-table td {
+  padding: .34em .4em;
+  border-bottom: var(--hairline) solid var(--shade);
+  color: var(--fg-mute);
+  vertical-align: middle;
+}
+.brief-table tr:last-child td { border-bottom: 0; }
+.brief-table .num { text-align: center; font-weight: 800; color: var(--fg); }
+.brief-table .setname {
+  display: flex;
+  align-items: center;
+  gap: .45em;
+  font-weight: 700;
+  color: var(--fg);
+  white-space: nowrap;
+}
+.brief-table .ladder { display: flex; gap: .22em; flex-wrap: wrap; }
+.rung {
+  display: inline-flex;
+  align-items: baseline;
+  gap: .18em;
+  padding: .1em .38em;
+  border-radius: 3px;
+  background: var(--ground);
+  box-shadow: inset 0 0 0 1px var(--shade);
+  font-variant-numeric: tabular-nums;
+}
+.rung i { font-style: normal; font-size: .78em; color: var(--fg-mute); }
+.rung b { color: var(--fg); }
+/* the full-set rung is the number people actually plan around */
+.rung.is-full {
+  background: var(--act);
+  color: var(--act-fg);
+}
+/* --act-fg, NOT --fg: the chip above just inverted to the ink slab, and --fg on
+   it is light ink on the cream slab in dark / dark ink on the ink slab in light
+   — measured 1.0:1, the amount a player actually plans around, invisible. */
+.rung.is-full b { color: var(--act-fg); }
+
+/* ── final approach diagram ───────────────────────────────────────────── */
+
+.fa-diagram {
+  display: flex;
+  flex-direction: column;
+  gap: .7em;
+  margin: 0 0 1em;
+  padding: .7em .65em;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--ground);
+  box-shadow: var(--deboss);
+}
+.fa-board { display: flex; flex-direction: column; align-items: center; gap: .35em; }
+.fa-board-label, .fa-board-count {
+  font-size: .62em;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  color: var(--fg-mute);
+}
+.fa-board-count { color: var(--fg); }
+.fa-cols { display: flex; gap: .45em; }
+.fa-col {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .22em;
+  width: 4.1em;
+  padding: .35em .3em .3em;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--deboss);
+}
+.fa-col.is-complete {
+  box-shadow: var(--deboss-deep), inset 0 4px 0 var(--rail);
+  background: color-mix(in oklab, var(--band, var(--fg-mute)) var(--mat-alpha), var(--surface));
+}
+.fa-col-name {
+  font-size: .58em;
+  font-weight: 900;
+  letter-spacing: .08em;
+  color: var(--band-ink, var(--fg));
+  background: var(--band, var(--fg-mute));
+  padding: .18em .4em;
+  border-radius: 2px;
+  white-space: nowrap;
+}
+.fa-col-pips { display: flex; gap: .16em; }
+.fa-col-pips i {
+  width: .5em;
+  height: .7em;
+  border-radius: 1px;
+  background: var(--band, var(--fg-mute));
+  box-shadow: 0 0 0 1px var(--shade);
+}
+.fa-col-tick {
+  font-size: .55em;
+  font-weight: 900;
+  letter-spacing: .1em;
+  color: var(--fg);
+}
+
+.fa-steps { list-style: none; margin: 0; padding: 0 0 0 .1em; }
+.fa-step {
+  position: relative;
+  display: flex;
+  gap: .5em;
+  align-items: flex-start;
+  padding: .3em 0 .3em .9em;
+  margin: 0;
+}
+/* the rail */
+.fa-step::before {
+  content: "";
+  position: absolute;
+  left: .15em;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--fg-mute);
+}
+.fa-step:first-child::before { top: .8em; }
+.fa-step:last-child::before { bottom: calc(100% - .8em); }
+.fa-step::after {
+  content: "";
+  position: absolute;
+  left: -.05em;
+  top: .62em;
+  width: .42em;
+  height: .42em;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: none;
+}
+.fa-step.is-break::after { background: var(--danger); }
+.fa-step.is-win::after { background: var(--accent); }
+.fa-tag {
+  flex: 0 0 5.2em;
+  font-size: .6em;
+  font-weight: 900;
+  letter-spacing: 0;
+  color: var(--accent);
+  padding-top: .35em;
+}
+.fa-step.is-break .fa-tag { color: var(--danger-ink); }
+.fa-step.is-win .fa-tag { color: var(--accent); }
+.fa-text { font-size: .8em; line-height: 1.4; color: var(--fg-mute); }
+
+/* ── card catalogue ───────────────────────────────────────────────────── */
+
+.brief-card {
+  margin-bottom: .45em;
+  padding: .45em .6em .5em;
+  border-radius: var(--radius);
+  border-left: 3px solid var(--fg-mute);
+  background: var(--ground);
+  box-shadow: var(--deboss);
+}
+.brief-card.is-chud { border-left-color: var(--accent); }
+.brief-card.is-rent { border-left-color: var(--accent); }
+.brief-card-head { display: flex; align-items: baseline; gap: .45em; }
+.brief-card-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: .86em;
+  font-weight: 900;
+  letter-spacing: .01em;
+  color: var(--fg);
+}
+.brief-card.is-chud .brief-card-name { color: var(--fg); }
+.brief-card-coin {
+  flex: 0 0 auto;
+  font-size: .74em;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+.brief-card-qty {
+  flex: 0 0 auto;
+  font-size: .66em;
+  font-weight: 800;
+  letter-spacing: .06em;
+  color: var(--fg-mute);
+}
+.brief-card-rule {
+  margin: .2em 0 .3em;
+  font-size: .79em;
+  line-height: 1.42;
+  color: var(--fg-mute);
+}
+.brief-card-flag {
+  display: inline-block;
+  font-size: .62em;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+.brief-card-flag.is-block { color: var(--accent); }
+.brief-card-flag.is-noblock { color: var(--fg-mute); }
+
+/* ── OPSEC chain ──────────────────────────────────────────────────────── */
+
+.op-chain {
+  list-style: none;
+  margin: 0 0 .9em;
+  padding: .55em .6em;
+  border-radius: var(--radius);
+  background: var(--ground);
+  box-shadow: var(--deboss);
+  counter-reset: beat;
+}
+.op-beat {
+  display: flex;
+  gap: .5em;
+  align-items: baseline;
+  padding: .28em 0;
+  border-bottom: var(--hairline) solid var(--shade);
+}
+.op-beat:last-child { border-bottom: 0; }
+.op-who {
+  flex: 0 0 4.4em;
+  font-size: .62em;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-align: right;
+  color: var(--fg-mute);
+}
+.op-beat.is-attack .op-who { color: var(--danger-ink); }
+.op-beat.is-defend .op-who { color: var(--accent); }
+.op-beat.is-result .op-who { color: var(--accent); }
+.op-text { font-size: .79em; line-height: 1.4; color: var(--fg-mute); }
+.op-beat.is-result .op-text { color: var(--fg); font-weight: 700; }
+
+/* ── card details sheet ───────────────────────────────────────────────── */
+
+.details-rule { font-size: .88em; line-height: 1.45; color: var(--fg); }
+.dt-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-bottom: .6em;
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+/* ROUND-4 REVIEW (peek-hover@desktop): "Effect" and its value ran together with
+   no gutter. MEASURED in the page: the row was a flex box and
+   `.dt-label { min-width: 0 }` let the label's BOX shrink to 24px against 35px
+   of text, so the word overflowed its own box and crossed the 9px gap. A grid
+   track cannot do that — `auto` never goes below min-content, so the gutter is
+   structural rather than a gap a shrunk box can eat. */
+.dt-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  column-gap: .9em;
+  padding: .32em .6em;
+  font-size: .8em;
+  background: var(--ground);
+}
+.dt-label { color: var(--fg-mute); }
+.dt-value { font-weight: 800; color: var(--fg); text-align: right; }
+.dt-row.is-good .dt-value { color: var(--accent); }
+.dt-row.is-bad .dt-value { color: var(--fg-mute); font-weight: 700; }
+.dt-row.is-hot .dt-value { color: var(--fg); }
+
+.dt-tags { display: flex; flex-wrap: wrap; gap: .3em; margin-bottom: .4em; }
+.dt-tag {
+  font-size: .64em;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+  padding: .24em .55em;
+  border-radius: 2px;
+  /* §3.2: furniture gets material, never a 1px outline on a slightly-lighter
+     ground. A tag is a stamped plate, cut into the sheet it sits on. */
+  background: var(--ground);
+  box-shadow: var(--deboss);
+  color: var(--fg-mute);
+}
+.dt-tag.is-block { color: var(--accent); box-shadow: var(--deboss), inset 0 0 0 2px var(--accent); }
+.dt-why { font-size: .78em; font-weight: 700; color: var(--danger-ink); margin: 0; }
+
+/* ── final approach strip (inside the HUD) ────────────────────────────── */
+
+/* OVERRIDE 1 — ui.css sets `.hud { display:flex }` on one row. The strip is a
+   full-width second row of the same header, so it needs wrapping enabled.
+
+   `.hud-mid` must lose its auto basis at the same time: at 390px "PHOENIX'S
+   TURN" is wider than the space left over, and with wrapping on that pushed the
+   whole icon group onto its own line — measured on the 390×844 shot, a wasted
+   44px band above the table. A zero basis lets it shrink instead, which is what
+   its own `min-width: 0` and text-overflow were already written for.
+   Both are inert while the strip is hidden. */
+.hud { flex-wrap: wrap; }
+.hud-mid { flex: 1 1 0; }
+
+/* ── the row is RESERVED, never grown (P8) ──────────────────────────────────
+   MEASURED before this: arming moved #opponents from y62→y100 (desktop),
+   y59→y101 (phone), y56→y84 (landscape) and shrank the opponents strip
+   147→118 / 209→132 / 217→190 — four times a game, at the exact moment the
+   player is being told to read the table. And it was unbounded: three armed
+   players + the attrition chip measured a 589px-tall strip inside a 651px-tall
+   #hud on a 390px phone.
+
+   `height` (not min-height) plus a two-line clamp on the sentence makes the box
+   a constant, and `.is-empty` keeps that constant in the layout with the paint
+   turned off — ui/hud.js never sets `hidden` on it, because `display:none` is
+   what made the felt jump. Cost: a permanently reserved band, measured
+   28px desktop / 34px phone / 22px landscape (see .hud-strip height below). */
+.hud-strip {
+  flex: 1 1 100%;
+  display: flex;
+  align-items: center;
+  gap: .45em;
+  min-width: 0;
+  /* ONE line of .strip-text (.72em × 1.25 line-height = .9em) + padding.
+     Fixed, so no amount of content can move the felt — and ONE line, because a
+     two-line reserve measurably squeezed the rest of the table: 34px on a
+     390px phone against 21px here. ui/hud.js stripLine() is written to this
+     budget and tools/lib/audit.mjs's clipped-text pass gates the claim. */
+  height: calc(.9em + .56em);
+  padding: .28em .5em;
+  margin-top: .18em;
+  overflow: hidden;
+  border-radius: var(--radius);
+  background: var(--ground);
+  box-shadow: var(--deboss);
+}
+.hud-strip.is-empty {
+  /* still occupies its box — that is the entire point */
+  visibility: hidden;
+  pointer-events: none;
+}
+/* ══ THE ARMED STRIP FLOATS OVER THE PILES, NOT OVER A SEAT (ROUND-8) ══════
+   HISTORY. Round 4 reserved this row and landscape floated it, because at
+   844×390 reserving even a 17px row took `.self-board` 77→54 and the property
+   cards to 31px, under §0.9's 44px floor, which tools/touchtest.mjs failed on.
+   Round 5 floated portrait too: "the reserved row is 24px of an 82px HUD, and
+   #self-board is a 228px scrollport around 353px of your own board — four of
+   your thirteen property mats at 0% visible."
+
+   WHAT THE FLOAT ACTUALLY COST, which round 5 priced as "the top of the seats
+   strip for the ~3s it is up". Neither half survived bfe8b42. A collapsed seat
+   is now 44px of nameplate-over-meters; the float is 25px tall and starts 6px
+   above it, so it does not clip the top of a seat, it ERASES THE FIRST SEAT'S
+   ENTIRE NAMEPLATE — 43% of the box, and on final-approach@phone the opponent's
+   name is simply not in the frame. And it is up for the whole Final Approach,
+   not ~3s, so the game's loudest moment is the one that photographs a nameless
+   opponent. Landscape had the same collision unremarked: the strip at y51 over
+   a seat at y54.
+
+   PUTTING THE ROW BACK WAS TRIED AND MEASURED, AND IT LOSES. The reserve is
+   affordable in isolation — five-player@phone goes 254/254 → 230/230, still
+   nothing hidden — but 23px off every #self-board port pushes the bottom row of
+   your own mats under the fold, and the two gates that count that both got
+   worse in the same run: tools/screenshot.mjs buried runs 41 → 58 across 5 → 8
+   shots, and tools/touchtest.mjs clipped controls across 4 → 5 surfaces. The
+   band is not free after all; it is just billed somewhere the HUD cannot see.
+
+   SO THE STRIP MOVES INSTEAD OF THE FELT. It stays out of flow — the reserve's
+   whole point was that arming must never GROW the header, and it still cannot —
+   but it anchors to the top edge of `#table-center` rather than to the bottom of
+   the HUD. That band is the deck and discard, and after bfe8b42 it is the one
+   piece of a phone frame with nothing to read in its top 21px: the pile captions
+   are painted under the cards, not over them. Cost, stated and counted: the top
+   ~21px of the two pile faces while the strip is up, which is one `.ca-val`
+   coin on a stacked discard card and takes tools/screenshot.mjs's buried total
+   41 → 42 on final-approach@phone. Against a named opponent that is the trade,
+   and it costs the felt nothing at all — self-board, seats and piles measure
+   byte-identical to bfe8b42 on all nine staged surfaces.
+
+   Same anchor `#table-center` the toast uses (ui.css declares `anchor-name`),
+   and the same reason: an offset from the HUD is a claim about everything
+   between the HUD and the felt, and nothing tells this rule when that expires.
+
+   THE POSITION SCHEME IS PART OF THE FIX, NOT A DETAIL. `position: absolute`
+   inside the HUD was tried first and silently did nothing — an anchor is only
+   acceptable when it is a descendant of the positioned element's containing
+   block (or the containing block is the initial one), and `#table-center` is not
+   inside `#hud`. The rule parsed, the fallback took over, and the strip stayed
+   exactly where it was: the measurement is what caught it, not the stylesheet.
+   `fixed` moves the containing block to the initial one, which every box on the
+   page is inside. It stays inside `.hud`'s z-5 stacking context, so it still
+   paints over the z-1 felt and under nothing that matters.
+
+   The `@supports` gate is the degradation: without anchor positioning all three
+   offsets would be invalid at once and the strip would land wherever `auto`
+   put it. Gated, a browser without it keeps the round-5 float verbatim.
+
+   The height stays the base rule's fixed box (NOT `height: auto`, which the
+   float used): three armed players plus the attrition chip once measured a
+   589px strip inside a 651px #hud, and a constant box with `overflow: hidden`
+   is what makes that unrepresentable — out of flow it could not move the felt,
+   but it could bury the table it is reporting on. */
+/* ── PHONE + LANDSCAPE: THE STRIP IS DOCKED, NOT FLOATED (P10) ────────────
+   The round-8 float anchored this strip over the top of #table-center, priced
+   at "the top ~21px of the two pile faces". Two independent critics measured
+   what that actually buys: on final-approach@phone and opponent-armed@phone
+   the banner buries the deck/discard value coins and card titles (the shot
+   gate counts them — 1M/3M at 100%), and ART §3.7 names a floating pill over
+   the board as a web-app tell. Landscape floated it over the first seat's
+   nameplate, which round 8's own comment called erasing "43% of the box".
+
+   So below 1024px the strip is IN THE FLOW — the .hud's own second row, where
+   the base rule already puts it — and occludes nothing. What changes against
+   the P8 reserve-always contract, stated plainly: `.is-empty` is `display:
+   none` here, so the row exists only while a seat is armed. That means arming
+   moves the felt ONCE (≈20px, and back on disarm), where P8's permanent
+   reserve was measured to cost every phone frame ~24px of #self-board and made
+   the buried-run and clipped-control gates WORSE (41→58 buried when it was
+   tried). One 20px step at the game's loudest announced moment, against a
+   permanent tax on the scrollport the payment prompt needs — the step is the
+   cheaper harm, and the arming beat is already announced by sound, the
+   .announce banner and the seat's own hazard treatment, so the reflow lands
+   inside a moment the player is being pointed at anyway.
+   The fixed-height/overflow-hidden box is KEPT: three armed players still
+   cannot grow it. */
+@media (max-width: 1023px) {
+  .hud-strip {
+    margin-top: 0;
+    margin-bottom: .18em;
+    /* a docked stripe, not a second band: the tightest box one line of
+       .strip-text (.72em × 1.25 = 12.6px) and the .62em flag clear */
+    height: calc(.9em + .3em);
+    padding: .12em .5em;
+  }
+  .hud-strip.is-empty { display: none; }
+}
+/* ── DESKTOP: THE STRIP RIDES THE HUD ROW, IT IS NOT A SECOND BAND ────────
+   ROUND-5 REVIEW. §3.1 names full-width stacked bands as the top slop pattern,
+   and the desktop frame was carrying four of them — MEASURED at 1280×720:
+   HUD 88 (of which 27 is this strip, reserved and EMPTY in most frames) +
+   prompt 28 + dock 128 = 244px of 720. A 1280px bar has 1002px of unused
+   middle; the alert has no business claiming a row of its own there.
+
+   Inline, the HUD is 61px, the empty band is gone, and the 27px it was holding
+   is what pays for the opponents' seats to stop being sliced (table.css's
+   fit-content(11.4em)). The reserve-don't-grow contract is untouched: the box
+   is still a fixed size that exists whether or not it has anything in it, so
+   arming still cannot move the felt. */
+@media (min-width: 1024px) {
+  .hud-strip {
+    flex: 0 1 26em;
+    order: 1;
+    min-width: 0;
+    margin-top: 0;
+    align-self: center;
+  }
+  .hud-right { order: 2; }
+  /* the centre gives ground first: "YOUR TURN" plus its plays plate needs
+     ~150px and .hud-mid still has 600+ once the strip has taken its 26em */
+  .hud-mid { flex: 1 1 0; }
+}
+.hud-strip.is-threat {
+  background: var(--ground);
+  box-shadow: var(--deboss), inset 0 0 0 2px var(--danger);
+}
+.hud-strip.is-mine {
+  background: var(--ground);
+  box-shadow: var(--deboss), inset 0 0 0 2px var(--accent);
+}
+.strip-flag {
+  flex: 0 0 auto;
+  font-size: .62em;
+  font-weight: 900;
+  letter-spacing: 0;
+  padding: .26em .5em;
+  border-radius: 3px;
+  color: var(--fg);
+  background: var(--surface);
+  white-space: nowrap;
+}
+/* ── THE FLAG WEARS THE HAZARD; IT IS NOT PRINTED ON IT ──────────────────
+   MEASURED by checkContrast on `opponent-armed · dark` and `announce · dark`,
+   the first frames any gate has ever taken of either surface (def3dd9):
+   "BREAK THEM NOW" in --card-stock knocked out of --hazard-fine reads
+   rgb(251,248,241) on rgb(254,140,84) = 2.18:1, against §0.9's 4.5:1 — on the
+   string a player has the least time to read, at the loudest moment in the
+   game.
+
+   NO KNOCKOUT INK CAN FIX IT, and that is why this is a material change rather
+   than a colour one. --hazard-fine is a TWO-TONE material (--danger 5px /
+   --ink 5px). In the dark theme --danger is a light orange (#FF8C53, relative
+   luminance .406) and --ink is near-black (.007), so an ink clearing 4.5:1 on
+   the dark stripe needs L ≥ .206 and one clearing 4.5:1 on the vermillion
+   needs L ≤ .051. The two conditions do not intersect: no colour reads on
+   this material in the dark theme. Light passes only because there --danger is
+   dark (#AB2707, L .101), so bone clears both tones at 6.40:1 — an accident of
+   which end of the ramp the token sits at, not a decision anyone made.
+
+   So the flag takes the ruling .prompt-why already carries in this file: "a
+   stripe is a graphical object and text still owes 4.5:1". The hazard becomes
+   a rule struck down the flag's edge and the type sits beside it in
+   --danger-ink, on the strip's own ground. Nothing is darkened and nothing is
+   lightened — the vermillion is at full strength and full width, it is simply
+   no longer underneath the letters, which is the same trade .prompt-why made
+   for the refusal sentence. 2.18 → 8.86 dark, 6.40 → 7.51 light. */
+.hud-strip.is-threat .strip-flag {
+  color: var(--danger-ink);
+  background: var(--hazard-fine) left / 5px 100% no-repeat, var(--ground);
+  padding-left: .8em;
+}
+.hud-strip.is-mine .strip-flag { color: var(--act-fg); background: var(--act); }
+/* Two lines, hard. tools/lib/audit.mjs exempts a line-clamped box from the
+   clipped-text gate precisely because a clamp is a decision, not a rendering
+   accident — the full sentence is on the row's `title` and one tap away in the
+   brief's Goal page. */
+.strip-text {
+  flex: 1 1 8em;
+  min-width: 0;
+  font-size: .72em;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--fg);
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.strip-text b, .strip-who b { color: var(--danger-ink); }
+.hud-strip.is-mine .strip-text b { color: var(--fg); }
+.hud-strip.is-mine .strip-who b { color: var(--fg); }
+.strip-sep { color: var(--fg-mute); }
+.chip.strip-chip { flex: 0 0 auto; font-size: .62em; }
+.chip.strip-chip.is-hot { color: var(--fg); border-color: var(--accent); }
+
+.prompt-why.is-approach { color: var(--fg); }
+
+/* ── the refusal sentence: HAZARD MATERIAL, not coloured text ─────────────
+   ROUND-5 REVIEW (refusal@desktop): "Needs a complete set without an Upgrade"
+   was plain vermillion prose in a bar full of other prose. §1 is explicit —
+   danger is a MATERIAL (45° caution stripes + vermillion), never a plain
+   coloured chip, and never a hue on its own, because a hue on its own is
+   exactly what a colourblind player and a grayscale frame cannot read. So the
+   sentence gets the same stripe vocabulary every other danger in the app wears:
+   a hazard rule struck down its left edge and a solid warning mark ahead of it.
+   The INK stays --danger-ink (7.51 light / 8.86 dark on ground) because a
+   stripe is a graphical object and text still owes 4.5:1. */
+.prompt-why {
+  display: flex;
+  align-items: baseline;
+  gap: .45em;
+  padding: .2em 0 .2em .5em;
+  background: var(--hazard-fine) left / 5px 100% no-repeat;
+}
+.prompt-why::before {
+  content: "";
+  flex: 0 0 auto;
+  align-self: center;
+  width: .82em;
+  height: .82em;
+  background: var(--danger);
+  /* a solid triangle with a knocked-out bar and dot — a mark, not a dingbat */
+  -webkit-mask: var(--ico-hazard) center / contain no-repeat;
+  mask: var(--ico-hazard) center / contain no-repeat;
+}
+/* the approach note is news, not a refusal: it keeps the bar, drops the alarm */
+.prompt-why.is-approach { background: var(--stencil-hi) left / 3px 100% no-repeat; }
+.prompt-why.is-approach::before { background: var(--fg); }
+
+/* ── the answer frame is hazard MATERIAL, not a coloured border (ART §1) ──
+   ui/deadline.js injects #chud-alarm — a fixed viewport frame — with an inline
+   style of `inset 0 0 0 .18rem var(--danger)` plus a soft glow: a plain
+   vermillion chip at viewport scale, and a glow, both of which §1/§3.5 ban.
+   The LOOK critic measured it on payment@desktop. The correct form is the
+   build's own final-approach rails (table.css `.board[data-final-approach]`):
+   45° caution stripes, top and bottom, inside the frame. Same geometry rule as
+   every alarm in the app — hazard INSIDE the object — and the injected pulse
+   (it animates the <i>'s opacity) carries over untouched.
+   `body #chud-alarm i` outranks the injected `#chud-alarm i` (0-0-1 more), so
+   this wins whatever order the runtime style lands in. */
+body #chud-alarm i {
+  box-shadow: none;
+  background:
+    var(--hazard) 0 0 / 100% 6px no-repeat,
+    var(--hazard) 0 100% / 100% 6px no-repeat;
+}
+
+/* The "YOUR ANSWER" chip wore the same flat vermillion fill (ui/prompt.js's
+   inline `#prompt .prompt-turn.is-alarm`). Same ruling as .strip-flag above:
+   the flag WEARS the hazard, it is not printed on it — a hazard rule struck
+   down its edge, danger ink beside it, on the bar's own ground. Extra .chip
+   in the selector outranks the injected rule at equal order. */
+#prompt .chip.prompt-turn.is-alarm {
+  color: var(--danger-ink);
+  background: var(--hazard-fine) left / 5px 100% no-repeat, var(--ground);
+  border-color: transparent;
+  padding-left: .8em;
+}
+
+/* ── first-game hints ─────────────────────────────────────────────────── */
+
+/* Never modal, never blocking: the whole stack is inert to the pointer, so a
+   hint sitting over the table cannot eat a tap meant for a card. */
+/* ROUND-4 REVIEW (refusal@desktop): the previous rule lifted the stencil by a
+   flat 3.6em when the prompt bar appeared, which walked it up onto the CMD mat
+   and hid the card standing in it. Lifting it further only moves which mat it
+   covers. So the rule is a PRIORITY rule, not a geometry one: a coaching hint
+   never competes with a live decision. The same principle already governs the
+   drag (interact.css hides the layer while a card is in the air).
+   REQUEST TO ui/hints.js: publish --hint-lift from the TOP of whatever occupies
+   the bottom (dock OR dock+prompt), and DEFER a hint while #prompt is up rather
+   than showing it and having CSS hide it. */
+body:has(#prompt:not([hidden])) .hints {
+  opacity: 0;
+  visibility: hidden;
+  transition: none;
+}
+.hints {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--hint-lift, 4.6em) + env(safe-area-inset-bottom) + .3em);
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  gap: .3em;
+  width: min(26em, 92vw);
+  pointer-events: none;
+}
+/* ART §3.7: a hint is PAINTED ON THE APRON, not a pill floating over it. No
+   fill, no shadow, no border — stencil ink on concrete, inside a dashed
+   marking box, so it reads as part of the surface the cards sit on. */
+.hint-card {
+  display: flex;
+  gap: .45em;
+  align-items: flex-start;
+  padding: .45em .7em;
+  border-radius: 0;
+  border: 0;
+  /* ROUND-2 REVIEW (landscape-mid@landscape): with no fill at all the hint ran
+     straight over three colour mats and two cards and neither could be read.
+     A marking painted on concrete is OPAQUE — it is the apron's own colour with
+     dashed edges, not a transparent overlay and not a floating pill. */
+  background:
+    repeating-linear-gradient(90deg, var(--stencil-hi) 0 8px, transparent 8px 14px) 0 0 / 100% 2px no-repeat,
+    repeating-linear-gradient(90deg, var(--stencil-hi) 0 8px, transparent 8px 14px) 0 100% / 100% 2px no-repeat,
+    var(--ground);
+  box-shadow: none;
+  opacity: 0;
+  transform: translateY(.5em);
+  transition: opacity .18s ease, transform .22s cubic-bezier(.18, 1.5, .4, 1);
+}
+/* §3.7: a hint must never sit on the surface the player is aiming at. In
+   landscape the band landed squarely on three colour mats and two cards
+   (measured on landscape-mid@landscape), so it moves over the seats column —
+   the one region nothing is ever dropped onto. Declared here because this file
+   loads after table.css and owns .hints. */
+/* ROUND-4 REVIEW: above the dock there is no free apron left at desktop width —
+   the seats are on top (owner directive) and your mat fills the rest. But there
+   IS free concrete INSIDE the dock, between the hand bar on the left and the fan
+   in the middle: ~300px that nothing is ever placed on. The stencil goes there:
+   on the apron, beside the cards it is talking about, covering nothing. */
+@media (min-width: 1024px) {
+  .hints {
+    left: calc(13.2em + 1em);
+    right: auto;
+    bottom: calc(env(safe-area-inset-bottom) + .6em);
+    width: min(20em, 24vw);
+    transform: none;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 560px) and (max-width: 1024px) {
+  /* ROUND-4: parked bottom-LEFT, the band sat squarely on the DECK and DISCARD
+     captions — the two numbers a landscape player has no other way to read.
+     table.css's landscape grid leaves ~90px of bare concrete under the property
+     line on the right, which is the only region of this viewport holding
+     nothing. The stencil goes there. */
+  .hints {
+    left: auto;
+    right: .5em;
+    bottom: calc(var(--hint-lift, 4.6em) + .3em);
+    width: min(30em, 54vw);
+    transform: none;
+  }
+}
+/* ── the beat feed: a MARKING, not a stack of pills ───────────────────────
+   ROUND-5 REVIEW (five-player@desktop, refusal@desktop). ui/feed.js ships its
+   own injected stylesheet and drew each line as a rounded, bordered, shadowed
+   plate floating over the table — landing squarely on the discard pile. That is
+   §3.7's named pattern ("floating hint pills over the board") reintroduced by
+   this round's own new module, one block after this file removed it from the
+   coach layer.
+
+   Two things are wrong and both are fixed here rather than in ui/feed.js, which
+   this agent does not own (the request to fold this back into that file is in
+   the report):
+
+   1. MATERIAL. A beat is painted on the apron, in the apron's own colour with
+      dashed edges, exactly like .hint-card above — not a plate with a radius
+      and a drop shadow. The weight rail stays, because it is the one thing
+      carrying attack/big/hit in grayscale, but it becomes a hazard-width
+      stencil rule rather than a pill's rounded border.
+   2. PLACE. On desktop it moves off the table entirely, into the ~350×130 of
+      dead concrete inside the dock between the hand bar and the fan — the same
+      empty region this file already parks the coach stencil in, and the one
+      part of that viewport that nothing is ever placed on. The coach stencil
+      steps up above it; the two are the only things in that column.
+
+   These selectors carry an extra class on purpose: ui/feed.js's own rules are
+   `#chud-feed .feed-row` (1,1,0) and are injected into <head> AFTER this
+   stylesheet, so equal specificity would lose the cascade. */
+#chud-feed .feed-stack .feed-row {
+  padding: .3em .6em;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  font-weight: 700;
+  color: var(--fg);
+  background:
+    linear-gradient(var(--stencil-hi), var(--stencil-hi)) 0 0 / 3px 100% no-repeat,
+    repeating-linear-gradient(90deg, var(--stencil-hi) 0 8px, transparent 8px 14px) 0 0 / 100% 2px no-repeat,
+    repeating-linear-gradient(90deg, var(--stencil-hi) 0 8px, transparent 8px 14px) 0 100% / 100% 2px no-repeat,
+    var(--ground);
+}
+#chud-feed .feed-stack .feed-row.is-big {
+  background:
+    linear-gradient(var(--foil), var(--foil)) 0 0 / 3px 100% no-repeat,
+    repeating-linear-gradient(90deg, var(--stencil-hi) 0 8px, transparent 8px 14px) 0 0 / 100% 2px no-repeat,
+    repeating-linear-gradient(90deg, var(--stencil-hi) 0 8px, transparent 8px 14px) 0 100% / 100% 2px no-repeat,
+    var(--ground);
+}
+/* a line that happened to YOU is the one that wears hazard material */
+#chud-feed .feed-stack .feed-row.is-hit {
+  color: var(--fg);
+  background:
+    var(--hazard-fine) 0 0 / 5px 100% no-repeat,
+    repeating-linear-gradient(90deg, var(--stencil-hi) 0 8px, transparent 8px 14px) 0 0 / 100% 2px no-repeat,
+    repeating-linear-gradient(90deg, var(--stencil-hi) 0 8px, transparent 8px 14px) 0 100% / 100% 2px no-repeat,
+    var(--ground);
+}
+/* The third instance of .strip-flag's defect, found while fixing that one and
+   fixed here because no gate has photographed this tag on a dark frame yet:
+   --card-stock on solid --danger is 2.12:1 in the dark theme, and §1 bans a
+   plain coloured chip for danger anyway. The alarm channel is already spent —
+   the row this tag appears on wears the hazard rail (.is-hit above) — so the
+   tag itself is type, in the ink danger uses for type. 8.86 dark, 7.51 light
+   on the row's own --ground. */
+#chud-feed .feed-stack .feed-you {
+  border-radius: 0;
+  padding: 0;
+  background: none;
+  color: var(--danger-ink);
+  letter-spacing: 0;
+}
+#chud-feed .feed-stack .feed-mark { opacity: 1; color: var(--fg-mute); }
+/* ── ON A PHONE THE FEED IS A ONE-LINE TICKER ─────────────────────────────
+   PLACE, part two. Desktop got the empty dock column (below); portrait has no
+   such column, so a three-row stack simply stood on the board — MEASURED on
+   five-player@phone, the stack covered the whole second row of the player's own
+   mats and the screenshot gate's buried-run count for that one shot was 22.
+   §3.7 is about material AND place, and there is no place on a 390px phone for
+   three lines of running commentary over the one region the player is reading.
+   One line is a ticker: it says what just happened, it is 20px tall, and the
+   Mission Log has the rest. The rows are still built and still animate, so
+   nothing in ui/feed.js changes; only the last one is shown. */
+@media (max-width: 759px) {
+  #chud-feed .feed-stack .feed-row:not(:last-child) { display: none; }
+  #chud-feed .feed-stack .feed-row { font-size: .8em; padding: .18em .5em; }
+}
+@media (orientation: landscape) and (max-height: 560px) {
+  #chud-feed .feed-stack .feed-row:not(:last-child) { display: none; }
+}
+@media (min-width: 1024px) {
+  /* fixed, not absolute: the host is a height:0 div pinned above #prompt, and
+     the dock is the box this belongs in. Bottom-anchored so the newest line is
+     always the one nearest the hand. */
+  #chud-feed.floaters .feed-stack {
+    position: fixed;
+    left: 13.2em;
+    right: auto;
+    top: auto;
+    bottom: calc(env(safe-area-inset-bottom) + .5em);
+    max-width: 21em;
+  }
+  /* the coach stencil steps up so the two share the column instead of the
+     same 60px of it */
+  .hints { bottom: calc(env(safe-area-inset-bottom) + 5.2em); }
+}
+
+.hint-card.is-in { opacity: 1; transform: translateY(0); }
+.hint-card.is-out { opacity: 0; transform: translateY(.3em); }
+.hint-mark {
+  flex: 0 0 auto;
+  font-weight: 800;
+  /* stencil INK, not stencil paint: the marking box carries the "painted on"
+     read; the characters still owe 4.5:1 (--stencil-hi measured 1.84:1 dark). */
+  color: var(--fg-mute);
+  line-height: 1.3;
+}
+.hint-body {
+  font-size: .78em;
+  line-height: 1.35;
+  font-weight: 700;
+  color: var(--fg-mute);
+  text-shadow: 0 1px 0 var(--sheen);
+}
+
+/* ── settings sheet ───────────────────────────────────────────────────── */
+
+.settings { display: flex; flex-direction: column; gap: .6em; }
+/* MOBILE REVIEW round 5: at 844×390 the sheet body is 246px and this column ran
+   past it, so "How to play" and "Show first-game hints" — the two controls a
+   first-timer is looking for — were below the fold of a sheet nobody knows
+   scrolls. A landscape viewport is short and wide; the list lies down. */
+@media (orientation: landscape) and (max-height: 560px) {
+  .settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .3em .9em; }
+  .settings-row { min-height: calc(var(--tap) * .92); }
+}
+.settings-row { display: flex; align-items: center; gap: .7em; min-height: var(--tap); }
+.settings-label {
+  flex: 0 0 5em;
+  font-size: .78em;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  color: var(--fg-mute);
+}
+.settings-readout {
+  flex: 0 0 3.2em;
+  text-align: right;
+  font-size: .78em;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+}
+
+/* a real checkbox wearing a switch.
+   MOBILE REVIEW, round 4: the input is `position:absolute; inset:0` inside
+   .switch, so the HIT AREA is whatever .switch measures — and .switch was
+   hugging the 1.6em face, giving 44×23 in portrait and 37×19 in landscape. The
+   FACE is a drawing and stays that size; the SWITCH is the control. */
+.switch {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--tap);
+  min-height: var(--tap);
+}
+.switch-input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+/* ROUND-2 LOOK #1: "stock iOS-style blue toggle pills" (settings-dark@desktop).
+   §1 gives the primary/selected channel to the ACHROMATIC INK SLAB and reserves
+   cobalt for focus/selection strokes; a solid --accent fill was the one thing a
+   toggle must never be. The switch is now the app's own materials end to end:
+   a square-cornered channel CUT into the sheet (§6's drawing style: no rounded
+   pill), a slab knob wearing the §4 press mechanic (hard offset, zero blur,
+   collapses while the finger is down), and ON = the whole channel becomes the
+   ink slab with the knob knocked out — the same chosen-state grammar as
+   .seg-face and .rung.is-full, so it reads with the hue removed.
+   Measured: knob-off --fg-mute on --ground-deep 4.59:1 light / 12.5:1 dark;
+   knob-on --act-fg on --act 17.08:1 light / 15.63:1 dark. */
+.switch-face {
+  display: block;
+  width: 3.1em;
+  height: 1.6em;
+  border-radius: var(--radius);
+  background: var(--ground-deep);
+  box-shadow: var(--deboss-deep);
+  transition: background .16s ease, box-shadow .16s ease;
+}
+.switch-face::after {
+  content: "";
+  display: block;
+  width: 1.2em;
+  height: 1.2em;
+  margin: .2em;
+  border-radius: 2px;
+  background: var(--fg-mute);
+  box-shadow: var(--press-soft);
+  transition: transform .16s cubic-bezier(.18, 1.5, .4, 1), background .16s ease;
+}
+/* the press: the knob's offset collapses while the input is held down */
+.switch-input:active + .switch-face::after { box-shadow: 0 0 0 var(--press-ink); }
+.switch-input:checked + .switch-face {
+  background: var(--act);
+  box-shadow: none;
+}
+.switch-input:checked + .switch-face::after {
+  transform: translateX(1.5em);
+  background: var(--act-fg);
+  box-shadow: none;
+}
+.switch-input:focus-visible + .switch-face { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ROUND-2 LOOK #1, same finding: `accent-color` rendered the browser's stock
+   blue slider. Drawn instead: a debossed channel cut into the sheet and an INK
+   DISC thumb — the value coin's own mark (§6: "filled ink disc"), achromatic,
+   with the cobalt ring kept for focus only. No text, so the §0.9 figures live
+   on the readout beside it; the 44px hit box is the input's own height. */
+.slider {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: var(--tap);
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+.slider::-webkit-slider-runnable-track {
+  height: 8px;
+  border-radius: 2px;
+  background: var(--ground-deep);
+  box-shadow: var(--deboss);
+}
+.slider::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 1.15em;
+  height: 1.15em;
+  margin-top: calc((8px - 1.15em) / 2);
+  border: 0;
+  border-radius: 50%;
+  background: var(--act);
+  box-shadow: var(--press-soft);
+}
+.slider:active::-webkit-slider-thumb { box-shadow: 0 0 0 var(--press-ink); }
+.slider::-moz-range-track {
+  height: 8px;
+  border-radius: 2px;
+  background: var(--ground-deep);
+  box-shadow: var(--deboss);
+}
+/* the travelled side fills achromatic — position said twice, never in hue */
+.slider::-moz-range-progress { height: 8px; border-radius: 2px; background: var(--act); }
+.slider::-moz-range-thumb {
+  width: 1.15em;
+  height: 1.15em;
+  border: 0;
+  border-radius: 50%;
+  background: var(--act);
+  box-shadow: var(--press-soft);
+}
+.slider:active::-moz-range-thumb { box-shadow: 0 0 0 var(--press-ink); }
+.slider:disabled { opacity: .4; cursor: not-allowed; }
+.slider:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ── win overlay: name the ending, show the boards ────────────────────── */
+
+.win-tag {
+  align-self: center;
+  font-size: .68em;
+  font-weight: 900;
+  letter-spacing: .2em;
+  text-transform: uppercase;
+  color: var(--foil-ink);
+  padding: .2em .7em;
+  border-radius: 2px;
+  /* §3.2: a struck plate, not an outlined pill. The brass reads as a rim on
+     the material rather than as a hairline drawn round a chip. */
+  box-shadow: var(--deboss), inset 0 0 0 2px var(--foil);
+  background: var(--ground);
+  letter-spacing: 0;
+  margin-bottom: .5em;
+}
+.win-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: .68em;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  color: var(--fg-mute);
+  padding: 0 .55em .2em;
+}
+
+/* ── the rank movement (#win-rank, built by ui/overlays.js) ──────────────
+   Between the reason and the boards, OUTSIDE the scroller: the sortie-point
+   award and the distance to the next tier are the meta progression the ladder
+   ships for, so they may not scroll away with the recap. Technical-order
+   treatment on the ceremony's night tokens — the award is a figure, not a
+   medal, so no foil here: ART §1 keeps the gold for the roundel and the title,
+   and a second brass element would dilute both. The bar is the apron's own
+   two-value vocabulary: ink on a shade track, square corners, no gradient. */
+#win-rank { flex: 0 0 auto; }
+.win-rank {
+  display: flex;
+  flex-direction: column;
+  gap: .3em;
+  margin-top: .2em;
+  text-align: initial;
+}
+.win-rank-line {
+  display: flex;
+  align-items: baseline;
+  gap: .7em;
+  flex-wrap: wrap;
+  font-size: var(--t-small);
+}
+.win-rank-points {
+  font-weight: 800;
+  color: var(--fg);
+  letter-spacing: var(--track-display);
+}
+.win-rank-band {
+  font-weight: 700;
+  color: var(--fg-mute);
+  letter-spacing: .08em;
+}
+.win-rank-goal {
+  margin-left: auto;
+  font-weight: 700;
+  color: var(--fg-mute);
+}
+.win-rank-bar {
+  height: 5px;
+  background: var(--shade-2);
+}
+.win-rank-fill {
+  display: block;
+  height: 100%;
+  background: var(--fg);
+}
+
+/* OVERRIDE 2 — ui.css lays .win-row out as a two-item flex row. With the set
+   marks and the per-player breakdown it becomes a two-line grid. */
+.win-summary .win-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  grid-template-areas: "name sets worth" "detail detail detail";
+  align-items: center;
+  gap: .1em .5em;
+  text-align: left;
+  padding: .34em .55em;
+}
+.win-summary .win-row:first-child { background: var(--surface); color: var(--fg-mute); }
+/* OWNER RULING 2026-08-07: the rows had all flattened to one grey and the
+   winner's line was distinguishable only by a hairline. It is the row the
+   screen exists for, so it is LIFTED off the well the others are cut into —
+   raised plate, brass rim, warm key along its top edge — while every other row
+   stays debossed. Material, not just colour, so it survives grayscale. */
+.win-summary .win-row.is-winner {
+  background:
+    linear-gradient(180deg, color-mix(in oklab, var(--foil) 16%, var(--surface)), var(--surface) 62%);
+  color: var(--fg);
+  box-shadow:
+    inset 0 0 0 2px var(--foil),
+    inset 0 1px 0 color-mix(in oklab, var(--foil) 45%, transparent),
+    0 2px 0 var(--shade-2),
+    0 6px 14px rgba(0, 0, 0, .35);
+}
+.win-summary .win-row.is-out { opacity: .55; }
+.win-name { grid-area: name; }
+.win-sets { grid-area: sets; font-weight: 800; font-variant-numeric: tabular-nums; }
+.win-worth { grid-area: worth; font-variant-numeric: tabular-nums; min-width: 3.4em; text-align: right; }
+.win-marks {
+  grid-area: name;
+  justify-self: end;
+  display: inline-flex;
+  gap: .16em;
+  margin-right: .5em;
+}
+.win-detail {
+  grid-area: detail;
+  font-size: .78em;
+  color: var(--fg-mute);
+  letter-spacing: .02em;
+}
+/* the two numbers an attrition finish was actually decided on */
+.win-sets.is-decider, .win-worth.is-decider {
+  color: var(--foil-ink);
+  font-weight: 800;
+}
+#win-reason { line-height: 1.4; font-size: .82em; }
+
+/* ══ P7 round-1 fixes ═══════════════════════════════════════════════════ */
+
+/* ── §0.9 tap floor: everything under 44px that this agent owns ─────────
+   Measured on 390×844 by tools/lib/audit.mjs, which now measures every
+   surface rather than whatever happened to be staged last:
+     .brief-tab        35px  (calc(--tap * .8))   — this file, fixed below
+     .chat-tab         34px  (calc(--tap * .78))  — OVERRIDE 3, rule in ui.css
+     .side-head .btn-icon 44×20 (2em box)         — OVERRIDE 4, rule in ui.css
+     .btn-small        34px  (calc(--tap * .78))  — OVERRIDE 5, rule in base.css
+   The three OVERRIDEs are reported to the design agent to be folded into
+   their own files; they are here so the floor holds in the meantime.
+   Left where they are because they are NOT mine to move:
+     .propcol          20px tall — table.css / table agent
+     hand card strips  39–44px exposed — table/hand.js fan overlap */
+.brief-tab { min-height: var(--tap); }
+
+/* OVERRIDE 3 — ui.css: `.chat-tab { min-height: calc(var(--tap) * .78) }` */
+.chat-tabs .chat-tab { min-height: var(--tap); }
+
+/* OVERRIDE 4 — ui.css: `.side-head .btn-icon { min-height:2em; width:2em; height:2em }`
+   at .68em context that computes to 44×20. The head keeps its small type; only
+   the close button grows back to the floor. */
+.side-head .btn-icon {
+  min-height: var(--tap);
+  width: var(--tap);
+  height: var(--tap);
+  font-size: 1.1em;
+}
+
+/* OVERRIDE 5 — base.css: `.btn-small { min-height: calc(var(--tap) * .78) }`.
+   Kick/Remove in the lobby are destructive and were 34px. */
+.lobby-row .btn-small { min-height: var(--tap); }
+
+/* ── §P7.6 the software keyboard ────────────────────────────────────────
+   OVERRIDE 6 — ui.css pins `.side { bottom: 0 }` to the LAYOUT viewport, which
+   iOS does not shrink for the keyboard: measured #chat-input and SEND both at
+   bottom 835 on an 844 viewport, 327px under the keyboard. ui/comms.js
+   publishes the occluded height as --kb-inset from visualViewport (§2). */
+.side { bottom: var(--kb-inset, 0px); }
+body.kb-open .side { transition: bottom .14s ease-out; }
+/* With the keyboard up the log is the first thing that can afford to shrink;
+   the composer is the reason the keyboard exists. */
+body.kb-open .log { flex: 0 1 22%; }
+body.kb-open .chat-row { position: sticky; bottom: 0; }
+
+/* ── §P7.12 the connection indicator ────────────────────────────────────
+   OVERRIDE 7 — ui.css draws `.conn` as a .55em (≈8px) dot whose only
+   explanation is a hover `title`, which a phone cannot produce. The dot keeps
+   its place; a word joins it when there is something to say. ui/hud.js builds
+   the label (public/index.html is architect-owned). */
+.conn { width: .7em; height: .7em; }
+.conn.is-off { animation: conn-pulse 1.1s ease-in-out infinite; }
+@keyframes conn-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .5; }
+}
+.conn-label {
+  font-size: .6em;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  color: var(--danger-ink);
+  white-space: nowrap;
+  max-width: 0;
+  overflow: hidden;
+  transition: max-width .18s ease, opacity .18s ease;
+  opacity: 0;
+}
+.conn-label.is-on { max-width: 9em; opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .conn.is-off { animation: none; }
+  .conn-label { transition: none; }
+}
+
+/* ── §P7.7 the response countdown, on the bar that asks the question ────
+   The HUD ring is 2.35em at the top of a 390px phone; being attacked is
+   answered at the bottom. Same ring, same urgency classes (ui.css .timer),
+   rendered inside #prompt by ui/prompt.js and driven by the one clock. */
+/* Bigger than the HUD's 2.35em ring: this one is the deadline you are answering,
+   and at 34×34 measured on a 390px phone it read as a chip, not a clock. */
+.prompt-timer { order: -1; align-self: center; width: 2.9em; height: 2.9em; }
+.prompt-timer .timer-text { font-size: .74em; }
+.hud-strip .strip-chip[title] { cursor: help; }
+
+/* ── §P7.3 a refusal that can speak ─────────────────────────────────────
+   The Play control used to render `<button disabled title="…">` — no shake, no
+   cue, no haptic, no sentence, and a measured 0 `denied` sounds in a full game.
+   It now stays live and refuses out loud (interact/index.js refuse()); this is
+   what "live but it will say no" looks like, and it is deliberately NOT the
+   0.38-opacity :disabled treatment, which reads as "nothing here". */
+.btn.is-refusing {
+  filter: saturate(.4);
+  opacity: .72;
+  box-shadow: inset 0 0 0 2px var(--danger);
+}
+.btn.is-refusing::after {
+  content: " ?";
+  font-weight: 900;
+  color: var(--danger-ink);
+}
+
+/* ── the PEEK: reading a card costs zero taps (owner directive, P7) ──────
+   Hover on desktop, touch-and-hold on a phone. ui/peek.js clones the live card
+   node from table/cardnode.js, so the face is the shipped renderer at a bigger
+   size — this file only sizes and frames it.
+
+   pointer-events:none on the whole layer is load-bearing: the peek sits over
+   the table while a drag can be starting underneath it, and it must never take
+   a click, a drag or a hit-test away from the card it is describing.
+
+   Theme-agnostic: every value below is a design token, so a light theme is a
+   token swap and not a rewrite of this block. */
+.peek {
+  position: fixed;
+  z-index: 92;                       /* over the table and the prompt, under .sheet (90 is the scrim, 92 clears the bar) */
+  pointer-events: none;
+  display: flex;
+  gap: .7em;
+  align-items: flex-start;
+  width: min(30em, 92vw);
+  max-height: 78vh;
+  padding: .7em .8em;
+  border-radius: calc(var(--radius) * 1.4);
+  border: 0;
+  background: var(--surface);
+  box-shadow: var(--card-drop-air);
+  opacity: 0;
+  transform: scale(.96);
+  transform-origin: center;
+  transition: opacity .1s ease-out, transform .12s cubic-bezier(.18, 1.5, .4, 1);
+}
+.peek.is-in { opacity: 1; transform: scale(1); }
+
+/* DELETED: four `.peek .card.is-peek` rules that neutralised a cloned table
+   node's pose variables. Nothing has cloned a node into the peek since
+   ui/peek.js defaulted its renderer to the cardart PEEK tier — the face it
+   builds is `.ca.ca-peek`, sized by cardart.css, and `is-peek` had no producer
+   left at all. tools/coverage.mjs (def3dd9) is what said so out loud: it listed
+   `class:is-peek` among its uncovered markers, which is a marker the
+   stylesheets style and the source can no longer make. Both halves are gone,
+   so the marker is too. */
+
+.peek-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: .3em; }
+.peek-kind {
+  font-size: .62em;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.peek-name { font-size: 1em; font-weight: 900; line-height: 1.15; color: var(--fg); }
+.peek-rule { margin: 0; font-size: .82em; line-height: 1.42; color: var(--fg-mute); }
+.peek-rows { margin: .15em 0 .1em; }
+.peek .dt-tag { align-self: flex-start; }
+.peek .dt-why { margin-top: .1em; }
+
+@media (max-width: 480px) {
+  /* One column on a phone: 30em beside a card does not fit 390px, and the
+     hold-peek is anchored above the thumb where height is the scarce axis. */
+  .peek { flex-direction: column; align-items: center; width: min(21em, 88vw); gap: .5em; }
+  .peek-body { width: 100%; }
+  .peek-name { text-align: center; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .peek { transition: opacity .1s linear; transform: none; }
+  .peek.is-in { transform: none; }
+}
+
+/* ── phone: the brief must stay readable at 390px ─────────────────────── */
+
+@media (max-width: 480px) {
+  /* The rail WRAPS on a phone instead of scrolling sideways.
+     Measured at 390px: `overflow-x: auto` left button.brief-tab[help-page] at
+     x=345 with width 67 — right edge 412, i.e. 22px off the screen, and the
+     mask made that read as decoration rather than as a control you cannot
+     reach. A scroller you have to discover is worse than two rows you can see.
+     scroll-snap and the fade mask go with it; neither means anything once
+     every tab is on screen at once. */
+  .brief-tabs {
+    flex-wrap: wrap;
+    overflow-x: visible;
+    scroll-snap-type: none;
+    -webkit-mask-image: none;
+    mask-image: none;
+    row-gap: .3em;
+  }
+  .brief-tab {
+    flex: 1 1 auto;
+    padding: 0 .55em;
+    font-size: .72em;
+    /* Two rows of tabs cost ~94px of an 82vh sheet; the page keeps the rest.
+       The 44px floor is not negotiable for a row that is now the only way to
+       change page (§0.9). */
+    min-height: var(--tap);
+  }
+  .brief-page { max-height: 52vh; }
+  .fa-col { width: 3.5em; }
+  .fa-tag { flex-basis: 4.4em; }
+  .op-who { flex-basis: 3.6em; }
+  .settings-label { flex-basis: 4.2em; }
+}
+
+/* ── discard browser (ui/discard.js) ──────────────────────────────────────
+   The pile grid is sized so a phone shows FIVE cards per row at ≥58px wide —
+   measured against §0.9's 44px floor with the 8px gutter, which is why the
+   card is the tap target and not a 28px mini. A 60-card pile is then twelve
+   rows of scroll instead of a wall of unreadable thumbnails. */
+
+.pile.is-openable { cursor: pointer; }
+.pile.is-openable:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
+@media (hover: hover) {
+  .pile.is-openable:hover .pile-label { color: var(--fg); }
+}
+
+.dv { --card-w: clamp(52px, 15vw, 76px); }
+.dv-panel { display: flex; flex-direction: column; gap: .4em; min-width: 0; }
+.dv-tab-n {
+  margin-left: .4em;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-mute);
+}
+.brief-tab.is-on .dv-tab-n { color: inherit; }
+
+.dv-filters { display: flex; flex-wrap: wrap; gap: .3em; }
+/* MOBILE REVIEW, round 4: measured 50×31 / 72×31 / 47×31 across the five
+   filters in both themes and orientations. This file names --tap "the §0.9
+   floor" three times and then multiplied it down by .7. */
+.chip.dv-chip {
+  cursor: pointer;
+  min-height: var(--tap);
+  padding: .3em .7em;
+  border-radius: 2px;
+  font-size: .66em;
+}
+.chip.dv-chip.is-on { color: var(--act-fg); background: var(--act); border-color: var(--accent); }
+.chip.dv-chip.is-none { opacity: .45; }
+.chip.dv-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.dv-count {
+  margin: 0;
+  font-size: .66em;
+  letter-spacing: 0;
+  color: var(--fg-mute);
+}
+
+.dv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-w), 1fr));
+  gap: .5em;
+  align-items: start;
+  /* room for the NEWEST badge, which sits .45em above the first card */
+  padding-top: .55em;
+}
+.dv-card {
+  position: relative;
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  /* §0.9: the CARD is the target, so the card must clear 44px on its short
+     axis. --card-w bottoms out at 52px and the 5:7 ratio makes it 72px tall. */
+  min-width: var(--card-w);
+}
+.dv-card .card { width: 100%; margin: 0; }
+.dv-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
+.dv-card.is-reading .card { box-shadow: 0 0 0 2px var(--accent), var(--card-drop-air); }
+@media (hover: hover) {
+  .dv-card:hover .card { box-shadow: 0 0 0 2px var(--accent), var(--card-drop-air); }
+}
+.dv-newest {
+  position: absolute;
+  left: 50%;
+  /* on the CARD, not under the button — the name caption now owns the space
+     below and the badge was landing behind it */
+  top: -.45em;
+  transform: translateX(-50%);
+  padding: .05em .35em;
+  border-radius: 2px;
+  font-size: .5em;
+  font-weight: 900;
+  letter-spacing: 0;
+  color: var(--act-fg);
+  background: var(--act);
+  white-space: nowrap;
+}
+
+.dv-reader:empty { display: none; }
+.dv-reader {
+  display: flex;
+  flex-direction: column;
+  gap: .4em;
+  padding: .5em;
+  border-radius: var(--radius);
+  background: var(--ground);
+  box-shadow: var(--deboss);
+}
+.dv-reader .card { width: calc(var(--card-w) * 1.9); align-self: center; }
+.dv-reader-head { display: flex; align-items: center; justify-content: space-between; gap: .4em; }
+.dv-reader-name { font-weight: 900; font-size: .84em; color: var(--fg); }
+
+.dv-rows { display: flex; flex-direction: column; margin-bottom: .3em; }
+.dv-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: .5em;
+  padding: .3em .1em;
+  font-size: .74em;
+  border-bottom: var(--hairline) solid var(--shade);
+}
+.dv-row:last-child { border-bottom: 0; }
+.dv-row-name { display: flex; align-items: center; gap: .35em; min-width: 0; color: var(--fg); }
+.dv-row-gone,
+.dv-row-live {
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.dv-row-gone { color: var(--fg-mute); font-weight: 700; }
+.dv-row.is-spent .dv-row-gone { color: var(--danger-ink); }
+.dv-row-live { color: var(--accent); min-width: 4.4em; text-align: right; }
+.dv-row-live.is-out { color: var(--danger-ink); }
+.dv-row.is-dead .dv-row-name { color: var(--fg-mute); }
+
+/* ── discard-to-limit: the confirm state is unmistakable (§P8) ────────────
+   `.is-refusing` (above) is what "live, but it will say no" looks like; this is
+   its opposite number, so the two are never a coin toss at a glance. The button
+   is still never `disabled` — the refusal has to be able to speak. */
+.btn.btn-primary.is-ready {
+  box-shadow: inset 0 0 0 2px var(--act-fg), 0 0 0 3px var(--accent), 4px 4px 0 var(--press-ink);
+}
+.chip.total.is-over {
+  color: var(--card-stock);
+  background: var(--hazard-fine);
+  box-shadow: none;
+}
+
+/* ── the game record (ui/journal.js) ─────────────────────────────────────
+   The drawer feed and the full log sheet share one beat row so the two can
+   never disagree about what a turning point looks like. Weight is carried by
+   the left rail and the mark glyph, never by hue alone (§0.9 contrast, and the
+   colourblind channel ART-DIRECTION §1 asks for). */
+
+/* §0.9 floor. Measured at .72×--tap: 49×32, which tools/touchtest.mjs flagged
+   in the side panel. The type stays small; the box does not. */
+.jr-open { font-size: .68em; min-height: var(--tap); padding: 0 .7em; }
+
+.jr-beat {
+  display: flex;
+  align-items: flex-start;
+  gap: .45em;
+  padding: .26em .4em .26em .35em;
+  border-bottom: var(--hairline) solid var(--shade);
+  border-left: 3px solid transparent;
+  color: var(--fg-mute);
+}
+.jr-beat:last-child { border-bottom: 0; }
+.jr-mark {
+  flex: 0 0 auto;
+  width: 1.1em;
+  text-align: center;
+  font-weight: 900;
+  color: var(--fg-mute);
+  line-height: 1.45;
+}
+.jr-body { flex: 1 1 auto; min-width: 0; }
+.jr-text { display: block; line-height: 1.4; overflow-wrap: anywhere; }
+.jr-turn {
+  flex: 0 0 auto;
+  font-size: .78em;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-mute);
+}
+
+/* routine keeps the old log's weight; attacks lift; turning points shout */
+.jr-beat.is-attack { color: var(--fg); border-left-color: var(--shade); }
+.jr-beat.is-attack .jr-mark { color: var(--accent); }
+.jr-beat.is-turn {
+  color: var(--fg);
+  font-weight: 700;
+  border-left-color: var(--accent);
+  background: linear-gradient(90deg, color-mix(in oklab, var(--accent) 14%, transparent), transparent 65%);
+}
+/* the mark is a SHAPE cue on a washed row; at --accent it measured 4.09:1
+   against that wash, and the left rail already carries the hue */
+.jr-beat.is-turn .jr-mark { color: var(--fg); }
+.jr-beat.is-mine { box-shadow: inset 2px 0 0 var(--band, var(--fg-mute)); }
+.jr-beat.is-alarm {
+  border-left-color: var(--danger);
+  background: linear-gradient(90deg, color-mix(in oklab, var(--danger) 20%, transparent), transparent 65%);
+}
+.jr-beat.is-alarm .jr-mark { color: var(--danger-ink); }
+
+.jr-cards { display: flex; flex-wrap: wrap; gap: .25em; margin-top: .22em; }
+.jr-card {
+  display: inline-flex;
+  align-items: center;
+  gap: .3em;
+  padding: .16em .45em;
+  border: 0;
+  border-radius: 2px;
+  /* §3.2 again: a card reference in the log is a stamped plate. */
+  background: var(--ground);
+  box-shadow: var(--deboss);
+  color: var(--fg);
+  font-size: .82em;
+  font-weight: 700;
+  cursor: pointer;
+  /* MOBILE REVIEW, round 4: measured 78×27 … 136×27 across ten of these in the
+     mission log. Every one opens a card reader, so every one is a control. */
+  min-height: var(--tap);
+}
+.jr-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (hover: hover) {
+  .jr-card:hover { box-shadow: var(--deboss), inset 0 0 0 2px var(--accent); color: var(--fg); }
+}
+
+.jr-panel { display: flex; flex-direction: column; gap: .4em; min-width: 0; }
+.jr-list { display: flex; flex-direction: column; }
+.jr-prose {
+  padding: .24em 0 .24em .5em;
+  border-left: 2px solid var(--shade);
+  font-size: .78em;
+  line-height: 1.4;
+  color: var(--fg-mute);
+}
+.jr-reader:empty { display: none; }
+.jr-reader {
+  display: flex;
+  flex-direction: column;
+  gap: .4em;
+  padding: .5em;
+  border-radius: var(--radius);
+  background: var(--ground);
+  box-shadow: var(--deboss);
+}
+.jr-reader .card { width: calc(var(--card-w) * 1.9); align-self: center; }
+
+/* the win-screen recap */
+.jr-recap { display: flex; flex-direction: column; gap: .35em; margin: .5em 0 .2em; text-align: left; }
+.jr-recap-head {
+  font-size: .64em;
+  font-weight: 900;
+  letter-spacing: 0;
+  color: var(--fg-mute);
+}
+.jr-approach {
+  margin: 0;
+  padding: .5em .6em;
+  border-radius: var(--radius);
+  font-size: .78em;
+  line-height: 1.4;
+  border-left: 3px solid var(--fg-mute);
+  background: var(--ground);
+}
+.jr-approach.is-good { border-left-color: var(--foil); color: var(--fg); }
+.jr-approach.is-good b { color: var(--foil-ink); }
+.jr-approach.is-bad { border-left-color: var(--danger); color: var(--fg); }
+.jr-approach.is-bad b { color: var(--danger-ink); }
+.jr-list.is-recap { font-size: .78em; max-height: 10em; overflow-y: auto; scrollbar-width: thin; }
+.jr-more { font-size: .74em; align-self: flex-start; }
+
+/* ── the announcement: a beat you cannot miss (§P8) ──────────────────────
+   The owner lost a final approach and could not tell that it had been broken.
+   The drawer is closed by default, so the disarm gets its own full-width slab
+   over the felt. Inert to the pointer: it must never eat a tap meant for a
+   card underneath it. */
+.announce {
+  position: fixed;
+  left: 50%;
+  top: calc(env(safe-area-inset-top) + 5.6em);
+  transform: translateX(-50%) translateY(-.5em);
+  z-index: 74;
+  display: flex;
+  align-items: center;
+  gap: .6em;
+  width: min(30em, 94vw);
+  padding: .55em .8em;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--card-drop-air);
+  opacity: 0;
+  transition: opacity .18s ease, transform .24s cubic-bezier(.18, 1.5, .4, 1);
+  pointer-events: none;
+}
+.announce.is-in { opacity: 1; transform: translateX(-50%) translateY(0); }
+/* THE SAME BUG AS THE TOAST, FOUND WHILE FIXING IT (round 8). `5.6em` is a
+   distance from the top of the screen, so it inherited the same defect from the
+   same cause. MEASURED at five players with a real disarm sentence, coverage of
+   each 44px collapsed seat:
+     390×844   y80, 46px tall   seat 1  51%   seat 2  42%
+     844×390   y67, 38px tall   seat 1  70%   seat 2  11%
+   It announces that a FINAL APPROACH has been broken — a fact about a SEAT —
+   across the seats it is about. Anchored to the foot of the shared table like
+   `.toast` (ui.css declares the anchor-name and the fallback reasoning), every
+   one of those goes to 0%. No shot drives a disarm, so nothing photographs this
+   state: it had to be measured, not looked at. */
+@media (max-width: 1023px) {
+  .announce {
+    position-anchor: --table-centre;
+    top: anchor(bottom, calc(env(safe-area-inset-top) + 5.6em));
+  }
+}
+.announce-flag {
+  flex: 0 0 auto;
+  padding: .28em .55em;
+  border-radius: 3px;
+  font-size: .64em;
+  font-weight: 900;
+  letter-spacing: 0;
+  background: var(--ground);
+  color: var(--fg);
+  white-space: nowrap;
+}
+.announce-text { font-size: .78em; font-weight: 700; line-height: 1.35; color: var(--fg); }
+.announce.is-bad {
+  background: var(--surface);
+  box-shadow: inset 0 0 0 2px var(--danger), var(--card-drop-air);
+}
+/* The same 2.18:1 as .strip-flag, from the same cause, on the same words —
+   `announce · dark` reported both runs in one frame. Same fix: the hazard is a
+   rule at the edge, the type is --danger-ink on the flag's own ground. */
+.announce.is-bad .announce-flag {
+  color: var(--danger-ink);
+  background: var(--hazard-fine) left / 5px 100% no-repeat, var(--ground);
+  padding-left: .85em;
+}
+.announce.is-mine,
+.announce.is-good {
+  background: var(--surface);
+  box-shadow: inset 0 0 0 2px var(--accent), var(--card-drop-air);
+}
+.announce.is-mine .announce-flag,
+.announce.is-good .announce-flag { background: var(--act); color: var(--act-fg); }
+@media (prefers-reduced-motion: reduce) {
+  /* §0.9: motion collapses to a fade; the message itself does not go quiet. */
+  .announce { transition: opacity .18s ease; transform: translateX(-50%); }
+  .announce.is-in { transform: translateX(-50%); }
+}
+
+/* OVERRIDE 5 — the RECAP is the scroll region, not the modal.
+   MEASURED after the P8 recap landed: the box was 787px tall in a 720px desktop
+   viewport. The first fix scrolled the whole box, which is why win@desktop cut
+   "Leave room" at the viewport edge and win-recap@desktop showed the roundel
+   sliced off the top — one end was always missing. ui.css now caps .win-box at
+   the overlay height and pins the ceremony and the two controls; everything
+   variable-length lives in #win-summary, and that is what scrolls. */
+.win-summary {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  /* ROUND-5 REVIEW (win-recap@desktop): the fade and the sticky button were
+     fighting for the same 1.1em. The button is `align-self: flex-start`, so it
+     covered the LEFT third of the row underneath it and the fade greyed the
+     rest — a half-sentence with a control parked on top of it, on the most
+     celebratory screen in the game. It read as a z-index accident because it
+     was one. P10 LOOK: the scroller now carries the shared .scroll-edge
+     treatment (ui.css), with the BOTTOM feather zeroed for exactly the round-5
+     reason — the full-width sticky .jr-more IS the bottom edge and its own
+     ramp carries the cue. The TOP keeps the shared feather + shades: the first
+     recap row used to slice against the pinned ceremony with nothing saying
+     "more above" once scrolled. */
+  --edge-feather-bot: 0em;
+  padding-top: .45em;
+}
+.win-summary::-webkit-scrollbar { width: 5px; }
+.win-summary::-webkit-scrollbar-thumb { background: var(--fg-mute); border-radius: 999px; }
+/* The recap list is INSIDE that scroller now, so its own 10em cap would make
+   two nested scroll regions with one thumb between them. */
+.jr-list.is-recap { max-height: none; overflow: visible; }
+/* MEASURED (touchtest, `finished`): "Open the full log" is the last thing in the
+   recap, so once the recap became the scroll region the button measured 186×0
+   reachable — the owner's own bug report twice over. It rides the bottom, and
+   it rides the WHOLE bottom: full width, opaque, with the apron's own hairline
+   above it, so a row scrolling under it is a scroll and not a collision. */
+.win-summary .jr-more {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  align-self: stretch;
+  width: 100%;
+  margin-top: .25em;
+  border-radius: 0;
+  background: var(--surface);
+  /* ROUND-2 LOOK #4 (win@phone): the fold cut the last HOW IT WENT row
+     mid-line with nothing saying "there is more" — the round-5 fix removed the
+     scroller's mask (the note on .win-summary above) and left no cue at all.
+     The cue comes back as the FOOTER'S, not the scroller's: a soft rise of the
+     well's own --ground-deep above the button, so the sliced row sinks into
+     the well it is scrolling inside instead of ending at a hard edge. A
+     box-shadow, deliberately: it needs no DOM box, so it cannot re-enter the
+     buried-text hit test the way a pseudo-element overlay would, and it cannot
+     collide with the sticky button the old mask fought. Soft blur is
+     sanctioned here — this is inside #win-overlay, ART §1's ceremony carve-out
+     — and the wash is the well's own colour under cream type, so the sliced
+     row's contrast goes UP as it fades. */
+  box-shadow:
+    inset 0 0 0 1px var(--fg-mute),
+    0 -1px 0 var(--shade-2),
+    0 -18px 14px -6px var(--ground-deep);
+}
+
+/* The card's NAME, under its mini face. At the mini tier table.css degrades the
+   face to band + art + coin, so eleven discarded actions all read "ACTION 3M"
+   (measured on discard-pile@phone) and the pile answered none of the questions
+   it exists for. Two lines, then it wraps — nothing truncates. */
+.dv-name {
+  display: block;
+  margin-top: .2em;
+  font-size: .58em;
+  line-height: 1.2;
+  font-weight: 700;
+  color: var(--fg-mute);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.dv-card.is-reading .dv-name { color: var(--fg); }
+
+/* ══ THE FLIGHT LOG ═══════════════════════════════════════════════════════
+
+   ui/stats.js's panel, and the second reading mark on the home rail that opens
+   it. Both live here rather than in ui.css because ui.css owns the rail's grid
+   and the sheet chassis, and neither has to change to carry this: the panel is
+   a `.sheet-body` like every other, and the marks group takes the rail's
+   existing `help` cell.
+
+   BANDS ARE SEPARATED BY A LINE, NOT BY A BOX (ART §3.2). Three stacked
+   rounded-rect panels on a slightly-lighter ground inside a panel is the exact
+   dashboard stack the art direction was written to kill, and a stats screen is
+   where it happens by reflex. The bands are divided by the same 1px stencil the
+   apron uses for its markings, and nothing here has a border of its own.
+
+   NO SET COLOURS, with ONE exception. §1 reserves hue for set identity; a stats
+   panel is the classic place to reach for ten of them. `.fl-swatch` is a
+   card-colour swatch naming a card colour, which is what the channel is for.
+   Everything else on this surface is --fg / --fg-mute on --surface.
+
+   NO COUNT-UP, NO GROW-IN, NO BAR CHART. A number that animates claims it just
+   changed; a record being consulted did not. `tabular-nums` is already on every
+   figure via base.css's .mono, so 300 flights reflows nothing and there is
+   nothing for an animation to hide.                                          */
+
+/* ── the rail's reading corner ─────────────────────────────────────────── */
+
+/* Takes the `help` grid area from ui.css so the rail's template is untouched.
+   Both children keep .home-help's painted-mark treatment; only the cell is new.
+
+   STACKED, AND THAT IS A MEASUREMENT RATHER THAN A PREFERENCE. The rail's outer
+   columns are `minmax(0, 1fr)` either side of an `auto` centre, and the centre
+   is `width: min(44em, 100%)` — so at 1280 the resolved template is
+   `92.9px / 939.3px / 92.9px` and at 390 it is `171.7px / 171.7px`. "How to
+   play" alone is 80px of that 93. Two marks cannot share a line at either
+   width, and a `flex-wrap` that wraps at every viewport is a column pretending
+   not to be one.
+
+   So it is a column, deliberately: two lines of apron lettering in the frame's
+   corner, `--tap` apart, which is the same vocabulary the single mark already
+   used. No row gap — the 44px tap floor is the spacing, and anything on top of
+   it would read as two separate rail entries rather than one reading corner.
+
+   Widening the centre column instead would be the other fix, and it belongs to
+   ui.css, which this agent does not own (see the report). */
+/* Row, not column. This stacked only because ui.css's rail gave the outer
+   tracks a minmax(0) floor that resolved to 92.9px at 1280 — "How to play"
+   alone is 80px of that, so a second mark had nowhere to go. The rail now
+   floors both outer tracks at 10em symmetrically (an EQUAL floor cannot move
+   the centre, which was the original objection), so the two reading marks sit
+   on one line. */
+.home-marks {
+  grid-area: help;
+  justify-self: start;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: .2em .9em;
+  min-width: 0;
+}
+
+/* ── the panel ─────────────────────────────────────────────────────────── */
+
+.fl { display: flex; flex-direction: column; gap: .7em; min-width: 0; }
+.fl-body { display: flex; flex-direction: column; gap: .7em; min-width: 0; }
+
+/* Every stats.status that has something to say gets this. It is a NOTE, not an
+   error: `no-storage` and `future-version` are both ordinary situations a real
+   player is in, and neither may look like a crash. So: the apron's own hairline
+   down the left edge, the same device .prompt-why uses for its refusal
+   sentence, and no hazard material anywhere. */
+.fl-note {
+  margin: 0;
+  padding: .5em 0 .5em .7em;
+  font-size: var(--t-small);
+  line-height: 1.45;
+  color: var(--fg-mute);
+  /* A GRADIENT, not the bare colour. `background: var(--stencil-hi) left / 3px
+     100% no-repeat` is what the first draft said, copying .prompt-why — and a
+     `/size` only applies to background IMAGES, so a bare colour ignores it and
+     paints the whole box. The result was a tinted panel inside a panel, which
+     is the §3.2 stack this file's header refuses. Two stops of the same colour
+     is an image and takes the 3px. */
+  background: linear-gradient(var(--stencil-hi), var(--stencil-hi)) left / 3px 100% no-repeat;
+  text-wrap: pretty;
+}
+
+.fl-seg { flex: 0 0 auto; }
+
+.fl-band { display: flex; flex-direction: column; gap: .45em; min-width: 0; }
+/* The divider. One hairline above each band after the first — the marking
+   between two registers of an apron, and the only structure on this screen. */
+.fl-band + .fl-band,
+.fl-band + .fl-locked { padding-top: .7em; box-shadow: inset 0 1px 0 var(--shade-2); }
+
+/* ── band 0: the tier — Bronze / Silver / Gold over sortie points ──────── */
+
+/* A stencilled word and three square pips. Deliberately NOT a medal: §507.9
+   keeps drawn insignia out of the project, ART §1 keeps foil for the victory
+   modal, and the hue channel stays reserved for set identity — so the tier is
+   the same two-ink vocabulary as the form line below it, and "which tier" is
+   carried by the word and the pip count, never by a colour. */
+.fl-tier { display: flex; align-items: center; gap: .6em; min-width: 0; }
+.fl-tier-name {
+  font-size: var(--t-lede);
+  font-weight: 800;
+  color: var(--fg);
+  letter-spacing: var(--track-display);
+}
+/* Below Bronze the name is a status, not an achievement — mute it. */
+.fl-tier-name.is-untiered { color: var(--fg-mute); }
+.fl-pips { display: flex; gap: 4px; }
+.fl-pip {
+  width: .55em;
+  height: .55em;
+  box-shadow: inset 0 0 0 1.5px var(--fg-mute);
+}
+.fl-pip.is-filled { background: var(--fg); box-shadow: none; }
+/* The road to the next tier. Same track/fill pair as the win screen's bar. */
+.fl-tierbar { height: 6px; background: var(--shade-2); }
+.fl-tierbar-fill { display: block; height: 100%; background: var(--fg); }
+.fl-tier-line {
+  margin: 0;
+  font-size: var(--t-small);
+  font-weight: 700;
+  color: var(--fg-mute);
+}
+
+/* ── band 1: one number, and the denominator against it ────────────────── */
+
+.fl-band-rate { align-items: center; gap: .1em; text-align: center; }
+/* --t-display, mono, tabular. §4: figures are "the character of the thing", and
+   a win rate is a figure before it is a headline — it is not set in the display
+   face for the same reason the money coins are not. */
+.fl-rate {
+  margin: 0;
+  font-size: var(--t-display);
+  font-weight: 800;
+  line-height: 1;
+  color: var(--fg);
+  letter-spacing: var(--track-display);
+}
+/* IMMEDIATELY adjacent, and never optional. A 62% at this size over three
+   flights is a lie told in a large typeface; the count is what stops it. */
+.fl-rate-den {
+  margin: 0;
+  font-size: var(--t-small);
+  font-weight: 700;
+  color: var(--fg-mute);
+}
+
+/* ── band 2/3: the figure strips ───────────────────────────────────────── */
+
+/* WRAP, NEVER SCROLL. A stat strip you have to swipe is one nobody reads, so
+   there is no overflow-x here and there never will be: at 390px the five cells
+   fall to three-and-two and both rows are fully on screen. The basis is 4.2em
+   because "shootdowns" is the longest label in the set and sets the floor. */
+.fl-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5em .9em;
+  min-width: 0;
+}
+.fl-cell {
+  flex: 1 1 4.2em;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: .05em;
+}
+.fl-cell-num {
+  font-size: var(--t-title);
+  font-weight: 800;
+  line-height: 1.05;
+  color: var(--fg);
+  letter-spacing: var(--track-display);
+}
+.fl-cell-label {
+  font-size: var(--t-micro);
+  font-weight: 700;
+  color: var(--fg-mute);
+  overflow-wrap: anywhere;
+}
+
+/* The final-approach four sit a step below the record strip: this is the
+   texture, not the headline figures. */
+.fl-strip-fa .fl-cell-num { font-size: var(--t-lede); }
+
+.fl-head {
+  margin: 0;
+  font-size: var(--t-lede);
+  font-weight: 800;
+  color: var(--fg);
+  letter-spacing: var(--track-display);
+}
+
+/* The one line of copy on the screen, and the reason band 3 exists: it is the
+   only statistic in the set with a rivalry in it. Full ink, because it is a
+   sentence the player is meant to read rather than a caption. */
+.fl-rivalry {
+  margin: 0;
+  font-size: var(--t-small);
+  font-weight: 700;
+  line-height: 1.45;
+  color: var(--fg);
+  text-wrap: pretty;
+}
+
+/* ── the label/value rows ──────────────────────────────────────────────── */
+
+.fl-rows { display: flex; flex-direction: column; }
+.fl-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: .8em;
+  padding: .32em 0;
+  font-size: var(--t-small);
+  box-shadow: inset 0 -1px 0 var(--shade);
+}
+.fl-row:last-child { box-shadow: none; }
+.fl-row-label { color: var(--fg-mute); min-width: 0; }
+.fl-row-value {
+  flex: 0 0 auto;
+  font-weight: 800;
+  color: var(--fg);
+  text-align: right;
+}
+.fl-fav { display: flex; align-items: center; gap: .4em; }
+/* THE ONE SET COLOUR ON THIS SURFACE (§1). Same geometry as .brief-swatch in
+   the rules sheet, so the two places the app shows a set colour outside a card
+   show it the same way. */
+.fl-swatch {
+  display: inline-block;
+  width: .8em;
+  height: .8em;
+  flex: 0 0 auto;
+  border-radius: 2px;
+  background: var(--band, var(--fg-mute));
+  box-shadow: 0 0 0 1px var(--shade);
+}
+
+/* ── the form line: last N, oldest left ────────────────────────────────── */
+
+.fl-formline { display: flex; align-items: center; gap: .55em; padding-top: .2em; }
+.fl-form-label {
+  flex: 0 0 auto;
+  font-size: var(--t-micro);
+  font-weight: 700;
+  color: var(--fg-mute);
+}
+.fl-form { display: flex; flex-wrap: wrap; gap: 3px; min-width: 0; }
+/* Stencil marks, not a sparkline. Filled = won, hollow = lost, dashed edge =
+   a flight whose record has a hole in it (gaps > 0). Square corners, because
+   ART §6's drawing style has square corners always. Decorative by §0.9 — the
+   strip carries one accessible sentence and each mark is aria-hidden. */
+.fl-mark {
+  width: 9px;
+  height: 12px;
+  flex: 0 0 auto;
+  box-shadow: inset 0 0 0 1.5px var(--fg-mute);
+}
+.fl-mark.is-won { background: var(--fg); box-shadow: none; }
+.fl-mark.is-gapped { box-shadow: inset 0 0 0 1.5px var(--fg-mute); opacity: .55; }
+.fl-mark.is-won.is-gapped { background: var(--fg-mute); }
+
+/* ── the honest sentences: threshold, caveat, footer ───────────────────── */
+
+/* The threshold line, and the "this filter has no flights" line. One string
+   naming what unlocks and how far away it is — a visible threshold is a
+   returning-player hook that costs exactly this much. */
+.fl-locked,
+.fl-caveat {
+  margin: 0;
+  font-size: var(--t-small);
+  line-height: 1.45;
+  color: var(--fg-mute);
+  text-wrap: pretty;
+}
+.fl-caveat { font-size: var(--t-micro); }
+
+/* THE FOOTER RIDES THE BOTTOM OF THE SCROLLER.
+   MEASURED (touchtest, iPhone, 300 flights): "Clear this logbook" was 136×44
+   with 14px reachable, and 0px once a filter shortened the panel — a control on
+   screen and untappable. Identical defect and identical fix to the win recap's
+   `.jr-more` above. Pinning the whole footer rather than just the button also
+   keeps rule 1's sentence — the date, the count, "kept in this browser only" —
+   against the numbers it qualifies at every scroll position, which is where it
+   belongs anyway. Opaque, full width, hairline on top, so a band scrolling
+   under it is a scroll and not a collision. */
+.fl-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: .5em;
+  margin-top: auto;
+  padding: .6em 0 .15em;
+  background: var(--surface);
+  /* P10 LOOK: the hairline alone left the row above it hard-cut mid-glyph
+     ("Fastest win" sliced on flightlog@desktop). Same ramp the win recap's
+     .jr-more carries — the shared scroll-edge treatment's answer for a sticky
+     footer, where the scroller's own bottom devices sit hidden behind the
+     opaque footer (ui.css .scroll-edge). */
+  box-shadow: inset 0 1px 0 var(--shade-2), 0 -14px 12px -6px var(--shade-2);
+}
+
+/* Rule 1 lives here: the date and the count, never the word "lifetime". */
+.fl-foot {
+  margin: 0;
+  font-size: var(--t-micro);
+  line-height: 1.45;
+  color: var(--fg-mute);
+  text-wrap: pretty;
+}
+
+/* ── zero flights ──────────────────────────────────────────────────────── */
+
+/* Reachable only when the logbook has something to explain (a blob a newer
+   build wrote, or one that could not be parsed) — otherwise the rail mark is
+   not on screen at all. One sentence and a way out; never a set of bands
+   filled with zeros. */
+.fl-empty { display: flex; flex-direction: column; align-items: stretch; gap: .7em; }
+.fl-empty-text {
+  margin: 0;
+  font-size: var(--t-small);
+  line-height: 1.5;
+  color: var(--fg-mute);
+  text-wrap: pretty;
+}
+
+/* ── clearing it ───────────────────────────────────────────────────────── */
+
+.fl-clear { align-self: flex-start; font-size: var(--t-small); }
+/* Two taps, and the second one names the number it is about to erase. NOT
+   .btn-danger: §1 reserves hazard material for danger in play, and a permanent
+   striped button in a settings-shaped panel spends the material a long way from
+   where the final-approach rails need it. */
+.fl-confirm { display: flex; flex-direction: column; gap: .45em; }
+.fl-confirm-text { margin: 0; font-size: var(--t-small); font-weight: 700; color: var(--fg); }
+.fl-confirm-row { display: flex; flex-wrap: wrap; gap: .45em; }
+.fl-confirm-row .btn { flex: 1 1 8em; font-size: var(--t-small); }
+
+/* ── desktop: the sheet is 44em, and two columns is what that width is for ── */
+
+@media (min-width: 720px) {
+  /* Band 1 stops being a stacked block and sits beside the record strip: at
+     44em the centred percentage alone left ~28em of empty panel to its right,
+     which is the "dead apron" defect the home screen was rebuilt to fix. */
+  .fl-band-rate {
+    flex-direction: row;
+    align-items: baseline;
+    justify-content: flex-start;
+    gap: .6em;
+    text-align: left;
+  }
+  .fl-rate-den { font-size: var(--t-lede); }
+  /* Five cells across one 44em row rather than three-and-two. */
+  .fl-cell { flex: 1 1 5.5em; }
+}

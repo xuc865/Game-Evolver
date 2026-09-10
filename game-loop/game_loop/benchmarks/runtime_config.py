@@ -51,8 +51,8 @@ def runtime_config_from_environment(
     runtime_type = os.environ.get("GAME_LOOP_MAKER_RUNTIME", "opengame").strip().casefold()
     if runtime_type in {"deepseek-harness", "deepseek_harness", "dsh"}:
         return DeepSeekHarnessRuntimeConfig(
-            provider=os.environ.get("DSH_PROVIDER", "deepseek-official").strip(),
-            model=os.environ.get("DSH_MODEL", os.environ.get("CODEX_MODEL", "deepseek-v4-flash")).strip(),
+            provider=os.environ.get("DSH_PROVIDER", "qwen-official").strip(),
+            model=os.environ.get("DSH_MODEL", os.environ.get("CODEX_MODEL", "Qwen3.8-27B-node1")).strip(),
             backbone_provider=provider_name,
             max_tokens=(
                 None

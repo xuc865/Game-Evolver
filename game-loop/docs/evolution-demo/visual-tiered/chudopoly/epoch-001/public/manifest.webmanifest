@@ -1,0 +1,21 @@
+{
+  "name": "CHUDOPOLY",
+  "short_name": "Chudopoly",
+  "description": "An Air Force card table. Monopoly Deal, flight-line edition.",
+  "id": "/",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0B0D10",
+  "theme_color": "#15171C",
+  "launch_handler": { "client_mode": "focus-existing" },
+  "categories": ["games"],
+  "icons": [
+    { "src": "/icon.svg?v=1", "type": "image/svg+xml", "sizes": "any", "purpose": "any" },
+    { "src": "/icons/icon-192.png?v=1", "type": "image/png", "sizes": "192x192", "purpose": "any" },
+    { "src": "/icons/icon-512.png?v=1", "type": "image/png", "sizes": "512x512", "purpose": "any" },
+    { "src": "/icons/icon-maskable-192.png?v=1", "type": "image/png", "sizes": "192x192", "purpose": "maskable" },
+    { "src": "/icons/icon-maskable-512.png?v=1", "type": "image/png", "sizes": "512x512", "purpose": "maskable" }
+  ]
+}

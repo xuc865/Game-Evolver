@@ -35,21 +35,20 @@ def build_verifier_env(*, gcbench_root: Path, project_root: Path | None = None) 
         env["PATH"] = str(Path(godot).parent) + os.pathsep + env.get("PATH", "")
 
     env.setdefault("GAMECRAFT_BENCH_JUDGE", "openai")
-    # The judge is a separate service from the backbone. Keep an explicit
-    # judge route from being replaced by inherited backbone OPENAI_* values.
-    if env.get("GAMECRAFT_BENCH_JUDGE_ALLOW_KEYLESS") == "1":
-        env.setdefault("GAMECRAFT_BENCH_JUDGE_OPENAI_API_KEY", "EMPTY")
-    if env.get("GAMECRAFT_BENCH_JUDGE_OPENAI_API_KEY"):
-        env["OPENAI_API_KEY"] = env["GAMECRAFT_BENCH_JUDGE_OPENAI_API_KEY"]
+    # The judge is a separate service from the backbone. Prefer the current
+    # GLM deployment for rubric scoring and avoid inheriting stale DeepSeek
+    # routing. The backend itself now supports a truly keyless request path.
+    glm_base = env.get("GLM_BASE_URL") or "http://11.213.4.72:80/v1"
+    glm_model = env.get("GLM_MODEL") or "GLM-5.3-Flash-node1"
+    env.setdefault("GAMECRAFT_BENCH_JUDGE_OPENAI_BASE_URL", glm_base)
+    env.setdefault("GAMECRAFT_BENCH_JUDGE_MODEL", glm_model)
     if env.get("GAMECRAFT_BENCH_JUDGE_OPENAI_BASE_URL"):
         env["OPENAI_BASE_URL"] = env["GAMECRAFT_BENCH_JUDGE_OPENAI_BASE_URL"]
-    if env.get("DEEPSEEK_API_KEY") and not env.get("OPENAI_API_KEY"):
-        env["OPENAI_API_KEY"] = env["DEEPSEEK_API_KEY"]
-    if env.get("DEEPSEEK_API_BASE") and not env.get("OPENAI_BASE_URL"):
-        env["OPENAI_BASE_URL"] = env["DEEPSEEK_API_BASE"]
+    if env.get("OPENAI_BASE_URL") in {"", None}:
+        env["OPENAI_BASE_URL"] = glm_base
     env.setdefault(
         "GAMECRAFT_BENCH_JUDGE_MODEL",
-        env.get("DEEPSEEK_JUDGE_MODEL") or env.get("DEEPSEEK_MODEL") or "deepseek-v4-flash",
+        glm_model,
     )
     return env
 

@@ -1,0 +1,77 @@
+{
+ "$schema": "chud-fixture/1",
+ "name": "lobby-guest",
+ "description": "The same room from a SECOND HUMAN seat: host block hidden, ruleset read-only, no per-seat controls — the lobby most players actually see.",
+ "seed": 1337,
+ "selfId": "38838b20-cbdc-440f-a333-b3cfeb624e39",
+ "room": "MF3D",
+ "recordedAt": "2026-08-07T20:36:27.128Z",
+ "states": [
+  {
+   "type": "state",
+   "code": "MF3D",
+   "phase": "lobby",
+   "players": [
+    {
+     "id": "6af1bf54-d0e5-486c-ae08-bd498ee4e850",
+     "name": "HOST",
+     "connected": true,
+     "isBot": false,
+     "botMode": null
+    },
+    {
+     "id": "f31bd949-9521-4bd8-ad9c-8f5157d60e78",
+     "name": "Viper",
+     "connected": true,
+     "isBot": true,
+     "botMode": "neutral"
+    },
+    {
+     "id": "546b8897-b0c4-4a72-a91c-711a1bb4340b",
+     "name": "Ace",
+     "connected": true,
+     "isBot": true,
+     "botMode": "aggressive"
+    },
+    {
+     "id": "38838b20-cbdc-440f-a333-b3cfeb624e39",
+     "name": "SQUADMATE",
+     "connected": true,
+     "isBot": false,
+     "botMode": null
+    }
+   ],
+   "hostId": "6af1bf54-d0e5-486c-ae08-bd498ee4e850",
+   "game": null,
+   "turnTimer": null,
+   "responseTimer": null,
+   "timers": {
+    "turn": 60,
+    "response": 45
+   },
+   "rules": {
+    "preset": "chudopoly",
+    "winRule": "finalApproach",
+    "setsToWin": 3,
+    "pureSetRequired": false,
+    "passGoRestartsTurn": false,
+    "suddenDeath": "off",
+    "deck": {
+     "inspector_general": 2,
+     "opsec": 3,
+     "midnight_requisition": 3,
+     "tdy_orders": 3,
+     "finance_office": 3,
+     "roll_call": 3,
+     "pcs_orders": 10,
+     "upgrade": 3,
+     "foc": 2,
+     "surge_ops": 2,
+     "chud": 2,
+     "wildAny": 2,
+     "wildPairs": 7
+    }
+   }
+  }
+ ]
+}

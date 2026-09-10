@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: gates (no browser)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # package.json engines: >=20 <25. Test the floor and the ceiling —
+        # the client is native ES modules, so a Node version that parses the
+        # engine differently is exactly the failure this catches.
+        node-version: ['20', '24']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+      - run: npm ci
+
+      - name: syntax
+        run: npm run check
+      - name: unit + integration tests
+        run: npm test
+
+      # The six gates from `npm run verify` that need no browser. The other
+      # eight drive real Chromium through Playwright and are left to the local
+      # `npm run verify` — a CI runner has no GPU, and ARCHITECTURE §8 is
+      # explicit that a gate which measures the wrong thing is worse than no
+      # gate. These six measure the same thing everywhere.
+      - name: gate — no binary assets outside the allowlist
+        run: npm run tool:assets
+      - name: gate — client discipline (no innerHTML in table/anim, no inline handlers)
+        run: npm run tool:client
+      - name: gate — websocket abuse vectors + ping/pong liveness
+        run: npm run tool:server
+      - name: gate — logbook fuzz + a full seeded game into the store
+        run: node tools/statsfuzz.mjs --game
+
+      - name: audit
+        run: npm audit --audit-level=high

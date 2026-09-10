@@ -45,7 +45,7 @@ PROJECTS_ROOT = Path(
     )
 )
 SEED_ARTIFACT = ROOT / "experiments" / "seed_artifacts" / "puzzle-sokoban-scaffold"
-BASE_CONFIG = ROOT / "experiments" / "configs-v4" / "gcbench-L4_deepseek_v4.json"
+BASE_CONFIG = ROOT / "experiments" / "configs-v4" / "gcbench-L4_glm5.2.json"
 INNER_CONFIG = ROOT / "experiments" / "agentx" / "inner_harness_gcbench.json"
 OUTER_CONFIG = ROOT / "experiments" / "agentx" / "outer_harness.json"
 RUNTIME_PROFILES = {
@@ -55,9 +55,9 @@ RUNTIME_PROFILES = {
         else "opengame-profile.example.json"
     ),
     "deepseek-harness": ROOT / "experiments" / "inner-agent" / (
-        "deepseek-harness-profile.local.json"
-        if (ROOT / "experiments" / "inner-agent" / "deepseek-harness-profile.local.json").is_file()
-        else "deepseek-harness-profile.example.json"
+        "qwen38-harness-profile.local.json"
+        if (ROOT / "experiments" / "inner-agent" / "qwen38-harness-profile.local.json").is_file()
+        else "glm53-harness-profile.local.json"
     ),
 }
 STUDIO_OPENGAME_SYSTEM = ROOT / "experiments" / "inner-agent" / "opengame-studio-system.md"
@@ -68,11 +68,9 @@ SNAPSHOT_SCHEMA = "game-evolver-engine-snapshot.v1"
 LOCAL_ENV_FILES = (ROOT / ".env.local", ROOT / "experiments" / ".env")
 ALLOWED_RUNTIME_ENV = frozenset({
     "CODEX_API_BASE", "CODEX_MODEL", "CODEX_PROVIDER",
-    "DEEPSEEK_API_KEY", "DEEPSEEK_API_BASE", "DEEPSEEK_BASE_URL", "DEEPSEEK_MODEL",
-    "DEEPSEEK_ROUTE_MODE", "DEEPSEEK_POLARIS_BASE_URL", "DEEPSEEK_POLARIS_API_KEY",
-    "DEEPSEEK_POLARIS_MODEL",
     "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL",
-    "GLM_BASE_URL",
+    "GLM_BASE_URL", "GLM_MODEL",
+    "QWEN_BASE_URL", "QWEN_MODEL",
     "OPENGAME_REASONING_API_KEY", "OPENGAME_REASONING_BASE_URL",
     "OPENGAME_REASONING_MODEL", "OPENGAME_REASONING_PROVIDER",
 })

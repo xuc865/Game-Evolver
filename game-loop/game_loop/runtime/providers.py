@@ -4,7 +4,6 @@ import json
 import os
 import urllib.error
 import urllib.request
-import zlib
 from dataclasses import dataclass
 from typing import Mapping
 from urllib.parse import urlparse
@@ -37,11 +36,6 @@ class BackboneProviderSpec:
         )
         if pooled_api_key and env.get(f"CODEX_API_KEYS_{self.provider_id.upper()}"):
             credential_env = f"CODEX_API_KEYS_{self.provider_id.upper()}"
-        # Backends historically use *_API_BASE while the provider registry
-        # predates that convention and stores *_BASE_URL. Prefer the explicit
-        # provider-specific API setting before the generic CODEX endpoint;
-        # otherwise a GLM/Kimi/Qwen HTTP endpoint can accidentally replace the
-        # DeepSeek rubric judge endpoint and make the judge look unready.
         provider_prefix = self.provider_id.upper()
         provider_base = (
             env.get(self.base_url_env)
@@ -57,23 +51,6 @@ class BackboneProviderSpec:
             or self.model
         )
         route_id = "official"
-        if self.provider_id == "deepseek" and str(
-            env.get("DEEPSEEK_ROUTE_MODE", "")
-        ).strip().casefold() == "mixed":
-            polaris_base = str(env.get("DEEPSEEK_POLARIS_BASE_URL", "")).strip()
-            polaris_key = str(env.get("DEEPSEEK_POLARIS_API_KEY", "")).strip()
-            polaris_model = str(env.get("DEEPSEEK_POLARIS_MODEL", "")).strip()
-            salt = str(env.get("GAME_LOOP_PROVIDER_KEY_SALT", "")).strip()
-            if polaris_base and polaris_key and polaris_model and salt and (
-                zlib.crc32(f"deepseek-route:{salt}".encode("utf-8")) % 2
-            ):
-                provider_base = polaris_base
-                if provider_base.endswith("/chat/completions"):
-                    provider_base = provider_base[: -len("/chat/completions")]
-                pooled_api_key = polaris_key
-                provider_model = polaris_model
-                credential_env = "DEEPSEEK_POLARIS_API_KEY"
-                route_id = "polaris"
         return ResolvedBackbone(
             provider_id=self.provider_id,
             # Experiment backends historically expose CODEX_API_BASE/CODEX_MODEL.
@@ -189,16 +166,14 @@ PROVIDERS: dict[str, BackboneProviderSpec] = {
         "deployment-provided OpenAI-compatible endpoint", False, True,
     ),
     "glm": BackboneProviderSpec(
-        "glm", "http://11.213.4.72:80/v1", "GLM-5.3-Flash",
+        "glm", "http://11.213.4.72:80/v1", "GLM-5.3-Flash-node1",
         ("ZAI_API_KEY", "GLM_API_KEY", "BIGMODEL_API_KEY"), "GLM_BASE_URL", "GLM_MODEL",
         "deployment-provided OpenAI-compatible endpoint", False, True,
-        "https://openrouter.ai/api/v1", "z-ai/glm-5.2", ("OPENROUTER_API_KEY",),
     ),
     "qwen": BackboneProviderSpec(
         "qwen", "http://29.116.237.141:8080/v1", "Qwen3.8-27B-node1",
         ("DASHSCOPE_API_KEY", "QWEN_API_KEY"), "QWEN_BASE_URL", "QWEN_MODEL",
         "deployment-provided OpenAI-compatible endpoint", False, True,
-        "https://openrouter.ai/api/v1", "qwen/qwen3.6-27b", ("OPENROUTER_API_KEY",),
     ),
     "claude": BackboneProviderSpec(
         "claude", "https://xmcode.shop/v1", "claude-sonnet-4-6",

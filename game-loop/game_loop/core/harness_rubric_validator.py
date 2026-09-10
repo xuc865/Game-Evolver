@@ -452,8 +452,11 @@ def _artifact_kind(artifact: Path) -> str:
             (artifact / "polybranch.pjs").is_file()
             or (artifact / "js" / "vendor" / "three.min.js").is_file()
             or (artifact / "src" / "main.js").is_file()
+            or (artifact / "js" / "main.js").is_file()
         )
     ):
+        return "web"
+    if (artifact / "index.html").is_file() and (artifact / "js" / "main.js").is_file():
         return "web"
     if any(artifact.glob("*.py")):
         return "pygame"

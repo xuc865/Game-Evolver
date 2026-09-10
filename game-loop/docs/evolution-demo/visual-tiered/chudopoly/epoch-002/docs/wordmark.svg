@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 724 220" width="724" height="220"
+     fill-rule="evenodd" role="img" aria-label="Chudopoly"><title>Chudopoly</title>
+  <!--
+    The CHUDOPOLY wordmark. ARCHITECTURE 0.3: a logo is drawn, not set. This is
+    hand-authored geometry, not type. The paths below are copied VERBATIM from the
+    ratified mark in public/index.html (.brand-mark); the only change is that its
+    three CSS custom properties are resolved to their literal token values, because
+    a standalone file has no cascade to inherit them from:
+
+        card-stock  becomes  #FBF8F1   (ART-DIRECTION 2, shared token)
+        ink         becomes  #14161A   (ART-DIRECTION 2, 17.08:1 on stock)
+        ca-drop     becomes  #A2977E   (already the inline fallback)
+
+    Permitted outside public/ by ARCHITECTURE 0.3 amendment (d) 2026-08-07: docs
+    SVG and PNG referenced only by repo docs. GitHub sanitises inline SVG in
+    Markdown, so the README cannot show the mark without a file.
+
+    ONE FILE SERVES BOTH GITHUB THEMES, deliberately. ART-DIRECTION 0: "The cards
+    do not change between themes, they are cream printed stock in both. The table
+    changes; the objects don't." The mark carries its own card stock as an opaque
+    plate, so on GitHub's dark theme it reads as a printed card lying on a dark
+    table, which is the thesis rather than a compromise. No picture-element swap
+    is needed and none should be added.
+
+    Note for anyone editing this comment: XML forbids a double hyphen inside a
+    comment, so the CSS variable names above are written without their leading
+    dashes on purpose. Writing them the natural way makes this file unparseable,
+    which is how it shipped broken the first time.
+  -->
+  <rect width="724" height="220" fill="#FBF8F1"/>
+  <path fill="#14161A" d="M13 13 H711 V207 H13 Z M20 20 H704 V200 H20 Z"/>
+  <g fill="#14161A">
+    <path d="M5 5 H84 V12 H12 V60 H5 Z"/>
+    <path d="M719 5 V60 H712 V12 H640 V5 Z"/>
+    <path d="M5 215 V160 H12 V208 H84 V215 Z"/>
+    <path d="M719 215 H640 V208 H712 V160 Z"/>
+  </g>
+  <g transform="translate(73 53)">
+    <path fill="#A2977E" d="M16 0 H62 V20 H20 V80 H62 V100 H16 L0 84 V16 Z M72.0 0 H92.0 V40 H114.0 V0 H134.0 V100 H114.0
+   V60 H92.0 V100 H72.0 Z M144.0 0 H164.0 V80 H186.0 V0 H206.0 V84 L190.0 100 H160.0 L144.0 84 Z
+   M216.0 0 H262.0 L278.0 16 V84 L262.0 100 H216.0 Z M298.0 0 H328.0 L344.0 16 V84 L328.0 100
+   H298.0 L282.0 84 V16 Z M350.0 0 H396.0 L412.0 16 V44 L396.0 60 H370.0 V100 H350.0 Z M429.0 0
+   H459.0 L475.0 16 V84 L459.0 100 H429.0 L413.0 84 V16 Z M480.0 0 H500.0 V80 H542.0 V100 H480.0 Z
+   M534.0 0 H556.0 L565.0 26 L574.0 0 H596.0 L575.0 48 V100 H555.0 V48 Z"/>
+  </g>
+  <g transform="translate(64 44)">
+    <path fill="#14161A" d="M16 0 H62 V20 H20 V80 H62 V100 H16 L0 84 V16 Z M72.0 0 H92.0 V40 H114.0 V0 H134.0 V100 H114.0
+   V60 H92.0 V100 H72.0 Z M144.0 0 H164.0 V80 H186.0 V0 H206.0 V84 L190.0 100 H160.0 L144.0 84 Z
+   M216.0 0 H262.0 L278.0 16 V84 L262.0 100 H216.0 Z M236.0 20 H254.0 L258.0 24 V76 L254.0 80
+   H236.0 Z M298.0 0 H328.0 L344.0 16 V84 L328.0 100 H298.0 L282.0 84 V16 Z M306.0 20 H320.0 L324.0
+   24 V76 L320.0 80 H306.0 L302.0 76 V24 Z M350.0 0 H396.0 L412.0 16 V44 L396.0 60 H370.0 V100
+   H350.0 Z M370.0 20 H388.0 L392.0 24 V36 L388.0 40 H370.0 Z M429.0 0 H459.0 L475.0 16 V84 L459.0
+   100 H429.0 L413.0 84 V16 Z M437.0 20 H451.0 L455.0 24 V76 L451.0 80 H437.0 L433.0 76 V24 Z
+   M480.0 0 H500.0 V80 H542.0 V100 H480.0 Z M534.0 0 H556.0 L565.0 26 L574.0 0 H596.0 L575.0 48
+   V100 H555.0 V48 Z"/>
+  </g>
+</svg>

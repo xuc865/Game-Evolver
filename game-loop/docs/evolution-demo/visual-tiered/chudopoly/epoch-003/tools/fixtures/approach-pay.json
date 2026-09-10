@@ -1,0 +1,544 @@
+{
+ "$schema": "chud-fixture/1",
+ "name": "approach-pay",
+ "description": "The ARMED seat being CHARGED: p1 completes its third set through playProperty (syncSets arms it), ends the turn, and the next seat plays Roll Call — a real pendingAction the armed seat must answer. The state prompt.js approachWarning() exists for, held by no recorded transcript (the recording seat arms and wins; the passive seat never arms).",
+ "builtBy": "tools/buildfixtures.mjs (engine calls, §0.7; validateState-checked)",
+ "seed": "build:approach-pay",
+ "selfId": "p1",
+ "room": "BUILT",
+ "recordedAt": "2026-08-08T01:19:12.659Z",
+ "states": [
+  {
+   "type": "state",
+   "code": "BUILT",
+   "phase": "playing",
+   "players": [
+    {
+     "id": "p1",
+     "name": "HARNESS",
+     "connected": true,
+     "isBot": false
+    },
+    {
+     "id": "p2",
+     "name": "KESTREL",
+     "connected": true,
+     "isBot": true
+    },
+    {
+     "id": "p3",
+     "name": "VULTURE",
+     "connected": true,
+     "isBot": true
+    }
+   ],
+   "hostId": "p1",
+   "game": {
+    "phase": "playing",
+    "turnPhase": "action_response",
+    "currentPlayerId": "p2",
+    "playsRemaining": 2,
+    "rearrangesRemaining": 12,
+    "rearrangeBudget": 12,
+    "deckCount": 91,
+    "discardTop": {
+     "id": 71,
+     "type": "action",
+     "action": "roll_call",
+     "name": "Roll Call",
+     "value": 2,
+     "description": "All other players pay you 2M each"
+    },
+    "discardPile": [
+     {
+      "id": 71,
+      "type": "action",
+      "action": "roll_call",
+      "name": "Roll Call",
+      "value": 2,
+      "description": "All other players pay you 2M each"
+     }
+    ],
+    "pendingAction": {
+     "type": "payment",
+     "action": "roll_call",
+     "sourceId": "p2",
+     "amount": 2,
+     "doubled": false,
+     "multiplier": 1,
+     "targets": [
+      {
+       "id": "p1",
+       "depth": 0,
+       "responderId": "p1"
+      },
+      {
+       "id": "p3",
+       "depth": 0,
+       "responderId": "p3"
+      }
+     ]
+    },
+    "responders": [
+     "p1",
+     "p3"
+    ],
+    "winner": null,
+    "endReason": null,
+    "armedIds": [
+     "p1"
+    ],
+    "surgeOps": 0,
+    "surgeMultiplier": 1,
+    "handLimit": 7,
+    "rules": {
+     "preset": "chudopoly",
+     "winRule": "finalApproach",
+     "setsToWin": 3,
+     "pureSetRequired": false,
+     "passGoRestartsTurn": false,
+     "suddenDeath": "off",
+     "deck": {
+      "inspector_general": 2,
+      "opsec": 3,
+      "midnight_requisition": 3,
+      "tdy_orders": 3,
+      "finance_office": 3,
+      "roll_call": 3,
+      "pcs_orders": 10,
+      "upgrade": 3,
+      "foc": 2,
+      "surge_ops": 2,
+      "chud": 2,
+      "wildAny": 2,
+      "wildPairs": 7
+     }
+    },
+    "setsToWin": 3,
+    "winRule": "finalApproach",
+    "deckCycle": 0,
+    "deckCycleLimit": 16,
+    "contested": false,
+    "contestLaps": 0,
+    "contestLapCap": 2,
+    "contestBar": 3,
+    "turnNumber": 1,
+    "stats": {
+     "turns": 2,
+     "cardsPlayed": {
+      "p1": 1,
+      "p2": 1
+     },
+     "payments": {
+      "count": 0,
+      "total": 0,
+      "biggest": 0
+     },
+     "propertiesStolen": {}
+    },
+    "log": [
+     "Game started! HARNESS, KESTREL, VULTURE are playing.",
+     "HARNESS drew 2 cards.",
+     "HARNESS played Goodfellow AFB on Training",
+     "HARNESS completed the Training set — 3 of 3.",
+     "HARNESS is on FINAL APPROACH with 3 sets — 2 opponent turns left to break it before HARNESS wins!",
+     "KESTREL's turn",
+     "KESTREL drew 2 cards.",
+     "KESTREL calls Roll Call — everyone pays 2M!"
+    ],
+    "stalemateBasis": null,
+    "events": [
+     {
+      "seq": 1,
+      "t": "game_start",
+      "order": [
+       "p1",
+       "p2",
+       "p3"
+      ],
+      "names": {
+       "p1": "HARNESS",
+       "p2": "KESTREL",
+       "p3": "VULTURE"
+      },
+      "winRule": "finalApproach",
+      "setsToWin": 3,
+      "rules": {
+       "preset": "chudopoly",
+       "winRule": "finalApproach",
+       "setsToWin": 3,
+       "pureSetRequired": false,
+       "passGoRestartsTurn": false,
+       "suddenDeath": "off",
+       "deck": {
+        "inspector_general": 2,
+        "opsec": 3,
+        "midnight_requisition": 3,
+        "tdy_orders": 3,
+        "finance_office": 3,
+        "roll_call": 3,
+        "pcs_orders": 10,
+        "upgrade": 3,
+        "foc": 2,
+        "surge_ops": 2,
+        "chud": 2,
+        "wildAny": 2,
+        "wildPairs": 7
+       }
+      }
+     },
+     {
+      "seq": 2,
+      "t": "deal",
+      "to": "p1",
+      "count": 5,
+      "cards": [
+       {
+        "id": 25,
+        "type": "property",
+        "name": "Thule AB",
+        "value": 2,
+        "color": "base"
+       },
+       {
+        "id": 94,
+        "type": "rent",
+        "name": "Rent: pink/orange",
+        "value": 1,
+        "colors": [
+         "pink",
+         "orange"
+        ]
+       },
+       {
+        "id": 1,
+        "type": "property",
+        "name": "Cannon AFB",
+        "value": 1,
+        "color": "brown"
+       },
+       {
+        "id": 65,
+        "type": "action",
+        "name": "TDY Orders",
+        "value": 3,
+        "action": "tdy_orders",
+        "description": "Swap one of your properties for one of another player's. Neither card may come from a complete set."
+       },
+       {
+        "id": 100,
+        "type": "rent",
+        "name": "Rent: base/intel",
+        "value": 1,
+        "colors": [
+         "base",
+         "intel"
+        ]
+       }
+      ]
+     },
+     {
+      "seq": 3,
+      "t": "deal",
+      "to": "p2",
+      "count": 5
+     },
+     {
+      "seq": 4,
+      "t": "deal",
+      "to": "p3",
+      "count": 5
+     },
+     {
+      "seq": 5,
+      "t": "turn_start",
+      "actor": "p1",
+      "plays": 3,
+      "finalApproach": false
+     },
+     {
+      "seq": 6,
+      "t": "draw",
+      "to": "p1",
+      "count": 2,
+      "cards": [
+       {
+        "id": 34,
+        "type": "wild_property",
+        "name": "Wild: Bases/Intel",
+        "value": 2,
+        "colors": [
+         "base",
+         "intel"
+        ]
+       },
+       {
+        "id": 84,
+        "type": "action",
+        "name": "Upgrade (House)",
+        "value": 3,
+        "action": "upgrade",
+        "description": "Add to a complete set: +3M rent"
+       }
+      ]
+     },
+     {
+      "seq": 7,
+      "t": "play_property",
+      "actor": "p1",
+      "card": {
+       "id": 4,
+       "type": "property",
+       "name": "Goodfellow AFB",
+       "value": 1,
+       "color": "lightblue",
+       "placedColor": "lightblue"
+      },
+      "color": "lightblue"
+     },
+     {
+      "seq": 8,
+      "t": "set_completed",
+      "actor": "p1",
+      "color": "lightblue",
+      "total": 3
+     },
+     {
+      "seq": 9,
+      "t": "final_approach",
+      "actor": "p1",
+      "sets": 3,
+      "onOwnTurn": true,
+      "turnsToCheckpoint": 3,
+      "winRule": "finalApproach",
+      "opponentTurnsRemaining": 2,
+      "checkpointTurn": 3
+     },
+     {
+      "seq": 10,
+      "t": "turn_end",
+      "actor": "p1"
+     },
+     {
+      "seq": 11,
+      "t": "turn_start",
+      "actor": "p2",
+      "plays": 3,
+      "finalApproach": false
+     },
+     {
+      "seq": 12,
+      "t": "draw",
+      "to": "p2",
+      "count": 2
+     },
+     {
+      "seq": 13,
+      "t": "play_action",
+      "actor": "p2",
+      "card": {
+       "id": 71,
+       "type": "action",
+       "name": "Roll Call",
+       "value": 2,
+       "action": "roll_call",
+       "description": "All other players pay you 2M each"
+      },
+      "action": "roll_call"
+     },
+     {
+      "seq": 14,
+      "t": "demand",
+      "actor": "p2",
+      "target": "p1",
+      "amount": 2,
+      "reason": "roll_call",
+      "doubled": false,
+      "multiplier": 1
+     },
+     {
+      "seq": 15,
+      "t": "demand",
+      "actor": "p2",
+      "target": "p3",
+      "amount": 2,
+      "reason": "roll_call",
+      "doubled": false,
+      "multiplier": 1
+     }
+    ],
+    "eventSeq": 15,
+    "players": [
+     {
+      "id": "p1",
+      "name": "HARNESS",
+      "handCount": 2,
+      "hand": [
+       {
+        "id": 37,
+        "type": "money",
+        "name": "1M",
+        "value": 1
+       },
+       {
+        "id": 38,
+        "type": "money",
+        "name": "1M",
+        "value": 1
+       }
+      ],
+      "bank": [],
+      "properties": {
+       "darkblue": [
+        {
+         "id": 20,
+         "type": "property",
+         "color": "darkblue",
+         "name": "The Pentagon",
+         "value": 4,
+         "placedColor": "darkblue"
+        },
+        {
+         "id": 21,
+         "type": "property",
+         "color": "darkblue",
+         "name": "Air Force One",
+         "value": 4,
+         "placedColor": "darkblue"
+        }
+       ],
+       "brown": [
+        {
+         "id": 0,
+         "type": "property",
+         "color": "brown",
+         "name": "Creech AFB",
+         "value": 1,
+         "placedColor": "brown"
+        },
+        {
+         "id": 1,
+         "type": "property",
+         "color": "brown",
+         "name": "Cannon AFB",
+         "value": 1,
+         "placedColor": "brown"
+        }
+       ],
+       "lightblue": [
+        {
+         "id": 2,
+         "type": "property",
+         "color": "lightblue",
+         "name": "Lackland AFB (BMT)",
+         "value": 1,
+         "placedColor": "lightblue"
+        },
+        {
+         "id": 3,
+         "type": "property",
+         "color": "lightblue",
+         "name": "Keesler AFB",
+         "value": 1,
+         "placedColor": "lightblue"
+        },
+        {
+         "id": 4,
+         "type": "property",
+         "color": "lightblue",
+         "name": "Goodfellow AFB",
+         "value": 1,
+         "placedColor": "lightblue"
+        }
+       ]
+      },
+      "upgrades": {},
+      "completedSets": 3,
+      "eliminated": false,
+      "finalApproach": true,
+      "finalApproachIn": 2,
+      "opponentTurnsRemaining": 1,
+      "checkpointTurn": 3,
+      "bankValue": 0,
+      "propertyValue": 13,
+      "upgradeValue": 0,
+      "payableValue": 13,
+      "netWorth": 13
+     },
+     {
+      "id": "p2",
+      "name": "KESTREL",
+      "handCount": 2,
+      "bank": [],
+      "properties": {
+       "red": [
+        {
+         "id": 11,
+         "type": "property",
+         "color": "red",
+         "name": "F-22 Raptor",
+         "value": 3,
+         "placedColor": "red"
+        }
+       ],
+       "pink": [
+        {
+         "id": 5,
+         "type": "property",
+         "color": "pink",
+         "name": "Peterson SFB",
+         "value": 2,
+         "placedColor": "pink"
+        }
+       ]
+      },
+      "upgrades": {},
+      "completedSets": 0,
+      "eliminated": false,
+      "finalApproach": false,
+      "finalApproachIn": null,
+      "opponentTurnsRemaining": null,
+      "checkpointTurn": null,
+      "bankValue": 0,
+      "propertyValue": 5,
+      "upgradeValue": 0,
+      "payableValue": 5,
+      "netWorth": 5
+     },
+     {
+      "id": "p3",
+      "name": "VULTURE",
+      "handCount": 0,
+      "bank": [],
+      "properties": {
+       "yellow": [
+        {
+         "id": 14,
+         "type": "property",
+         "color": "yellow",
+         "name": "KC-135 Stratotanker",
+         "value": 3,
+         "placedColor": "yellow"
+        }
+       ]
+      },
+      "upgrades": {},
+      "completedSets": 0,
+      "eliminated": false,
+      "finalApproach": false,
+      "finalApproachIn": null,
+      "opponentTurnsRemaining": null,
+      "checkpointTurn": null,
+      "bankValue": 0,
+      "propertyValue": 3,
+      "upgradeValue": 0,
+      "payableValue": 3,
+      "netWorth": 3
+     }
+    ]
+   },
+   "turnTimer": null,
+   "responseTimer": null
+  }
+ ]
+}

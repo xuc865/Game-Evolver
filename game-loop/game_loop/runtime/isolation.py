@@ -53,7 +53,7 @@ class EpisodeIsolation:
         config_home = root / "xdg-config"
         cache_home = root / "xdg-cache"
         data_home = root / "xdg-data"
-        if runtime_layout not in {"opengame", "deepseek-harness"}:
+        if runtime_layout not in {"opengame", "deepseek-harness", "codex"}:
             raise ValueError(f"unsupported episode runtime layout: {runtime_layout}")
         for path in (home, config_home, cache_home, data_home):
             path.mkdir(parents=True, exist_ok=True)
@@ -80,7 +80,7 @@ class EpisodeIsolation:
                 skill_target.mkdir()
             if system_prompt is not None:
                 (project_config / "system.md").write_text(system_prompt, encoding="utf-8")
-        else:
+        elif runtime_layout == "deepseek-harness":
             # A benchmark seed is data, not launcher configuration.  In
             # particular, never let a previous episode's skill roster leak
             # into this episode or collide with an explicitly installed one.
@@ -90,6 +90,24 @@ class EpisodeIsolation:
                     shutil.rmtree(inherited_skills)
                 else:
                     inherited_skills.unlink()
+        else:
+            # Codex configuration is part of the harness, not the game seed.
+            # Remove any project-local launcher state before installing the
+            # frozen per-episode role and instruction overlay.
+            inherited_configs = sorted(
+                workspace.rglob(".codex"),
+                key=lambda item: len(item.parts),
+                reverse=True,
+            )
+            for inherited_config in inherited_configs:
+                if inherited_config.is_dir():
+                    shutil.rmtree(inherited_config)
+                else:
+                    inherited_config.unlink()
+            project_config = workspace / ".codex"
+            project_config.mkdir(parents=True)
+            (project_config / "agents").mkdir()
+            (home / ".codex").mkdir(parents=True)
 
         isolation = cls(
             root,
@@ -137,12 +155,19 @@ class EpisodeIsolation:
                 "personal_skills": str(self.home / ".qwen" / "skills"),
                 "project_skills": str(self.workspace / ".qwen" / "skills"),
             })
-        else:
+        elif self.runtime_layout == "deepseek-harness":
             value.update({
                 "project_config": str(self.home / ".dsh"),
                 "session_root": str(self.root / "sessions"),
                 "personal_skills": str(self.home / ".dsh" / "skills"),
                 "project_skills": str(self.workspace / ".agents" / "skills"),
+            })
+        else:
+            value.update({
+                "project_config": str(self.workspace / ".codex"),
+                "session_root": str(self.root / "codex-events"),
+                "personal_skills": str(self.home / ".codex" / "skills"),
+                "project_skills": str(self.workspace / ".codex" / "skills"),
             })
         return value
 

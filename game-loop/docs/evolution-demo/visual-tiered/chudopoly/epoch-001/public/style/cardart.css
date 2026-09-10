@@ -1,0 +1,796 @@
+/* ── style/cardart.css — what is PRINTED ON a card ───────────────────────────
+   Companion to src/table/cardart.js. Owns the card face and nothing else: the
+   table, the zones and the chrome belong to table/ui/content/variables/base.
+
+   ART-DIRECTION "APRON" §0: the card is cream printed stock in BOTH themes.
+   The table changes between light and dark; the objects on it do not, exactly
+   as physical cards do not change colour when you dim the room. So there is no
+   dark-theme block in this file, and that is deliberate — the ONE dark object
+   in the design is the card BACK.
+
+   Theme tokens consumed (APRON defines them in variables.css; the fallbacks are
+   the measured §2 values, so the sheet also stands alone in the preview page):
+     --card-stock     cream printed stock
+     --card-edge      the trim / hairline
+     --card-ink       primary ink            (17.08:1 on stock)
+     --card-ink-mute  secondary ink          ( 5.64:1 on stock)
+     --set-*          the ten set colours    (all ≥4.5:1 on stock, white ≥4.5:1)
+
+   ── TIERS ────────────────────────────────────────────────────────────────
+   table/cardnode.js builds a face ONCE and then only reparents the node (§0.4),
+   so the face cannot be re-rendered when a card moves from the hand to the board
+   to an opponent's mini row. Every size below is therefore ONE markup degraded
+   by CONTAINER queries on the card itself:
+
+     >82px   band + name + glyph + rent ladder + coin      (hand, deck, discard)
+     ≤82px   the ladder goes first: 7.4cqw type falls under 6px here
+     ≤66px   band + name + glyph + coin                    (crowded hand, browser)
+     ≤60px   band + glyph + coin — three marks             (your board)
+     ≤34px   the card FLOODS its set colour and the glyph  (opponent boards, ups)
+             knocks out in bone. ONE MARK, and it is a
+             DRAWING — seven of the ten swap to a small-tier
+             cut of the same subject (.ca-glyph-mini). The
+             three-letter codes that owned this tier for one
+             round are gone; see the ≤34px block for why.
+
+   Measured against the real widths in table.css: hand 37–95, board 32–48,
+   opponent board 26–40, opponent upgrades 16–23, deck/discard 42–95, discard
+   browser 52–76.
+──────────────────────────────────────────────────────────────────────────── */
+
+/* ── Tokens ─────────────────────────────────────────────────────────────── */
+
+.ca {
+  /* variables.css declares these ONCE, outside both themes — a printed card is
+     the same object in a lit room and a dark one. --card-ink/--card-ink-mute are
+     kept as the first link in the chain because that is the name this module was
+     specified against; APRON landed them as --ink/--ink-mute. */
+  --ca-paper: var(--card-stock, #FBF8F1);
+  --ca-edge:  var(--card-edge, #D9D2C4);
+  --ca-ink:   var(--card-ink, var(--ink, #14161A));
+  --ca-mute:  var(--card-ink-mute, var(--ink-mute, #5C6470));
+  --ca-dark:  var(--card-back, #14161A);
+  /* stock-on-set is 4.71–9.7 across the ten — certified, unlike pure white. */
+  --ca-onset: var(--band-ink, #FBF8F1);
+
+  /* What a punched-out shape inside a glyph shows through to. Re-pointed at
+     the fill wherever a glyph sits on colour instead of on stock. */
+  --ca-knock: var(--ca-paper);
+  --ca-set:   var(--ca-ink);
+
+  --ca-head: "Avenir Next Condensed", "HelveticaNeue-CondensedBold", "Arial Narrow",
+             "Roboto Condensed", "Segoe UI", system-ui, sans-serif;
+  --ca-mono: ui-monospace, "SF Mono", Menlo, "Cascadia Mono", Consolas,
+             "Liberation Mono", monospace;
+}
+
+/* The ten sets. Theme token first, measured §2 value as the standalone
+   fallback — never the other way round. */
+.ca-set-brown     { --ca-set: var(--set-brown, #8A4B1E); }
+.ca-set-lightblue { --ca-set: var(--set-lightblue, #136C90); }
+.ca-set-pink      { --ca-set: var(--set-pink, #B01C63); }
+.ca-set-orange    { --ca-set: var(--set-orange, #A85200); }
+.ca-set-red       { --ca-set: var(--set-red, #B81A33); }
+.ca-set-yellow    { --ca-set: var(--set-yellow, #8A6A00); }
+.ca-set-green     { --ca-set: var(--set-green, #1B6E37); }
+.ca-set-darkblue  { --ca-set: var(--set-darkblue, #26308F); }
+.ca-set-base      { --ca-set: var(--set-base, #0C5F5B); }
+.ca-set-intel     { --ca-set: var(--set-intel, #465767); }
+
+/* ── Host hand-off ──────────────────────────────────────────────────────────
+   When the art system owns a face, the host .card sheds the chrome it drew for
+   the old dark stock: the steel colour spine (::before) and the specular sheen
+   (::after) were tuned for a navy card and both read as damage on cream. */
+
+.card:has(.ca) { background: none; }
+.card:has(.ca)::before,
+.card:has(.ca)::after { display: none; }
+
+/* The back sheds its own navy stock + bronze roundel the same way. */
+.card-back:has(> .ca) { background: none; box-shadow: none; }
+.card-back:has(> .ca)::before,
+.card-back:has(> .ca)::after { display: none; }
+
+/* The card is the container every tier below queries. Both faces declare it,
+   because a pooled face-down node (the deck stack, an opponent's hand) has a
+   .card-back and no .card-face at all. */
+.card-face:has(> .ca),
+.card-back:has(> .ca) {
+  padding: 0;
+  gap: 0;
+  container-type: inline-size;
+}
+.card-face > .ca,
+.card-back > .ca { position: absolute; inset: 0; }
+
+/* ── One row, one tier ──────────────────────────────────────────────────────
+   table.css reserves the strip a fan neighbour stands on as padding-right on
+   every .card-face except the LAST (`.zone-hand .card:not(:last-child)`,
+   (cover + .06) of the card). That rule was written for the pre-art face,
+   whose band/name are in-flow children; on THIS face the .ca is absolute
+   (inset:0), so the padding never moved a mark. What it did instead, measured
+   on big-hand@desktop (1280×720, 8 cards, --card-w 69.6px): the face is the
+   tier container and a container's size is its CONTENT box, so every covered
+   card queried 59.8px — the three-mark ≤60px tier, band with no lettering —
+   while the uncovered last card queried 69.6px and kept its lettering, title
+   and coin. Two tiers, one row; the owner: "sometimes the cards are
+   inconsistent and dont show text when others do". A tier is a property of
+   the card's WIDTH, so the container must measure the card: zero the
+   reservation on art faces (the query returns to --card-w for the whole row)
+   and carry it inside the face as .ca padding, where it moves the type it was
+   always meant to move. cqw now equals %-of-card, so the strip is the same
+   width table.css reserved. */
+.zone-hand .card:not(:last-child) .card-face:has(> .ca) { padding-right: 0; }
+.zone-hand .card:not(:last-child) .ca-hand {
+  padding-right: calc((var(--fan-cover, 0) + .06) * 100cqw);
+}
+
+/* ── Chassis ────────────────────────────────────────────────────────────── */
+
+.ca {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: inherit;
+  background: var(--ca-paper);
+  color: var(--ca-ink);
+  box-shadow: inset 0 0 0 1px var(--ca-edge);
+  font-family: var(--ca-head);
+  font-weight: 700;
+  text-align: left;
+  -webkit-font-smoothing: antialiased;
+}
+.ca * { box-sizing: border-box; min-width: 0; }
+
+/* Printed stock, not a screen surface. --grain is authored as inline SVG in
+   variables.css (§0.3), so this costs no asset. */
+.ca::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background-image: var(--grain, none);
+  background-size: 180px 180px;
+  opacity: .035;
+  pointer-events: none;
+  mix-blend-mode: multiply;
+}
+
+/* registration ticks — the technical-order tell */
+.ca-tick {
+  position: absolute;
+  width: 6cqw; height: 6cqw;
+  max-width: 7px; max-height: 7px;
+  border: 0 solid var(--ca-edge);
+  pointer-events: none;
+}
+.ca-tick.tl { top: 3cqw; left: 3cqw; border-top-width: 1px; border-left-width: 1px; }
+.ca-tick.tr { top: 3cqw; right: 3cqw; border-top-width: 1px; border-right-width: 1px; }
+.ca-tick.bl { bottom: 3cqw; left: 3cqw; border-bottom-width: 1px; border-left-width: 1px; }
+.ca-tick.br { bottom: 3cqw; right: 3cqw; border-bottom-width: 1px; border-right-width: 1px; }
+
+/* ── Common parts ───────────────────────────────────────────────────────── */
+
+.ca-band {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .4em;
+  background: var(--ca-set);
+  color: var(--ca-onset);
+  text-transform: uppercase;
+  overflow: hidden;
+}
+.ca-band-name { white-space: nowrap; overflow: hidden; text-overflow: clip; }
+.ca-band-ink { background: var(--ca-ink); color: var(--ca-paper); }
+.ca-band-wheel { background: var(--ca-ink); color: var(--ca-paper); }
+
+.ca-pips { display: flex; gap: .18em; flex: none; }
+.ca-pips i { width: .34em; height: .34em; border-radius: 50%; background: currentColor; }
+
+.ca-title {
+  flex: none;
+  text-transform: uppercase;
+  line-height: 1.08;
+  letter-spacing: .005em;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.ca-sub { flex: none; font-family: var(--ca-mono); color: var(--ca-mute); text-transform: uppercase; }
+
+.ca-art {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+}
+.ca-glyph { display: block; width: 100%; height: 100%; max-width: 100%; max-height: 100%; }
+
+/* A glyph takes the set colour on stock; knockouts show the stock through. */
+.ca-prop .ca-art > .ca-glyph { color: var(--ca-set); }
+.ca-action .ca-art > .ca-glyph { color: var(--ca-ink); }     /* achromatic by law (§1) */
+.ca-money .ca-art > .ca-glyph { color: var(--ca-mute); }
+
+/* The coin sits LEFT, the serial right. MEASURED on mid-game@desktop: the hand
+   fan overlaps each card from the RIGHT, so a bottom-right coin was covered on
+   every card but the last one and the hand showed no values at all. The left
+   edge is the strip the fan always leaves exposed. */
+.ca-foot {
+  flex: none;
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: .4em;
+}
+.ca-serial {
+  font-family: var(--ca-mono);
+  font-weight: 400;
+  color: var(--ca-mute);
+  letter-spacing: .04em;
+  white-space: nowrap;
+  overflow: hidden;
+  margin-left: auto;
+}
+/* ART §6: "value coin: filled ink disc with bone numerals". It was outlined ink
+   ON the set colour, which measured 2.64:1 — §2's ink-on-set column is verified
+   against card STOCK, not against a colour fill. Filling the coin makes the
+   contrast a property of the coin itself (ink vs bone, 17:1) rather than of
+   whatever the coin happens to be sitting on. */
+/* ROUND-5: it was a PILL, not a disc — `border-radius: 999px` with no
+   aspect-ratio, so "4M" set a 25×14 lozenge that overhung the card's own 6px
+   corner on the rent chassis. §6 says disc. A disc is `aspect-ratio: 1` plus a
+   floor of 22% of the card width, and the numerals are centred in it rather
+   than padding it out sideways. */
+/* ROUND-5 FIX: `min-width: 24cqw` is a floor for the SMALL tiers, where the coin
+   would otherwise collapse to a lozenge. It must never be the rule at peek tier:
+   the peek container is ~2.1x a hand card, so 24cqw there resolved to a ~90px
+   disc that forced the whole card taller than the viewport and painted a black
+   circle over the rules text. The floor is applied per tier below, not here. */
+.ca-val {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  aspect-ratio: 1;
+  min-width: 2.1em;
+  padding: 0;
+  font-family: var(--ca-mono);
+  font-weight: 700;
+  white-space: nowrap;
+  line-height: 1;
+  color: var(--ca-paper);
+  background: var(--ca-ink);
+  border: 0;
+  border-radius: 50%;
+}
+
+.ca-rents { flex: none; display: flex; gap: .25em; font-family: var(--ca-mono); font-weight: 400; }
+.ca-rentstep { border: 1px solid var(--ca-edge); border-radius: 2px; padding: 0 .25em; white-space: nowrap; }
+.ca-rentstep b { font-weight: 700; opacity: .5; margin-right: .18em; }
+
+.ca-code {
+  position: absolute;
+  right: 0; bottom: 0;
+  display: none;
+  font-family: var(--ca-mono);
+  font-weight: 700;
+  color: var(--ca-mute);
+}
+
+/* THE SMALL-TIER DRAWING (owner ruling, 2026-08-07 — see the ≤34px block).
+   Seven of the ten set marks carry a second drawing of the SAME subject, cut for
+   the size it is seen at: fewer strokes, heavier weight, interior detail gone.
+   Both ship in the one markup because table/cardnode.js builds a face ONCE and
+   only reparents it (§0.4) — the ≤34px tier cannot ask for a rebuild — and the
+   stylesheet chooses. Two drawings of one subject is still ONE vocabulary; a
+   drawing beside a letter is two, which is the defect this reverses.
+   Exactly one of the pair is ever displayed, so every box that holds a glyph
+   (.ca-art and .ca-half are grids, .ca-pairhalf is a block) centres the
+   survivor without any extra positioning. */
+.ca-glyph-mini { display: none; }
+
+/* ── THE WORDMARK PLATE ───────────────────────────────────────────────────
+   The home hero (public/index.html) — drawn geometry, not type. It lives in
+   THIS file rather than ui.css for two reasons: cardart.css is the last sheet
+   index.html loads, so it wins without a specificity fight; and the plate is
+   bone stock with ink printing, which makes it the same class of object as a
+   card and not a piece of chrome. ui.css's `.brand-title` still owns the
+   element's position in the home grid; only the mark inside it is ours.
+
+   Sized in px, not em: `.brand-title` sets `font-size: clamp(2.1em, 5.2vw,
+   3.4em)`, so an em-relative width would resolve against a font size that is
+   itself viewport-relative, and the plate would grow twice as fast as the
+   viewport does. */
+.brand-title:has(.brand-mark) {
+  /* the drawn mark carries the letterform now; the text treatment underneath it
+     would only apply to a text node that no longer exists */
+  letter-spacing: 0;
+  line-height: 0;
+  text-shadow: none;
+}
+.brand-mark {
+  /* The mark's hard offset. ART §6's drawing law allows exactly one shadow in
+     the corpus — "a hard zero-blur offset block behind a WARNING box" — and
+     this is it. It cannot be --ink-mute: that token flips with the theme, and
+     the plate is bone stock in both themes exactly as a card is. A warm neutral
+     rather than a hue, so it claims no colour §2 has reserved; on #FBF8F1 stock
+     it measures 2.5:1, which is a shadow's job (separating a shape) and not
+     type's, and checkContrast reads it as decorative for that reason. */
+  --ca-drop: #A2977E;
+  display: block;
+  width: 100%;
+  max-width: 440px;
+  height: auto;
+}
+@media (max-width: 560px) { .brand-mark { max-width: 330px; } }
+
+/* ── RENT — the face IS the colours (§6.3, the owner defect) ──────────────
+   No cream chassis, no band: the colour bleeds to the trim. That single
+   structural difference is what stops a rent being read as a wild property. */
+
+
+/* The colour field covers the whole card at the hand tier, so the stock behind
+   it is never seen — but the card must KEEP it. Blanking the background here
+   (rather than scoping it to .ca-hand) made the PEEK-tier rent transparent, and
+   the peek panel's dark surface showed straight through the card. */
+.ca-hand.ca-rent { box-shadow: inset 0 0 0 1px rgba(20, 22, 26, .34); }
+.ca-field { position: absolute; inset: 0; display: flex; }
+.ca-field-split > .ca-half {
+  flex: 1 1 50%;
+  display: grid;
+  place-items: center;
+  background: var(--ca-fill);
+  color: #fff;                       /* §2: white clears 4.5:1 on all ten */
+  --ca-knock: var(--ca-fill);        /* punched shapes show the set colour */
+  /* Bottom-weighted so the glyphs sit ABOVE the RENT medallion. Centred, the
+     medallion cut straight through both silhouettes — which defeats the point
+     of the card: you are meant to read the two SETS first. */
+  padding: 12% 8% 34%;
+}
+.ca-field-split > .ca-half .ca-glyph { width: 100%; height: 100%; }
+.ca-field-wheel { padding: 0; }
+.ca-wheel { display: block; width: 100%; height: 100%; }
+.ca-field-wheel .ca-wheel {
+  width: 152%; height: 152%;         /* bleed the wheel past the trim: it must
+                                        read as "all of them", not as a badge */
+  margin: auto;
+  position: absolute;
+  inset: -26%;
+}
+
+/* The type mark: small, achromatic, and SECOND. */
+.ca-medal {
+  position: absolute;
+  left: 50%; bottom: 7%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: .3em;
+  background: var(--ca-paper);
+  color: var(--ca-ink);
+  border: 1px solid var(--ca-ink);
+  border-radius: 999px;
+  z-index: 2;
+}
+.ca-medal-mark { display: block; flex: none; }
+.ca-medal b { font-weight: 800; letter-spacing: .1em; text-indent: .1em; }
+
+/* Top-LEFT: clear of the medallion, and on the strip the hand fan leaves
+   exposed. A rent has no other number on it, and a rent is bankable — in an
+   opponent's bank this coin is the only thing that matters. */
+.ca-val-float {
+  position: absolute;
+  /* 7cqw, not 5: a DISC (see .ca-val) at 5cqw crossed the card's own 6px corner
+     radius on the rent chassis, where the colour field bleeds to the trim and
+     there is no margin to hide in. */
+  left: 7cqw; top: 7cqw;
+  z-index: 2;
+  /* Inherits the filled ink coin from .ca-val. It used to repaint itself paper,
+     which after the coin was filled left bone numerals on bone (1.00:1). */
+  padding: 0;
+}
+
+/* ── WILD PROPERTY — the same colours, CONTAINED on the property chassis ─── */
+
+.ca-wild .ca-band-split { justify-content: center; }
+.ca-art-pair { display: flex; align-items: center; justify-content: center; gap: 4%; padding: 4%; }
+.ca-pairhalf { display: block; flex: 1 1 50%; min-width: 0; height: 100%; }
+.ca-pairhalf .ca-glyph { width: 100%; height: 100%; }
+.ca-wheel-art { width: 88%; height: 88%; margin: auto; }
+
+.ca-crows { flex: none; }
+.ca-crow { display: flex; align-items: center; gap: .45em; font-family: var(--ca-mono); font-weight: 400; text-transform: uppercase; }
+.ca-dot {
+  flex: none;
+  width: .85em; height: .85em;
+  border-radius: 2px;
+  background: var(--ca-fill);
+  overflow: hidden;
+}
+.ca-dot-wheel { display: block; width: 100%; height: 100%; }
+
+/* ── MONEY ──────────────────────────────────────────────────────────────── */
+
+.ca-money .ca-title { text-align: center; color: var(--ca-mute); letter-spacing: .12em; text-indent: .12em; }
+.ca-mnum {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: .08em;
+  color: var(--ca-ink);
+}
+.ca-mnum b { font-weight: 800; line-height: 1; }
+.ca-mnum i { font-family: var(--ca-mono); font-style: normal; font-weight: 700; }
+
+/* ── ACTION / OPSEC / CHUD ──────────────────────────────────────────────── */
+
+.ca-action .ca-band { letter-spacing: .1em; text-indent: .1em; justify-content: center; }
+/* OPSEC is a COUNTER — it is the only card you play out of turn, so it wears
+   hatching rather than a colour it is not entitled to (§1). */
+.ca-opsec .ca-art {
+  background: repeating-linear-gradient(-45deg,
+    transparent 0 4px, rgba(20, 22, 26, .06) 4px 7px);
+}
+/* THE CHUD is the biggest swing in the deck. It gets the hazard material (§1),
+   never foil — foil is the victory modal only. */
+.ca-chud .ca-band {
+  background: repeating-linear-gradient(-45deg,
+    var(--ca-ink) 0 6px, #4A2008 6px 12px);
+}
+.ca-chud .ca-art > .ca-glyph { color: var(--ca-ink); }
+.ca-chud-rays { animation: caChudBreathe 2.8s ease-in-out infinite; transform-origin: 24px 24px; }
+@keyframes caChudBreathe { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .ca-chud-rays { animation: none; opacity: .75; } }
+
+/* ── THE BACK — the one dark object in the design (§2) ──────────────────── */
+
+.ca-back {
+  background: var(--ca-dark);
+  color: var(--card-stock, #FBF8F1);
+  align-items: center;
+  justify-content: center;
+  box-shadow: inset 0 0 0 1px rgba(251, 248, 241, .22);
+  /* A knockout on the back must show the BACK through, not cream stock. The
+     default --ca-knock is the paper, which was harmless only for as long as the
+     back's mark had no knockouts in it; the stencil bridges in BACK_MARK are
+     the first, and without this they would print as four cream chips. */
+  --ca-knock: var(--ca-dark);
+}
+.ca-back::after { mix-blend-mode: screen; opacity: .05; }
+/* The 45° halftone SCREEN, as a background with an absolute px pitch rather
+   than fill-opacity — a screen reads as the printing process it imitates where
+   a faded fill just reads as faded (MIL-STD-38784B house style). Clipped to a
+   centred diamond so the flat corners stay flat and the mark sits on a field
+   rather than on noise. Pitch is px, not %, so it does not stretch as the card
+   grows from a 30px mini back to a 248px peek. */
+.ca-back::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(circle at 50% 50%, rgba(242, 238, 228, .40) 0 .85px, transparent 1.05px),
+    radial-gradient(circle at 50% 50%, rgba(242, 238, 228, .40) 0 .85px, transparent 1.05px);
+  background-size: 6px 6px, 6px 6px;
+  /* the half-tile offset is what makes it a 45° lattice rather than an
+     orthogonal grid — a square screen reads as a mesh, a 45° one as halftone */
+  background-position: 0 0, 3px 3px;
+  clip-path: polygon(50% 4%, 96% 50%, 50% 96%, 4% 50%);
+  pointer-events: none;
+}
+/* the wordmark and the deck mark are in flow, so they would paint UNDER an
+   absolutely-positioned ::before; these put them back on top of the screen */
+.ca-back-word, .ca-back-sub, .ca-back-art { position: relative; z-index: 1; }
+.ca-back .ca-tick { border-color: rgba(251, 248, 241, .45); }
+/* The wordmark is DRAWN now (see the ALPHA alphabet in table/cardart.js), so
+   the back's word is an <svg> and not a text run. It was set in
+   `var(--font-display)`, which resolves to SF Pro Rounded on macOS, Segoe UI
+   Variable Display on Windows and something else again on Linux — the deck's
+   name had no fixed letterform, and screenshot.mjs, which hashes PNGs, has been
+   measuring whatever face the machine happened to have. */
+.ca-back-word { display: block; flex: none; height: auto; }
+.ca-back-sub { font-family: var(--ca-mono); font-weight: 400; letter-spacing: .14em; text-indent: .14em; opacity: .62; }
+.ca-back-art { display: block; flex: none; opacity: .9; }
+
+/* ════════════════════════════════════════════════════════════════════════
+   TIER: hand — the ONE in-game face. Everything is in cqw so it tracks the
+   card instead of the viewport; the breakpoints below only REMOVE marks.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.ca-hand { padding: 6cqw; gap: 3cqw; }
+.ca-hand .ca-band { padding: 1.4cqw 3cqw; font-size: 9.4cqw; border-radius: 2px; letter-spacing: .04em; }
+.ca-hand .ca-title { font-size: 11cqw; }
+.ca-hand .ca-art { min-height: 24cqw; }
+.ca-hand .ca-glyph { width: 44cqw; height: 44cqw; }
+.ca-hand .ca-rents { font-size: 7.4cqw; }
+.ca-hand .ca-val { font-size: 9cqw; min-width: 26cqw; }
+/* The rosette has to CONTAIN the numeral, not collide with it: at 44cqw ring /
+   34cqw numeral the "4M" in the bank overlapped the ring on both sides. */
+.ca-hand.ca-money .ca-glyph { width: 58cqw; height: 58cqw; }
+.ca-hand .ca-mnum b { font-size: 28cqw; }
+.ca-hand .ca-mnum i { font-size: 10cqw; }
+.ca-hand.ca-money .ca-title { font-size: 7.4cqw; }
+.ca-hand .ca-code { font-size: 8cqw; }
+
+/* rent at hand size */
+.ca-hand .ca-medal { padding: 1cqw 3cqw; font-size: 8.4cqw; gap: .28em; }
+.ca-hand .ca-medal-mark { width: 8cqw; height: 8cqw; }
+.ca-hand .ca-val-float { font-size: 9cqw; }
+
+/* wild at hand size */
+.ca-hand .ca-art-pair { min-height: 26cqw; }
+.ca-hand .ca-pairhalf .ca-glyph { width: 100%; height: 100%; max-height: 34cqw; }
+
+/* back at hand size */
+.ca-hand.ca-back { gap: 5cqw; padding: 8cqw 4cqw; }
+.ca-hand.ca-back .ca-back-word { width: 66%; }
+.ca-hand.ca-back .ca-back-art { width: 52%; }
+
+/* ── ≤82px — the ladder prints only where its type is type. ───────────────
+   The rent ladder and the money note's word-title are both 7.4cqw, which
+   crosses 6px at 81px. The hand ramp's crowded stops sit at 69.6–79.5px on a
+   720-high desktop and 75.6–81px at 800+, so every crowded hand was printing
+   its ladder at 5.0–5.9px — below the size the ≤60px band-name ruling already
+   refused as type (it is the same "measured at 5.1px" number). The coin and
+   the rosette numeral carry the value at every size; from here down the
+   ladder belongs to the peek. The old cut was 66px, which no ramp stop ever
+   actually landed between 66 and 82 — the boundary predates the hand ramp. */
+@container (max-width: 82px) {
+  .ca-hand .ca-rents { display: none; }
+  .ca-hand.ca-money .ca-title { display: none; }
+}
+
+/* ── ≤66px — a crowded hand, the discard browser. ───────────────────────── */
+@container (max-width: 66px) {
+  /* "TO-14 · USAF ED." is a flavour mark and it sits at the FAR RIGHT of the
+     foot — which is the exact strip the hand fan's next card stands on. On
+     landscape-mid it rendered as two grey letters hanging off each card. It is
+     the first thing §6's degradation ladder should drop and it was never in
+     the ≤60px three-mark list at all. */
+  .ca-hand .ca-serial, .ca-hand .ca-sub { display: none; }
+  /* Same defect, same cause: the mono set/action code was pinned right:0 and
+     the fan covered its last character ("PCS" → "PC", "SRG" → "SR"). Every
+     other mark on this card is already left-aligned for that reason. */
+  .ca-hand .ca-code { right: auto; left: 0; }
+  .ca-hand .ca-title { -webkit-line-clamp: 2; font-size: 12cqw; }
+  .ca-hand .ca-glyph { width: 50cqw; height: 50cqw; }
+  .ca-hand .ca-pips { display: none; }
+  /* the word-title is already gone at ≤82 ("FOUR MILLION" also clipped on the
+     trim here, measured in the bank on mid-game@desktop) */
+  .ca-hand.ca-money .ca-glyph { width: 64cqw; height: 64cqw; }
+  /* The FUNDS band already says these are millions; the suffix only collided
+     with the rosette. */
+  .ca-hand .ca-mnum i { display: none; }
+
+  /* A PAIRED glyph is drawn at HALF the card's width, so it is always one tier
+     smaller than the card it is on: at 66px the two halves of a wild measure
+     30px each, which is the mini tier exactly. They therefore take the
+     small-tier cut here, a whole tier before a single-set card does. This is
+     the row the owner was looking at — a wild between the two singles it is
+     wild between — and it is why both must be drawn from the same cut. */
+  .ca-hand .ca-pairhalf .ca-glyph-full,
+  .ca-hand .ca-half .ca-glyph-full { display: none; }
+  .ca-hand .ca-pairhalf .ca-glyph-mini,
+  .ca-hand .ca-half .ca-glyph-mini { display: block; }
+}
+
+/* ── ≤60px — your own board, a landscape hand. THREE MARKS: band, glyph, coin.
+   ROUND-5: this tier used to start at 48px, and §6 says 60. The 12px between
+   them is where a 59px landscape hand card sat, printing a 7px title and a
+   clipped mono code — "Nothing that can truncate" is the tier's own rule. ── */
+@container (max-width: 60px) {
+  .ca-hand { padding: 5cqw; gap: 2cqw; }
+  .ca-hand .ca-title { display: none; }
+  .ca-hand .ca-tick { display: none; }
+  /* THE BAND STAYS; ITS LETTERING DOES NOT. MEASURED across the review set: at
+     11cqw on a 46px board card the set name sets at 5.1px, which is below the
+     size at which type is type — 21 of them per desktop frame, and the contrast
+     gate was letting them through as decorative. §6's ≤60px tier lists three
+     marks and the band is a MARK, not a caption: a solid rule of the set colour
+     across the top of the card. The name is carried by the glyph (§1's primary
+     channel), by the mat it is standing on (table.css's restored nameplate),
+     and at full size by the peek. */
+  .ca-hand .ca-band-name { display: none; }
+  .ca-hand .ca-band { height: 15%; min-height: 5px; padding: 0; justify-content: center; }
+  .ca-hand .ca-glyph { width: 58cqw; height: 58cqw; }
+  /* §6 asks for a filled ink DISC. The previous pass deleted the disc instead
+     of sizing it — measured, a 1px-bordered box around a 4.8px string read as a
+     blob — but bare digits are not one of the three marks, a coin is. At 40cqw
+     the disc is 18px on a 46px card with 7.8px numerals inside it, which is the
+     largest coin this tier can carry and still leave the glyph its 58%. */
+  .ca-hand .ca-val {
+    font-size: 17cqw;
+    min-width: 40cqw;
+    font-weight: 800;
+    font-family: var(--ca-head);
+    letter-spacing: -.04em;
+  }
+  /* The bank is where you count fast. Drop the rosette and let the numeral own
+     the card — a ring at 24px is texture, not information. */
+  .ca-hand.ca-money .ca-glyph { display: none; }
+  .ca-hand .ca-mnum b { font-size: 52cqw; }
+  .ca-hand .ca-mnum i { display: none; }
+  .ca-hand.ca-money .ca-title { display: none; }
+  /* the mono code earns its keep here: with the title gone, ten ORDER cards
+     otherwise differ only by glyph, and this is the size the discard pile
+     stacks at. Floored at 8px — below that it is texture, not a code. */
+  .ca-hand.ca-action .ca-code { display: block; font-size: max(8px, 15cqw); }
+  .ca-hand.ca-back .ca-back-word { display: none; }
+  .ca-hand.ca-back .ca-back-art { width: 68%; }
+  .ca-hand .ca-medal b { display: none; }
+  .ca-hand .ca-medal { padding: 1.5cqw; }
+  .ca-hand .ca-medal-mark { width: 11cqw; height: 11cqw; }
+  /* .ca-val-float STAYS: a rent can be banked as money, and in a bank the
+     value is the entire reason the card is on the table. */
+  .ca-hand .ca-val-float { font-size: 13cqw; padding: 0 1cqw; }
+}
+
+/* ── ≤34px — opponent boards and upgrade rows, down to 16px. ONE MARK. ────
+   The card floods its set colour and the glyph knocks out white. This is the
+   only tier where the property card is a colour chip rather than a card, and
+   it is the tier where "which set is that" is the ONLY question being asked.
+
+   ── WHAT THE LETTERS COST, AND WHY THEY ARE GONE (owner ruling 2026-08-07) ──
+   For one round this tier printed a 3-character code (DRN / OSB / T&E …) in
+   place of the drawing, exempting `.ca-wild` because a wild's two glyphs are
+   its identity. The exemption is the whole failure. A wild stands in the same
+   row as the singles it is wild between, so an opponent's board read as
+   pictures-on-the-wild, letters-on-its-neighbours — two vocabularies in one
+   row, and the card that most needs to be distinguishable was the one that
+   looked least like the rest. The owner: "its too confusing when the wild cards
+   are next to them".
+
+   The premise had also gone stale. The codes were chosen against the OLD
+   glyphs — a Space Force mark that thresholded into a witch's hat, a Fighters
+   mark that was a fat arrow with a stub — which genuinely did not survive here.
+   Seven marks were then redrawn and never re-measured at this size. Re-measured
+   now, on a 30px card with the art padding at 8%: the drawing renders at 25.2px
+   with white on a saturated flood behind it, and the 40px reference row one tier
+   up already prints the SAME drawing at 23px in set colour on cream — a harder
+   contrast case that reads. Four of the ten answer unchanged at 25px. Six do
+   not, and the fix for those is .ca-glyph-mini: the same subject drawn again
+   with fewer strokes and no interior detail. Not a letter. */
+@container (max-width: 34px) {
+  .ca-hand { padding: 0; gap: 0; }
+  .ca-hand .ca-band,
+  .ca-hand .ca-foot,
+  .ca-hand .ca-rents,
+  /* `.ca-hand.ca-action .ca-code` in the ≤60px block is (0,3,0) and this list
+     was (0,2,0), so the action code was NEVER dropped at the one-mark tier — it
+     printed --ca-mute on the ink flood at 4.5px, which is 1.9:1 and unreadable
+     as either type or texture. It is the same defect the set codes were, on the
+     other family: a letter standing beside a drawing at the tier that gets one
+     mark. Matching the selector's specificity is the whole fix. */
+  .ca-hand.ca-action .ca-code,
+  .ca-hand .ca-code { display: none; }
+
+  .ca-hand.ca-prop {
+    background: var(--ca-set);
+    --ca-knock: var(--ca-set);
+    box-shadow: inset 0 0 0 1px rgba(20, 22, 26, .38);
+  }
+  .ca-hand.ca-prop .ca-art > .ca-glyph { color: #fff; }
+
+  .ca-hand.ca-action { background: var(--ca-ink); --ca-knock: var(--ca-ink); }
+  .ca-hand.ca-action .ca-art > .ca-glyph { color: var(--ca-paper); }
+  /* 8%, not 14%. The glyph is a SQUARE fitted into the art box, so its size is
+     the box's WIDTH and every point of horizontal padding is spent twice.
+     MEASURED across the tier (26 / 30 / 34px): 14% drew the mark at
+     18.7 / 21.6 / 24.5px, 8% draws it at 21.8 / 25.2 / 28.6 — a 17% linear gain
+     for margin the flood already provides, because the set colour runs to the
+     trim and the card's own edge is the clearance. */
+  .ca-hand .ca-art { padding: 8%; }
+  .ca-hand .ca-glyph { width: 100%; height: 100%; }
+
+  /* THE SWAP. Seven subjects hand over to their small-tier cut here. */
+  .ca-glyph-full { display: none; }
+  .ca-glyph-mini { display: block; }
+
+  /* A WILD keeps its cream chassis at every size — that is the whole chassis
+     contract that separates it from a rent. It never floods. */
+  .ca-hand.ca-wild { background: var(--ca-paper); --ca-knock: var(--ca-paper); }
+  .ca-hand.ca-wild .ca-band { display: block; height: 16%; padding: 0; }
+  .ca-hand.ca-wild .ca-band-name { display: none; }
+  .ca-hand.ca-wild .ca-art { padding: 8%; }
+  .ca-hand.ca-wild .ca-art > .ca-glyph { color: var(--ca-set); }
+
+  /* THE WILD'S TWO GLYPHS GO DIAGONAL HERE, and this is the card the owner was
+     actually looking at. MEASURED on a 30px wild before the change: each half
+     was 12.1px wide and the glyph inside it was 10.2px — capped by the hand
+     tier's `max-height: 34cqw`, which resolves to 10.2px on a 30px card — and
+     then top-aligned in a 30.5px box, so the mark sat in the upper fifth with
+     two thirds of the card blank. Side by side, two glyphs can never have more
+     than half the card's width; the card is 5:7, so stacking them buys the
+     HEIGHT instead. Staggered — first half top-left, second bottom-right — each
+     glyph gets 16.5px, +62%, and the diagonal preserves the left-to-right order
+     of the band's colour split, which a plain vertical stack would break. */
+  .ca-hand.ca-wild .ca-art-pair { flex-direction: column; padding: 4%; gap: 0; }
+  .ca-hand.ca-wild .ca-pairhalf { flex: 0 0 50%; width: 64%; height: auto; }
+  .ca-hand.ca-wild .ca-pairhalf:first-child { align-self: flex-start; }
+  .ca-hand.ca-wild .ca-pairhalf:last-child { align-self: flex-end; }
+  .ca-hand.ca-wild .ca-pairhalf .ca-glyph { max-height: none; }
+
+  /* MONEY keeps the stock and the numeral: the number IS the identity. */
+  .ca-hand.ca-money { background: var(--ca-paper); }
+  .ca-hand.ca-money .ca-art > .ca-glyph { display: none; }
+  .ca-hand.ca-money .ca-mnum b { font-size: 62cqw; }
+
+  .ca-hand .ca-medal { border-width: 1px; padding: 1cqw; }
+  .ca-hand .ca-medal-mark { width: 13cqw; height: 13cqw; }
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   TIER: peek — the read-me tier. Fixed px: it is not inside a card, it is a
+   panel of its own, and it must be legible without reference to anything.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.ca-peek {
+  width: 248px;
+  min-height: 300px;
+  height: auto;
+  padding: 14px;
+  gap: 8px;
+  border-radius: 10px;
+  border: 1px solid var(--ca-edge);
+}
+.ca-peek .ca-tick { width: 8px; height: 8px; max-width: none; max-height: none; }
+.ca-peek .ca-tick.tl { top: 4px; left: 4px; }
+.ca-peek .ca-tick.tr { top: 4px; right: 4px; }
+.ca-peek .ca-tick.bl { bottom: 4px; left: 4px; }
+.ca-peek .ca-tick.br { bottom: 4px; right: 4px; }
+.ca-peek .ca-band { padding: 4px 9px; font-size: 10px; letter-spacing: .13em; border-radius: 3px; }
+.ca-peek .ca-pips i { width: 5px; height: 5px; }
+.ca-peek .ca-title { font-size: 19px; -webkit-line-clamp: 2; }
+.ca-peek .ca-sub { font-size: 8.5px; letter-spacing: .1em; margin-top: -5px; }
+.ca-peek .ca-art { min-height: 96px; }
+.ca-peek .ca-glyph { width: 108px; height: 108px; }
+.ca-peek .ca-rrows { flex: none; font-family: var(--ca-mono); font-weight: 400; font-size: 10.5px; line-height: 1.65; }
+.ca-peek .ca-rrow { display: flex; align-items: baseline; gap: 6px; }
+.ca-peek .ca-rrow i { flex: 1; border-bottom: 1px dotted var(--ca-edge); }
+.ca-peek .ca-rrow span:last-child { font-weight: 700; }
+.ca-peek .ca-crow { font-size: 10.5px; line-height: 1.75; }
+.ca-peek .ca-rulebox { flex: none; margin-top: auto; padding-top: 8px; border-top: 1px solid var(--ca-edge); }
+.ca-peek .ca-rule { margin: 0; font-weight: 500; font-size: 12.5px; line-height: 1.42; text-transform: none; }
+.ca-peek .ca-foot { margin-top: 8px; }
+.ca-peek .ca-serial { font-size: 8px; }
+/* An explicit disc, in px — the peek is the one tier whose container is large
+   enough that any cqw-relative floor becomes a blot. */
+.ca-peek .ca-val { font-size: 12px; min-width: 26px; padding: 0; }
+.ca-peek .ca-mnum b { font-size: 58px; }
+.ca-peek .ca-mnum i { font-size: 17px; }
+.ca-peek.ca-money .ca-title { font-size: 11px; }
+
+/* peek rent: the colour field is a framed plate, not the whole panel — the
+   panel still has to carry a paragraph of rule text on stock */
+.ca-peek .ca-art-field {
+  position: relative;
+  min-height: 116px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--ca-edge);
+}
+.ca-peek .ca-field-split > .ca-half { padding: 10%; }
+.ca-peek .ca-field-split > .ca-half .ca-glyph { width: 74px; height: 74px; }
+.ca-peek .ca-medal { padding: 4px 11px; font-size: 12px; border-width: 1.5px; }
+.ca-peek .ca-medal-mark { width: 13px; height: 13px; }
+.ca-peek .ca-art-pair { min-height: 96px; }
+.ca-peek .ca-pairhalf .ca-glyph { width: 100%; height: 100%; max-height: 92px; }
+.ca-peek .ca-wheel-art { width: 116px; height: 116px; }
+.ca-peek.ca-back { gap: 16px; }
+.ca-peek.ca-back .ca-back-word { width: 62%; }
+.ca-peek.ca-back .ca-back-sub { font-size: 8px; }
+.ca-peek.ca-back .ca-back-art { width: 58%; }
+
+/* The peek's kind/name/rule are suppressed in ui/peek.js body(), not here —
+   it skips BUILDING them when the face already prints them, rather than
+   building three strings and hiding them. */

@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PAIR_RUNNER = ROOT / "scripts/evaluate_v030_dynamic_fork_pair.py"
 HPA_RUNNER = ROOT / "scripts/evolve_v030_subagent_prototypes.py"
 DEFAULT_HPA = ROOT / "experiments/complex-game-multiagent-v030/hpa-after-correct-case-and-polaris-v7/proof.json"
-DEFAULT_PROFILE = ROOT / "experiments/inner-agent/deepseek-harness-profile.local.json"
+DEFAULT_PROFILE = ROOT / "experiments/inner-agent/qwen38-harness-profile.local.json"
 DEFAULT_INNER = ROOT / "experiments/agentx/inner_harness_gcbench.json"
 CONTINUATION_GOAL = "Improve the existing game every epoch: preserve working features, make a concrete quality improvement, and verify the result."
 
@@ -98,10 +98,9 @@ def run(args: argparse.Namespace) -> dict:
             current_seed = saved_seed
     environment = dict(os.environ)
     environment.update({
-        "DEEPSEEK_ROUTE_MODE": "mixed",
-        "DEEPSEEK_POLARIS_BASE_URL": args.polaris_base_url,
-        "DEEPSEEK_POLARIS_API_KEY": args.polaris_api_key,
-        "DEEPSEEK_POLARIS_MODEL": args.polaris_model,
+        "GAMECRAFT_BENCH_JUDGE_OPENAI_BASE_URL": args.polaris_base_url,
+        "GAMECRAFT_BENCH_JUDGE_OPENAI_API_KEY": args.polaris_api_key,
+        "GAMECRAFT_BENCH_JUDGE_MODEL": args.polaris_model,
         "GAME_LOOP_PROVIDER_KEY_SALT": args.provider_salt,
     })
     for epoch in range(int(state["next_epoch"]), args.epochs + 1):
@@ -195,6 +194,8 @@ def run(args: argparse.Namespace) -> dict:
             })
             state["hpa_proof"] = str(next_hpa.resolve())
             state["next_epoch"] = epoch + 1
+            state.pop("blocked_at_epoch", None)
+            state.pop("blocked_reason", None)
             state_path.write_text(json.dumps(state, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
         except _CommandTimeout as exc:
             pair_dir.mkdir(parents=True, exist_ok=True)

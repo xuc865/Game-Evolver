@@ -1,0 +1,57 @@
+{
+ "$schema": "chud-fixture/1",
+ "name": "lobby",
+ "description": "Real 5-seat lobby broadcast: host, four bots with modes, no game yet.",
+ "seed": 1338,
+ "selfId": "6617cfa1-d07e-40c0-8861-268ec992aee2",
+ "room": "Q8TW",
+ "recordedAt": "2026-08-07T01:42:57.741Z",
+ "states": [
+  {
+   "type": "state",
+   "code": "Q8TW",
+   "phase": "lobby",
+   "players": [
+    {
+     "id": "6617cfa1-d07e-40c0-8861-268ec992aee2",
+     "name": "HARNESS",
+     "connected": true,
+     "isBot": false,
+     "botMode": null
+    },
+    {
+     "id": "7d0d2ea9-e5b3-4cdc-b073-e094efd976d6",
+     "name": "Bolt",
+     "connected": true,
+     "isBot": true,
+     "botMode": "conservative"
+    },
+    {
+     "id": "612e4b57-76bf-445c-aeca-27926c18d06d",
+     "name": "Cobra",
+     "connected": true,
+     "isBot": true,
+     "botMode": "neutral"
+    },
+    {
+     "id": "06277209-b3fa-4ee0-adf6-c55f3589c751",
+     "name": "Jester",
+     "connected": true,
+     "isBot": true,
+     "botMode": "aggressive"
+    },
+    {
+     "id": "18592ea3-b819-4344-ae6a-d047f1a45a61",
+     "name": "Shadow",
+     "connected": true,
+     "isBot": true,
+     "botMode": "chud"
+    }
+   ],
+   "hostId": "6617cfa1-d07e-40c0-8861-268ec992aee2",
+   "game": null,
+   "turnTimer": null,
+   "responseTimer": null
+  }
+ ]
+}

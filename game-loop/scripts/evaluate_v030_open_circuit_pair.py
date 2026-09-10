@@ -38,7 +38,7 @@ DEFAULT_CANDIDATE = (
     / "experiments/studio-projects/v030-real-hpa-open-circuit-v9/runtime-verification"
     / "episode/submission.json"
 )
-DEFAULT_PROFILE = ROOT / "experiments/inner-agent/deepseek-harness-profile.local.json"
+DEFAULT_PROFILE = ROOT / "experiments/inner-agent/qwen38-harness-profile.local.json"
 DEFAULT_INNER = (
     ROOT / "game_loop/product_assets/experiments/agentx/inner_harness_gcbench.json"
 )

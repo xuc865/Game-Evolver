@@ -108,8 +108,10 @@ class AttributionDrivenInnerGradientProposer:
         target_harness: HarnessProfile,
     ) -> HarnessSemanticGradient:
         memory_hint = ""
+        focus_tags: tuple[str, ...] = ()
         if self.memory is not None:
             memory_hint = self.memory.render_proposer_context(loop_role="inner")
+            focus_tags = self.memory.recent_focus_tags(loop_role="inner")
         outer_tags: list[str] = []
         outer_notes: list[str] = []
         if self.outer_library_store is not None:
@@ -164,6 +166,9 @@ class AttributionDrivenInnerGradientProposer:
             tags = (category, module_tag, "usage_driven")
             if len(report.run_refs) % 3 == 0:
                 tags = (*tags, "element_merge")
+        if focus_tags:
+            diagnosis = f"{diagnosis}; focus={', '.join(focus_tags[:6])}"
+            tags = tuple(dict.fromkeys((*focus_tags, *tags)))
         if memory_hint:
             diagnosis = f"{diagnosis}; {memory_hint}"
         if outer_notes:
@@ -373,8 +378,10 @@ class InnerOutcomeOuterGradientProposer:
     ) -> HarnessSemanticGradient:
         del proposer_harness
         memory_hint = ""
+        focus_tags: tuple[str, ...] = ()
         if self.memory is not None:
             memory_hint = self.memory.render_proposer_context(loop_role="outer")
+            focus_tags = self.memory.recent_focus_tags(loop_role="outer")
         if latest_inner_result.accepted:
             diagnosis = "inner epoch promoted; reinforce accurate harness-generation elements"
             tags = ("workflow", "usage_driven", "element_merge")
@@ -386,6 +393,9 @@ class InnerOutcomeOuterGradientProposer:
             diagnosis = "infrastructure events require safer outer element-library refinement"
         tag = self._OUTER_TAGS[latest_inner_result.epoch % len(self._OUTER_TAGS)]
         diagnosis = f"{diagnosis}; explore {tag}"
+        if focus_tags:
+            diagnosis = f"{diagnosis}; focus={', '.join(focus_tags[:6])}"
+            tags = tuple(dict.fromkeys((*focus_tags, *tags)))
         if memory_hint:
             diagnosis = f"{diagnosis}; {memory_hint}"
         return HarnessSemanticGradient(

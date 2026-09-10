@@ -753,7 +753,7 @@ class HarnessEvolutionConfig:
     allowed_niches: tuple[str, ...] = ()
     loop_role: str = "inner"
     rubric_validation_sample_size: int = 2
-    rubric_provider: str = "deepseek"
+    rubric_provider: str = "glm"
     rubric_judge_timeout_seconds: int = 120
     require_rubric_validation: bool = True
     dynamic_rubric_generation: bool = True
@@ -870,7 +870,7 @@ class HarnessEvolutionConfig:
                     value.get("replay_min_cases", 2),
                 )
             ),
-            rubric_provider=str(value.get("rubric_provider", "deepseek")).strip().lower(),
+            rubric_provider=str(value.get("rubric_provider", "glm")).strip().lower(),
             rubric_judge_timeout_seconds=int(value.get("rubric_judge_timeout_seconds", 120)),
             require_rubric_validation=bool(value.get("require_rubric_validation", True)),
             dynamic_rubric_generation=bool(value.get("dynamic_rubric_generation", True)),

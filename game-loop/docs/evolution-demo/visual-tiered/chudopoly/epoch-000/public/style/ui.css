@@ -1,0 +1,1925 @@
+/* ui.css — screens, HUD, prompt bar, comms, sheets, overlays.
+   Owner: art-direction agent (ART-DIRECTION §3, §4).
+
+   §3 named eight things that make this read as a web app. Five of them are
+   fixed in this file:
+     1  full-width stacked bands              → §5's three columns (table.css)
+     2  the ×9 rounded-rect panel stack       → material, below
+     3  the login-form home screen            → the apron IS the home screen
+     4  gradient CTAs                         → base.css's ink slab
+     5  glow as personality                   → the roundel is DEBOSSED
+     6  ~40 tracked-caps micro-labels         → base.css's type scale
+     7  floating hint pills                   → stencilled (content.css)
+   Nothing in this file may reintroduce `border: 1px solid` on furniture, a
+   gradient on a control, or a glow on anything. */
+
+/* ── panels: content surfaces, not table furniture ─────────────────────────
+   A sheet or a modal is the ONE place a raised plane is honest — it is a piece
+   of paper held over the table. It gets the card's own soft shadow (paper has
+   mass) and the card's own hard edge, and it never gets a 1px outline on a
+   slightly-lighter ground. */
+
+.panel {
+  position: relative;
+  width: min(24em, 100%);
+  margin: auto;
+  padding: 1.2em 1.1em 1.2em;
+  display: flex;
+  flex-direction: column;
+  gap: .65em;
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--card-drop-air), inset 0 0 0 1px var(--shade);
+}
+
+/* ══ HOME — the apron, seen from above (§3.3) ══════════════════════════════
+
+   §3.3, ratified: "the home screen IS the table, seen from above, with the deck
+   sitting on it and the actions painted into the apron as markings."
+
+   ROUND-6 REVIEW, and this one is measured rather than argued. On the previous
+   build, at 1440×900 dark, first-timer (tools/lib/harness.mjs viewport +
+   getBoundingClientRect over every painting node in #screen-home):
+
+     ink box            1044 × 500 at (198, 200)
+     of the viewport    72.5% of the width, 55.6% of the HEIGHT
+     dead apron         22.2% above, 22.2% below, 13.8% either side
+     mass centres       deck midX 30% · wordmark midX 63% · actions midX 66%
+     bounding-box       dead centre — offset 0px h, 0px v
+
+   The last two lines together are the whole diagnosis. The composition's BOX
+   was already centred, so "it sits right of centre" was never a margin problem
+   and no amount of nudging would have found it. What was off-centre was the
+   WEIGHT: two half-weight objects at 30% and 66% with a hole between them, and
+   44% of the viewport height carrying nothing at all. The wordmark — a 440×134
+   bone plate, by a wide margin the brightest object on a near-black ground —
+   sat in the right-hand mass at 32% of the height, which is what made the
+   balance read wrong.
+
+   THE HYPOTHESIS WAS "CENTRE THE WORDMARK", AND CENTRING ALONE MAKES IT WORSE.
+   Tested: a centred column at 1440 puts every object on one ~500px axis and
+   strands 470px of unmarked apron on each side — the same disease rotated 90°,
+   and now it reads as a splash screen, which is the one thing §3.3 forbids. A
+   table seen from above has no sky to hang a logo in.
+
+   WHAT ACTUALLY FIXES IT: markings run to the edge of the frame; objects do
+   not. That is how a real apron is composed and it is already this design's own
+   vocabulary — the painted line is what anchors the surface, and the furniture
+   standing on it is free to sit wherever it sits. So the screen is three
+   registers, at every width:
+
+     head    the wordmark plate, with a rule under it that reaches both edges
+     table   the deck — now the LARGEST object on screen, filling the 1fr row
+     rail    the hold-short line edge to edge, and the marshalling area painted
+             along it, with the two secondary marks at the frame's corners
+
+   The wordmark IS centred, which is what was asked for, and it no longer floats
+   — the full-bleed rule under it is what holds it down. Every edge of the frame
+   now carries a marking, so there is no dead band left to strand anything in,
+   and the deck is the hero it should always have been on a card game's menu.
+
+   Only the rail's internal arrangement changes between widths; the three
+   registers are the same everywhere, which is why the phone and the desktop are
+   recognisably the same screen. */
+
+.home {
+  --home-pad: clamp(1em, 4.5vw, 3.5em);
+
+  position: relative;
+  z-index: 1;
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-areas: "head" "table" "rail";
+  /* NO horizontal padding here, deliberately: the two rules are MARKINGS, and a
+     marking that stops 3em short of the edge is a box. The inset lives on the
+     contents (--home-pad) so the lines can reach the frame. */
+  padding: clamp(.4em, 1.6vh, 1.1em) 0 0;
+}
+
+/* ── head: the plate, painted on the concrete ─────────────────────────── */
+
+.home-head {
+  grid-area: head;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .5em;
+  padding: 0 var(--home-pad) clamp(.5em, 1.5vh, 1em);
+  text-align: center;
+}
+/* The rule that stops the plate floating. Solid over dashed, the flight-line
+   pair — the same two-weight vocabulary the hold-short line uses below, so the
+   screen is bracketed by one marking language rather than two. */
+.home-head::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 5px;
+  pointer-events: none;
+  background:
+    linear-gradient(var(--stencil-hi), var(--stencil-hi)) 0 0 / 100% 2px no-repeat,
+    repeating-linear-gradient(90deg, var(--stencil) 0 26px, transparent 26px 40px) 0 3px / 100% 2px no-repeat;
+}
+/* The plate's size, capped on BOTH axes. Width alone is not enough: the mark is
+   3.29:1, so a width cap that suits 1440×900 makes it 228px tall in a 390-wide
+   phone's short landscape and eats the deck. Height-capped in vh, it yields to
+   the register that has the object in it. Overrides cardart.css's own
+   `max-width: 440px` (0,2,0 beats 0,1,0) — that file owns the drawing, this
+   file owns its place in the composition, which is the split its header sets. */
+.home-head .brand-mark {
+  max-width: min(560px, 88vw);
+  max-height: min(160px, 19vh);
+}
+
+/* ── table: the deck, and it is the hero ──────────────────────────────── */
+
+/* RESEARCH, and this is the number that moved the design: across the shipping
+   menus that put an object in the middle of a wide frame, the object is big
+   enough to BE the composition — Hearthstone's box measures ~60% of the screen
+   width by ~76% of its height on a 3840×2160 capture, and its four corner
+   elements have not moved in eight years of menu churn. A 400px assembly in a
+   1440px frame reads as an accident; a 60% object reads as intent. The first
+   pass of this layout put the deck at 39% × 49% and it still looked timid, so
+   the head and the rail are trimmed to whatever they actually need and every
+   pixel of slack goes to the deck.
+
+   The deck also sits ABOVE the geometric centre, by the asymmetric padding
+   below: the optical centre of a rectangle — "the place where a viewer's eye
+   spends most of its time" — is slightly above the geometric one, and
+   Hearthstone's own primary control sits 31% from the top rather than 50%. */
+.home-table {
+  grid-area: table;
+  position: relative;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(.3em, 1vh, .7em);
+  padding: clamp(.3em, 1vh, .7em) var(--home-pad) clamp(.6em, 2.4vh, 1.8em);
+  /* a size container, so the deck can be sized off the height it was GIVEN.
+     Without this there is no way to say "as wide as fits, but no taller than
+     the row" in one box: aspect-ratio derives the cross axis from the main one
+     and max-width clamps the result without shrinking the height back, which is
+     exactly what left 70px of empty deck box under the cards on the phone. */
+  container-type: size;
+}
+/* the painted inlay the piles stand in — the same compass marking table.css
+   prints at the centre of the table, because this IS that table. Sized off the
+   deck rather than in em so it tracks the hero instead of the root font. */
+.home-table::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: min(30em, 62vh);
+  aspect-ratio: 1;
+  translate: -50% -50%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, transparent 0 46%, var(--stencil-hi) 46% 46.6%, transparent 46.6%),
+    radial-gradient(circle, transparent 0 39%, var(--stencil) 39% 39.4%, transparent 39.4%),
+    repeating-conic-gradient(from 0deg, var(--stencil) 0deg .5deg, transparent .5deg 15deg);
+  -webkit-mask-image: radial-gradient(circle, #000 38%, transparent 49%);
+  mask-image: radial-gradient(circle, #000 38%, transparent 49%);
+  pointer-events: none;
+}
+
+/* The deck takes every pixel the row can spare, in whichever axis binds. The
+   width is the smaller of "the whole row" and "as wide as this aspect can be
+   without exceeding the row's height, less the tag under it" — 100cqh is the
+   row's content height, --deck-reserve is the tag plus its gap, and 1.43 is
+   100/70 written the other way round.
+
+   100/74 is the MEASURED extent of the arrangement below with the rotations
+   applied. At 38cqw per card, each group's axis-aligned box is
+   w' = W·|cos θ| + H·|sin θ| about its own centre, which puts the three at
+   x −0.8→103.0 and y 0.9→73.1 in cqw. It is not a guess at a nice ratio — the
+   first pass used 100/70 and the Inspector General's rotated bottom corner ran
+   3.1cqw past the box, which at 1440 is 19px straight through the "104 cards"
+   chip. A menu whose gate fails on buried text is a menu that buried text. */
+.home-deck {
+  --deck-reserve: 2.6em;
+
+  position: relative;
+  flex: 0 1 auto;
+  align-self: center;
+  width: min(100%, calc((100cqh - var(--deck-reserve)) * 1.351));
+  aspect-ratio: 100 / 74;
+  /* an inline-size container so the cards' offsets and their corner radius can
+     be expressed against the DECK, while each card is its own container for the
+     art inside it (cardart.css queries the nearest one) */
+  container-type: inline-size;
+}
+
+/* One box per card. cardart.css sizes every tier off `container-type:
+   inline-size` on the element that holds the .ca, so this is the same hand-off
+   the table makes — .home-cardbox stands in for .card-face/.card-back, without
+   claiming either class or a [data-card-id]. Nothing that walks the table can
+   see these. */
+.home-cardbox {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 38cqw;
+  aspect-ratio: var(--card-ratio);
+  container-type: inline-size;
+  /* 6% of the card's width — the proportion --card-r targets before its 6px
+     clamp, which exists for 40px cards and would read as a square corner on a
+     200px one. 38cqw × .06 = 2.3cqw. */
+  border-radius: 2.3cqw;
+  box-shadow: var(--card-drop);
+}
+.home-cardbox > .ca { border-radius: inherit; }
+
+/* The deal. Four backs at a dealer's angle, two cards face up beside them —
+   near enough to read as "dealt off this pile", far enough not to occlude the
+   pile's own mark. Percentages of the deck box, so the whole arrangement is one
+   scalable drawing.
+
+   dealt-0 starts at 36cqw and not the 31 the first pass used, because the BACK
+   prints the wordmark across its middle 66% — at 38cqw wide from x=1 that runs
+   x 7.5→32.5, and the F-22's rotated left edge was landing at 27.8 and cutting
+   the word in half. The one dark object in the design was the one thing being
+   occluded. */
+.home-back-0 { translate: 1cqw 9cqw; rotate: -4deg; }
+.home-back-1 { translate: 2.4cqw 10.2cqw; rotate: 2.6deg; }
+.home-back-2 { translate: 1.4cqw 9.6cqw; rotate: -1.2deg; }
+.home-back-3 { translate: 2cqw 9cqw; rotate: .6deg; }
+.home-dealt-0 { translate: 36cqw 3cqw; rotate: 7deg; }
+.home-dealt-1 { translate: 57cqw 15cqw; rotate: 20deg; }
+
+.home-deck-tag {
+  margin: 0;
+  flex: 0 0 auto;
+  font-size: var(--t-micro);
+  font-weight: 700;
+  color: var(--fg-mute);
+  padding: .1em .5em;
+  border-radius: 2px;
+  background: var(--ground);
+}
+
+/* ── rail: the hold-short line and everything painted along it ─────────── */
+
+.home-rail {
+  grid-area: rail;
+  position: relative;
+  display: grid;
+  /* minmax(0, 1fr), NOT 1fr. A bare 1fr is minmax(AUTO, 1fr), so each side
+     column carries its own content's min-content as a floor — "How to play" is
+     86px and the sound mark is 118px — and the free space either side of the
+     centre column then divides unevenly. Measured on the first pass: the
+     marshalling area's midpoint landed at 42% of the viewport instead of 50%,
+     which is the same off-centre-weight defect this round exists to fix, only
+     mirrored.
+     AMENDED: minmax(10em, 1fr), still symmetric. The defect above was UNEQUAL
+     content-driven floors (86 vs 118), not floors as such — an equal floor on
+     both sides cannot move the centre. Measured by the flight-log agent: at
+     minmax(0) the outer tracks resolved to 92.9px at 1280 against "How to play"
+     alone at 80px, so a SECOND reading mark had nowhere to go but underneath. */
+  grid-template-columns: minmax(10em, 1fr) minmax(0, auto) minmax(10em, 1fr);
+  grid-template-areas: "help actions settings";
+  align-items: center;
+  gap: .7em 1.2em;
+  padding: clamp(.8em, 2.2vh, 1.4em) var(--home-pad) clamp(.5em, 1.6vh, 1.1em);
+}
+/* the hold-short line: two solid, two dashed, and it runs to both edges */
+.home-rail::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 11px;
+  pointer-events: none;
+  background:
+    linear-gradient(var(--stencil-hi), var(--stencil-hi)) 0 0 / 100% 2px no-repeat,
+    linear-gradient(var(--stencil-hi), var(--stencil-hi)) 0 3px / 100% 2px no-repeat,
+    repeating-linear-gradient(90deg, var(--stencil-hi) 0 12px, transparent 12px 22px) 0 7px / 100% 2px no-repeat,
+    repeating-linear-gradient(90deg, var(--stencil-hi) 0 12px, transparent 12px 22px) 0 10px / 100% 2px no-repeat;
+}
+
+/* One flex-wrap rule for both layouts, because the desktop row and the phone
+   stack are the SAME order — greeting, call sign, the slab, the alternates,
+   the error. The 15em bases put call sign and the slab side by side wherever
+   the rail is at least ~32em wide and stack them below that; there is no second
+   template to keep in step. */
+.home-actions {
+  grid-area: actions;
+  /* NOT the default stretch: `width: min(44em, 100%)` overrides stretch, and a
+     narrower-than-its-column item then sits at the column's inline START. That
+     is what put the marshalling area's midpoint at 42% of the viewport with the
+     side columns already at minmax(0, 1fr) — the auto column is as wide as the
+     block's max-content, and the block was left-aligned inside it. */
+  justify-self: center;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: .5em .7em;
+  width: min(44em, 100%);
+}
+.home-greet { flex: 1 1 100%; margin: 0; text-align: center; }
+.home-slot { flex: 1 1 15em; display: flex; align-items: center; gap: .7em; }
+.home-slot .field-label { flex: 0 0 auto; margin: 0; }
+.home-slot .field { flex: 1 1 auto; min-width: 0; }
+/* ROUND-5: the CTA pressed SHALLOWER than the buttons under it. It inherits
+   --btn-drop: 4px like every other control, but its face is the ink slab and
+   --press-ink is a mid tone, so 4px of grey against near-black read as less
+   travel than the same 4px against a transparent secondary. The primary action
+   gets the deepest press in the app, which is also what §4 means by the press
+   being the whole affordance. */
+.home-go { flex: 1 1 15em; font-size: 1.1em; min-height: calc(var(--tap) * 1.15); --btn-drop: 6px; }
+/* The alternates taper: narrower than the row above and centred, so the rail
+   reads as one marshalling block that steps down in weight rather than three
+   full-width bars. */
+.home-alt {
+  flex: 1 1 100%;
+  display: flex;
+  gap: .5em;
+  align-items: stretch;
+  justify-content: center;
+  width: min(30em, 100%);
+  margin-inline: auto;
+}
+.home-alt .btn { flex: 1 1 auto; }
+.home-join { flex: 1 1 auto; display: flex; gap: .35em; min-width: 0; }
+.home-join .field-code { flex: 1 1 4.5em; min-width: 0; }
+.home-join .btn { flex: 0 0 auto; padding: 0 .9em; }
+.home #home-error { flex: 1 1 100%; margin: 0; text-align: center; }
+
+/* ── the opt-in public toggle (owner directive 2026-08-07) ────────────────
+   Painted lettering by the marshalling area's own rules — mute ink, no
+   chassis — with §0.9's 44px box on the whole label so the words are the
+   target, not the 16px square. */
+.home-public {
+  flex: 1 1 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: .35em;
+  min-height: var(--tap);
+  font-size: var(--t-small);
+  font-weight: 700;
+  color: var(--fg-mute);
+  cursor: pointer;
+  user-select: none;
+}
+.home-public:has(input:checked) { color: var(--fg); }
+
+/* ── OPEN TABLES (public rooms) ───────────────────────────────────────────
+   Furniture on the apron: the same debossed well the comms log sits in, not a
+   1px-bordered card list (§3.2). Present only while the poll finds a public
+   lobby — ui/home.js keeps it `hidden` otherwise, so the zero-rooms home is
+   unchanged. Rows are full-width 44px targets; the code is the only mono. */
+.home-tables {
+  flex: 1 1 100%;
+  width: min(30em, 100%);
+  margin: .35em auto 0;
+  padding: .35em .5em .45em;
+  border-radius: var(--radius);
+  background: var(--ground);
+  box-shadow: var(--deboss);
+}
+.home-tables-label {
+  margin: 0 0 .15em;
+  font-size: var(--t-micro);
+  font-weight: 800;
+  letter-spacing: var(--track-display);
+  color: var(--fg-mute);
+}
+.home-table-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: flex-start;
+  gap: .6em;
+  min-height: var(--tap);
+  padding: 0 .3em;
+  font-size: var(--t-small);
+  --btn-face: transparent;
+  --btn-edge: transparent;
+  --btn-drop: 0px;
+  box-shadow: inset 0 -1px 0 var(--shade);
+  border-radius: 0;
+}
+.home-table-row:last-child { box-shadow: none; }
+.home-table-host { color: var(--fg); font-weight: 800; }
+.home-table-meta { flex: 1 1 auto; text-align: left; color: var(--fg-mute); font-weight: 600; min-width: 0; }
+.home-table-code { color: var(--fg-mute); letter-spacing: .08em; }
+
+/* The two corner marks. Painted, not buttons: a fourth and fifth ink slab in
+   the rail would flatten the hierarchy the slab exists to carry, and these sit
+   at the frame's corners where a real apron puts its lettering. They keep the
+   §0.9 44px box; only the fill is gone. */
+.home-help, .home-settings {
+  min-height: var(--tap);
+  padding: 0;
+  box-shadow: none;
+  font-weight: 700;
+  font-size: var(--t-small);
+  color: var(--fg-mute);
+  --btn-ink: var(--fg-mute);
+}
+.home-help { grid-area: help; justify-self: start; }
+.home-settings { grid-area: settings; justify-self: end; gap: .45em; }
+.home-help > span, .home-help,
+.home-settings > span, .lobby-mark {
+  text-decoration: underline;
+  text-underline-offset: .28em;
+  text-decoration-thickness: 1px;
+  text-decoration-color: var(--stencil-hi);
+}
+.home-help:active:not(:disabled),
+.home-settings:active:not(:disabled) { transform: none; box-shadow: none; }
+
+/* The repository mark (owner directive 2026-08-07: "add a github icon/emblem
+   to the home page so people can click on it easily"). GitHub's own octicon,
+   inline as text (§0.3), drawn to the painted-mark rules above: same mute ink,
+   same §0.9 44px box, no slab, no press travel. An ANCHOR, not a button — the
+   browser owns the navigation — so the text marks' underline is stripped:
+   iconography carries no rule, and the accessible name is on the anchor. */
+.home-github {
+  min-width: var(--tap);
+  min-height: var(--tap);
+  padding: 0;
+  box-shadow: none;
+  align-self: center;
+  color: var(--fg-mute);
+  --btn-ink: var(--fg-mute);
+  text-decoration: none;
+}
+.home-github:active { transform: none; box-shadow: none; }
+@media (hover: hover) {
+  .home-github:hover { background: transparent; color: var(--fg); --btn-ink: var(--fg); }
+}
+
+/* ── the dial, on a rail mark ─────────────────────────────────────────────
+   The SAME --ico-dial the HUD's settings button wears, painted the same way
+   (a currentColor mask), rather than a second settings glyph drawn to sit next
+   to a word. §3.8's failure is one motif reskinned; its inverse is two motifs
+   for one action, and a player who learns the dial in the HUD should not have
+   to learn a gear on the menu. It is a MARK, not a .btn-icon: the icon button
+   is a 44px square with no label, and these carry their word. */
+.mark-dial::before {
+  content: "";
+  flex: none;
+  width: 1.15em;
+  height: 1.15em;
+  background-color: currentColor;
+  -webkit-mask: var(--ico-dial) center / contain no-repeat;
+  mask: var(--ico-dial) center / contain no-repeat;
+}
+
+/* ── first-timer vs returning ──────────────────────────────────────────────
+   These rendered identically: the saved call sign was pushed into the field and
+   nothing acknowledged it, so the row that was already ANSWERED still looked
+   like the first question. The greeting names them, and the call-sign row
+   demotes so the slab is the first thing in the rail with weight.
+
+   NOT a reorder. Putting the answered field below the button is the obvious
+   version and it breaks §0.9's keyboard clause via WCAG 2.4.3 — the visual and
+   focus orders would disagree. DOM order is fixed; only emphasis moves. */
+.home-greet {
+  font-size: var(--t-small);
+  font-weight: 700;
+  color: var(--fg);
+}
+/* Demotion by PROPORTION, not by opacity or type size. Both of those were in
+   the first draft and both are unmeasurable here: tools/checkContrast.mjs runs
+   on pristine storage, so it only ever renders the first-timer, and an .82
+   opacity on --fg-mute or a .92em cut of --t-micro would have shipped as the
+   one state on this screen no gate looks at. The answered row simply stops
+   taking half the rail and the slab takes what it gives up. */
+.home.is-returning .home-slot { flex: 0 1 13em; }
+.home.is-returning .home-go { flex: 1 1 22em; }
+
+/* ── phone / short: the rail's three cells become two rows ─────────────── */
+
+@media (max-width: 719px) {
+  .home-rail {
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      "actions actions"
+      "help    settings";
+    gap: .5em .8em;
+  }
+
+  /* PORTRAIT DEALS DOWN THE TABLE, NOT ACROSS IT.
+     Measured at 390×844 with the landscape arrangement: the deck came out
+     355×248 — 91% of the width and 29% of the height — because it was already
+     width-bound, so 20% of the viewport sat empty inside the table row while
+     the deck could not grow into it. The reflex fix is to shrink the register;
+     the right one is to change the arrangement's own aspect, which is what the
+     shipping portrait card menus do (reframe, don't re-stack).
+
+     So the fan descends instead of spreading: 39cqw cards stepping right AND
+     down, box aspect 100/89 instead of 100/74. Measured extent with the
+     rotations applied: x −1.6→99.5, y 1.85→88.25 in cqw. dealt-0 starts at
+     36cqw because the back prints its word across 6.6→32.4 here and anything
+     lower cuts it. */
+  .home-deck {
+    aspect-ratio: 100 / 89;
+    width: min(100%, calc((100cqh - var(--deck-reserve)) * 1.124));
+  }
+  .home-cardbox { width: 39cqw; border-radius: 2.3cqw; }
+  .home-back-0 { translate: 0 3cqw; rotate: -3.5deg; }
+  .home-back-1 { translate: 1.4cqw 4.2cqw; rotate: 2.4deg; }
+  .home-back-2 { translate: .4cqw 3.6cqw; rotate: -1deg; }
+  .home-back-3 { translate: 1cqw 3cqw; rotate: .6deg; }
+  .home-dealt-0 { translate: 36cqw 14cqw; rotate: 8deg; }
+  .home-dealt-1 { translate: 53cqw 29cqw; rotate: 18deg; }
+}
+
+/* Landscape phone. 844×390 is 390px of height for three registers, and the
+   previous build overflowed it in both directions — measured at y −11…401 in a
+   390 viewport, with `justify-content: center` on the scroll container making
+   the top 11px unreachable rather than merely clipped. Here the plate and the
+   rail sit side by side so the deck keeps a register of its own, and the 1fr
+   row cannot push anything past the frame. */
+@media (max-height: 560px) and (orientation: landscape) {
+  .home {
+    grid-template-columns: minmax(0, 19em) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "head  table"
+      "rail  rail";
+    padding-top: .4em;
+  }
+  .home-head { justify-content: center; padding: 0 0 .4em var(--home-pad); }
+  .home-head::after { display: none; }
+  /* 19vh of a 390px viewport is a 74px plate, which at 3.29:1 is 244px wide and
+     reads as a favicon. Here the plate is width-bound by its own column
+     instead, which is the axis that has room in landscape. */
+  .home-head .brand-mark { max-width: 100%; max-height: 38vh; }
+  /* Five lines of strapline in 390px of height is a paragraph where the deck
+     should be. The mark and the deck carry the identity at this size. */
+  .brand-sub { display: none; }
+  .home-table { padding-top: 0; }
+  .home-table::before { display: none; }
+  .home-rail { padding-top: .7em; padding-bottom: .4em; }
+  .home-greet { display: none; }
+}
+
+/* ══ LOBBY — the same three registers as the home screen ══════════════════
+
+   OWNER, 2026-08-07: "I never really looked at this cause I only ever did games
+   with bots but this definitely needs to be reworked… mobile scrollable,
+   desktop take up two columns."
+
+   WHY NOBODY HAD LOOKED. A lobby broadcast carries no `game` object
+   (server/broadcast.js broadcastRoom), so state/store.js applyState never
+   learns which seat is ours — `store.self.id` stays null and ui/lobby.js's
+   `host` test is false. Every `lobby@*.png` in tools/shots is therefore the
+   GUEST view, with #lobby-host, the clocks and the entire ruleset picker
+   hidden. The host lobby has never appeared in a review set. These numbers
+   come from driving the real flow instead (create room, add three bots):
+
+     1280×720, host + 3 bots, disclosure CLOSED
+       .lobby-panel      431 × 720, content 1138  →  418px unreachable
+       panel top         y −197        the room code sat ABOVE the viewport
+       Copy invite link  y −124..−80   entirely off the top
+       Launch Mission    y  805..849   85px past the bottom
+       off-viewport      54 controls
+       ink box           431 × 2531 = 33.6% × 351.5% of the viewport
+       dead apron        33.2% either side, which is the owner's ~72%
+     1920×1080  ink 468 × 2662 = 24.4% × 246.5%, apron 37.8% either side
+     390×844    ink 387 × 2284 = 270.6% of the viewport height
+     844×390    ink 600 × 1891 = 484.9%
+     with the disclosure OPEN, #ruleset goes 504 → 2041 and Launch Mission
+       lands at y 2342.
+
+   `.screen-lobby` was `overflow: hidden` and the ONLY scroller was the 58px
+   seat list, so none of the overflow was reachable by scrolling in either
+   direction. On a 1280×720 desktop with four seats the host could not press
+   the button the screen exists for, and could not read the room code they were
+   there to share. That is a defect, not a taste note.
+
+   The fix is the home screen's, because this should be recognisably the same
+   screen (5c0bdc7): MARKINGS RUN TO THE EDGE OF THE FRAME AND OBJECTS DO NOT.
+   Three registers at every width —
+
+     head   ROOM + code + the invite, with a full-bleed rule under it: the
+            same plate-and-rule the home screen opens with
+     body   the 1fr row and the ONLY scroll container. Two columns on a
+            pointer screen, one on a phone. Nothing else on the screen scrolls.
+     rail   the hold-short line edge to edge, Launch Mission painted in the
+            marshalling area, and the two secondary marks at the frame's
+            corners — Leave room, and Settings, in the same corner the home
+            rail puts Settings in.
+
+   The invariant this buys, which the single column had no way to hold: the
+   rail is a fixed grid row, so NOTHING in the body can push the primary action
+   off the bottom. Not four presets, not five seats, not the deck editor with
+   thirteen steppers, not a future stats logbook.
+
+   The stencilled marshalling box (hard corner ticks) is gone with the panel it
+   framed. It drew a box around 33% of the screen, and a box that stops short of
+   the frame is the exact thing §3.3 rules against — the head's rule and the
+   rail's hold-short line are the markings now, and they reach both edges. */
+
+.screen-lobby {
+  align-items: stretch;
+  justify-content: flex-start;
+  overflow: hidden;
+}
+
+.lobby {
+  --lobby-pad: clamp(1em, 4.5vw, 3.5em);
+
+  position: relative;
+  z-index: 1;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-areas: "head" "body" "rail";
+  /* NO horizontal padding, for the reason .home carries the same note: the two
+     rules are MARKINGS, and a marking that stops short of the edge is a box.
+     The inset lives on the contents. */
+  padding: clamp(.4em, 1.6vh, 1.1em) 0 0;
+}
+
+/* ── head: the plate ──────────────────────────────────────────────────── */
+
+.lobby-head {
+  grid-area: head;
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: .3em 1em;
+  padding: 0 var(--lobby-pad) clamp(.5em, 1.5vh, .9em);
+}
+/* the rule under the plate, edge to edge — .home-head::after's twin */
+.lobby-head::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--stencil-hi);
+  pointer-events: none;
+}
+.lobby-invite { flex: 0 0 auto; }
+.lobby-code-mirror {
+  width: 100%;
+  order: 3;
+  text-align: center;
+  color: var(--fg-mute);
+  font-size: var(--t-small);
+  font-weight: 700;
+  letter-spacing: .08em;
+  white-space: nowrap;
+}
+
+/* ── body: the only scroll container on this screen ───────────────────── */
+
+/* NO env(safe-area-inset-*) here or on anything inside it. `.screen` is the
+   single inset owner and tools/checkClient.mjs fails the build on a second
+   one — the gutter would be counted twice. */
+.lobby-body {
+  grid-area: body;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  /* ROUND-2 LOOK #6: the fold cut the deck editor mid-row ("TDY Orders" sliced
+     at the frame edge) with no cue that the column continues. The device that
+     fixed it — .opponents' travelling shades — is now the SHARED .scroll-edge
+     rule-set above (P10 LOOK unified six surfaces on it); this element carries
+     the class in index.html and only its ground colour here. P10 also adds the
+     feather the shades alone lacked: the sliced stepper row now fades at the
+     fold instead of cutting mid-glyph under a shadow. */
+  --edge-ground: var(--ground);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  /* `safe center`, and the `safe` is the whole point — lobby.css records the
+     measurement that earned it. A centred item taller than its scroll container
+     overflows in BOTH directions and the half above the scrollport can never be
+     scrolled back to; `safe` centres while there is free space and falls back
+     to start alignment the moment there is not. Measured: 1920×1080 body 881
+     tall against ~570 of content, so centring is what stops the screen hanging
+     off the head rule with 300px of nothing under it; 390×844 body 618 against
+     939 of content, where `safe` keeps the seat list reachable at scrollTop 0. */
+  align-content: safe center;
+  gap: 1em;
+  padding: clamp(.6em, 2vh, 1.1em) var(--lobby-pad);
+}
+/* THE SHADES ARE FOR A BODY THAT SCROLLS, and this one often does not.
+   MEASURED at 1920×1080 (host + 4 bots): scrollHeight 881 === clientHeight
+   881 — nothing to scroll to — yet the .scroll-edge cover layers painted two
+   solid var(--ground) bands across the body's top and bottom, one under the
+   head rule and one over the rail, in BOTH themes. On the sheets the same
+   covers are invisible because the sheet paints its own --surface behind them;
+   the lobby body paints nothing of its own, so the covers floated over the
+   apron's grid and vignette as two stray bars. A cue at an end that has
+   nothing behind it is a rendering fault (the strip's ROUND-6 ruling), so the
+   background layers come off this host: what remains of the shared device is
+   the feather mask, which is the half that cannot lie — it only fades content
+   that actually crosses the fold, and a body whose content fits keeps nothing
+   near the fold to fade. */
+.lobby-body.scroll-edge { background: none; }
+.lobby-col { display: flex; flex-direction: column; gap: .5em; min-width: 0; }
+/* A column head is a legend with a rule under it, not a panel title: it names
+   the half without adding a second chassis around it (§3.2), and the rule is
+   the same marking the head plate and the hold-short line are.
+
+   It matches .ruleset-title EXACTLY (lobby.css gives that one the same rule),
+   because they are the two heads of the two halves of one screen and the first
+   pass had them at var(--t-micro) and var(--t-lede) — the left column read as a
+   caption on the seat list and the right as a section of its own. */
+.lobby-legend {
+  margin: 0;
+  font-size: var(--t-lede);
+  font-weight: 700;
+  color: var(--fg);
+  box-shadow: inset 0 -2px 0 var(--shade);
+  padding-bottom: .2em;
+}
+/* THE LEGEND IS BACK AT PHONE WIDTHS, and the rule it replaces is the reason.
+
+   It used to read "the seat list is the first thing under the room code and
+   needs no label to say so" — true while the room column led the stack. It does
+   not lead any more (see THE DECISION LEADS, below): a host's phone body opens
+   on the ruleset, so the seat list is now the SECOND block, arriving under the
+   ruleset's own disclosure summary with nothing to say what it is. An unlabelled
+   list of names after "Change individual rules" reads as part of the rules.
+
+   Measured cost at 390×844, host + 4 bots: 25px, which moves the seat list from
+   y530 to y555 in a scrollport that ends at 688 — 2.7 rows visible at rest
+   instead of 3.0. The guest keeps its old arrangement and its old answer: a
+   guest's column order is untouched, and the `:has(#ruleset-guest)` block below
+   still hides the legend there, where the seat list IS the first thing. */
+.lobby-legend { display: block; }
+
+/* ── rail: the hold-short line and everything painted along it ────────── */
+
+.lobby-rail {
+  grid-area: rail;
+  position: relative;
+  display: grid;
+  /* minmax(0, 1fr) on the sides, NOT a bare 1fr — the same measurement
+     .home-rail records: a bare 1fr is minmax(AUTO, 1fr), so each side column
+     floors at its own min-content and the free space divides unevenly, which
+     lands the centre block off-centre.
+
+     minmax(auto, 26em) in the MIDDLE, not `auto`, and this one is its own
+     measurement. The home rail can use `auto` because its centre block is a
+     call-sign field plus an ink slab plus two alternates and is naturally wide.
+     This one holds a button and a sentence, so `auto` sized the track to the
+     button's own text and `.lobby-actions { width: min(26em, 100%) }` then
+     resolved 100% against that — Launch Mission came out 171px wide at 1280,
+     a primary action narrower than the two ghost marks either side of it. */
+  grid-template-columns: minmax(0, 1fr) minmax(auto, 26em) minmax(0, 1fr);
+  grid-template-areas: "leave actions settings";
+  align-items: center;
+  gap: .5em 1.2em;
+  /* The bottom inset clears the SLAB'S DROP, not just the slab. .lobby-go runs
+     --btn-drop: 6px and the shadow is painted outside the border box, so a
+     bottom pad sized to the text left the primary action's shadow touching the
+     frame at 1280×720 — the one control on the screen that must not look
+     cropped. 1.1em of a 16px root is 17.6px against 6px of drop. */
+  padding: clamp(.7em, 2vh, 1.2em) var(--lobby-pad) clamp(.7em, 2vh, 1.3em);
+}
+/* ── phone: the rail's three cells become two rows ────────────────────────
+   Exactly the home rail's fallback at the same breakpoint, and for the same
+   arithmetic: at 390px the two corner marks are ~86px and ~100px, which left
+   the centre track ~170px — so the primary action was the narrowest control in
+   its own marshalling area. Full width for the slab, the two marks under it. */
+@media (max-width: 719px) {
+  .lobby-rail {
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      "actions actions"
+      "leave   settings";
+    gap: .5em .8em;
+  }
+}
+/* the hold-short line, identical to the home rail's: two solid, two dashed */
+.lobby-rail::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 11px;
+  pointer-events: none;
+  background:
+    linear-gradient(var(--stencil-hi), var(--stencil-hi)) 0 0 / 100% 2px no-repeat,
+    linear-gradient(var(--stencil-hi), var(--stencil-hi)) 0 3px / 100% 2px no-repeat,
+    repeating-linear-gradient(90deg, var(--stencil-hi) 0 12px, transparent 12px 22px) 0 7px / 100% 2px no-repeat,
+    repeating-linear-gradient(90deg, var(--stencil-hi) 0 12px, transparent 12px 22px) 0 10px / 100% 2px no-repeat;
+}
+.lobby-actions {
+  grid-area: actions;
+  justify-self: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .25em;
+  width: min(26em, 100%);
+  min-width: 0;
+}
+/* The slab gets the deepest press in the app, for the reason .home-go records:
+   4px of --press-ink against near-black reads as less travel than the same 4px
+   under a transparent secondary, and the primary action must not press
+   shallower than the buttons beside it. */
+.lobby-go { width: 100%; font-size: 1.1em; min-height: calc(var(--tap) * 1.15); --btn-drop: 6px; }
+#lobby-hint { margin: 0; text-align: center; }
+
+/* The two corner marks, drawn to .home-help / .home-settings' rules: painted
+   lettering, not a third and fourth ink slab, and they keep the §0.9 44px box
+   with only the fill removed. */
+.lobby-mark {
+  min-height: var(--tap);
+  padding: 0;
+  box-shadow: none;
+  font-weight: 700;
+  font-size: var(--t-small);
+  color: var(--fg-mute);
+  --btn-ink: var(--fg-mute);
+}
+.lobby-leave { grid-area: leave; justify-self: start; }
+.lobby-settings { grid-area: settings; justify-self: end; }
+.lobby-mark:active:not(:disabled) { transform: none; box-shadow: none; }
+
+/* ── THE DECISION LEADS, AND IT LEADS AT EVERY WIDTH ──────────────────────
+   The host's column order is THE RULES then THE ROOM. It used to be the other
+   way round, and the phone is where that cost something real.
+
+   Measured at 390×844, host + 4 bots, disclosure closed, at rest (scrollTop 0):
+     .lobby-body        scrollHeight 996 in a clientHeight 618 scrollport
+     .ruleset-head      y620..643 — the last 23px before the fold
+     .preset-grid       y650..942 — 38px of the first plate, then nothing
+     presets fully in the scrollport                     0 of 4
+   The host saw the summary line "Rules · Chudopoly · Final Approach · 3 sets"
+   sitting on the bottom edge like a footnote, and a sliver. The four plates —
+   the decision this screen exists for — were discoverable only by accident.
+
+   THE ORDER IS THE FIX BECAUSE THE HEIGHTS ARE THE PROBLEM. 996px of content
+   in a 618px port means 378px is below the fold no matter what is done to it;
+   the only question is WHICH 378px. The room column grows 54px per seat and the
+   rules column does not grow at all, so with the room column leading, the
+   ruleset's position was a function of how many people were in the room — it
+   sank further out of sight exactly as the lobby filled and launch approached.
+   Leading with the rules makes the ruleset's position invariant: .lobby-col-
+   rules is 430px at every seat count, so 158px of the room column — the legend
+   and two and a half seats — is always in view under it. That is the rail's own
+   invariant one register down: nothing in the body can move the primary action,
+   and now nothing in the room can move the ruleset.
+
+   After, same state, same viewport, still scrollTop 0:
+     .ruleset-head      y 86..109        presets in the scrollport   4 of 4
+     .preset-grid       y115..408        whole #ruleset in the port  yes
+     #ruleset-win       y414..465        seat list                   y556..828
+     .ruleset-summary   y472..516        scrollHeight                1022
+   Nothing was deleted to do it; the 26px the scrollHeight gained is the room
+   legend, which had been hidden on a phone and is needed again (see it above).
+   All four plates keep their explanatory line and the win-rule sentence is
+   still under them (§3.9).
+
+   THE ALTERNATIVE WAS MEASURED AND IS WORSE. Opening the body pre-scrolled to
+   the ruleset (scrollTop 378) also puts all four plates in view — and puts the
+   ENTIRE seat list at y−292..−20 — above the scrollport, all four Remove marks
+   with it — on a screen that gives no cue that anything is above the fold, and
+   it leaves both clocks clipped as well. Reordering keeps the screen at
+   scrollTop 0, where a phone expects to open, and leaves a HALF-CUT SEAT ROW on
+   the fold, which is the one kind of cut edge that advertises itself: a
+   repeating row sliced in two reads as "scroll"; a single plate sliced in two,
+   which is what the old order left there, reads as the end of the screen.
+
+   NO `order` PROPERTY, ANYWHERE, AND THAT IS THE POINT. The move is done in the
+   DOM (ui/lobby.js ensurePicker), so tab order and reading order are the same
+   sequence at every width. `order: -1` under a phone query was built first and
+   measured against it — Tab pressed from Copy invite, recording each focused
+   element's position in the scrolled document:
+     DOM move   47 → 402 → 539 → 596 → 653 → 709 → 765 → 863
+                scrollTop 0 → 0 → 0 → 22 → 366 → 366 → 366, 0 backward jumps
+     order:-1   539 → 596 → 653 → 709 → 765 → 863 → 47 → 402
+                scrollTop 0 → 22 → 366 … → 366 → 0, ONE backward jump of 816px
+   .lobby-body scrolls to whatever takes focus, so that jump is not abstract:
+   the host tabs past the fold into the seat list and the screen then throws
+   itself back to the top for the presets they were already looking at. The
+   two-column widths would additionally need `order` to restore ROOM-left, which
+   relocates the same mismatch instead of removing it, so the columns lead with
+   the rules there too and the property is not used at all.
+
+   WHAT THIS DOES NOT FIX, AND WHY NOTHING DOES. 1022px of content in a 618px
+   port means ~400px is below the fold in every arrangement, so touchtest's
+   off-viewport and clipped-by-a-scrolling-ancestor findings on `lobby (host)`
+   cannot be zeroed by any layout — only re-aimed. They move from the ruleset
+   (3 off-viewport, 4 clipped: preset inputs and the disclosure summary) to the
+   room's tail (4 off-viewport, 5 clipped: the last two Remove marks, the bot
+   picker, Add bot, the two clocks), because the room's tail simply holds more
+   controls than the rules' tail — 8 against 5. The one control in that list
+   whose absence would be a defect is Add bot, and it is measured at rest for
+   the only seat count that needs it: 1 seat → y607..651 against a fold at 688,
+   fully in view; 2 seats → y664..708, half in view; 3+ seats → below, and at
+   3+ seats the rail's own hint has already stopped asking for players. What was
+   bought for it is the four preset plates, which were 0 of 4 in view at EVERY
+   seat count. Deleting explanatory copy to buy the difference was costed and
+   refused: #bot-blurb 34px + #clock-note 85px + #ruleset-win 51px = 170px
+   against a 400px shortfall, and all three are §3.9 teaching text.
+
+   ── the split itself is unchanged and still measured ─────────────────────
+   Content heights at 1280×720 with host + 3 bots, disclosure closed:
+     seats (4 rows)              196px
+     bot picker + its blurb       84px
+     the two clocks + the note   134px
+     the ruleset picker          504px   (2041px with the disclosure open)
+   THE RULES against THE ROOM puts 504 beside 414, which is the balanced cut.
+   The obvious alternative — clocks filed with the rules, since they are
+   rules — puts 638 beside 280 and leaves a third of the other column empty.
+   The clocks also belong with the room on their content: describeClocks() reads
+   store.room.players and warns about the server's two-human floors, so the
+   sentence it writes is about the people in this room, not the ruleset.
+
+   1024, not 900: at 900 the two columns are 400px each after the apron inset,
+   which is under the 431px the single column already had, and the preset name
+   row ("Long Game" + "Longest" + "≈67 turns") stops fitting on one line. */
+@media (min-width: 1024px) {
+  .lobby-body {
+    /* The wider track is the rules track, and it is the first one now. */
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+    gap: 1em clamp(1.2em, 3vw, 2.6em);
+    /* Either column can be the taller one — the rules column at 1280×720 is
+       343px closed and 2041px open, the room column 563px at five seats — so
+       neither may stretch to the other's height; align-items: start anchors
+       both to the top of the scrollport and lets the tall one grow alone. */
+    align-items: start;
+  }
+  /* A hairline between the two halves, cut into the concrete rather than drawn
+     as a border (§3.2): it is a marking on the ground, so it runs the full
+     height of the scrolled content. It sits on the SECOND column's leading
+     edge, which is the room's now — the marking divides the two halves, so it
+     moves with the order rather than with either column's name. */
+  .lobby-col-room { box-shadow: inset 1px 0 0 var(--stencil); padding-left: clamp(1.2em, 3vw, 2.6em); }
+  .lobby-body { padding-inline: clamp(1.5em, 5vw, 5em); }
+}
+
+/* The screen has real width to give at desktop sizes and no reason to spend it
+   all: past ~86em the body stops widening and centres, so a 2560px monitor gets
+   two readable columns rather than two 1200px ones. The MARKINGS still reach
+   both edges — only the objects between them stop. */
+@media (min-width: 1500px) {
+  .lobby-body { width: min(86em, 100%); margin-inline: auto; }
+}
+
+/* ── A GUEST IS NOT A HOST WITH THE CONTROLS REMOVED ───────────────────────
+   Measured at 1280×720 on a real three-seat room joined from a second context
+   (no shot has ever shown this state either — the host's own page cannot
+   render it): the guest's body is a 3-row seat list and one sentence, 160px of
+   content in a 553px scrollport, and the two-column grid put those two objects
+   in the top corners with ~500px of unmarked apron between and below them.
+   That is the composition fault this whole round exists to fix, arriving from
+   the other direction — a form laid out for content that is not there.
+
+   So the guest gets the HOME SCREEN's arrangement rather than the host's: one
+   column, the seat list as the object, sized and centred like the deck. The
+   head's rule and the rail's hold-short line still reach both frame edges, so
+   the screen is still marked to the edge — only the objects stop, which is the
+   rule (§3.3), not a violation of it.
+
+   Selected on #ruleset-guest rather than on a class, because ui/lobby.js
+   already unhides exactly that node for exactly this seat: one source of truth
+   for "am I the host", and no second flag to fall out of step with it. */
+.lobby-body:has(#ruleset-guest:not([hidden])) {
+  grid-template-columns: minmax(0, 1fr);
+  align-content: center;
+  width: min(34em, 100%);
+  margin-inline: auto;
+  padding-inline: var(--lobby-pad);
+}
+.lobby-body:has(#ruleset-guest:not([hidden])) .lobby-col-room {
+  box-shadow: none;
+  padding-left: 0;
+}
+.lobby-body:has(#ruleset-guest:not([hidden])) .lobby-legend { display: none; }
+#ruleset-guest { text-align: center; text-wrap: pretty; }
+
+/* ── the wordmark: PAINTED on the concrete, not set in a panel ───────────── */
+
+.brand-title {
+  font-family: var(--font-display);
+  font-size: clamp(2.1em, 5.2vw, 3.4em);
+  font-weight: 800;
+  letter-spacing: var(--track-display);
+  margin: 0;
+  line-height: .98;
+  color: var(--fg);
+  text-shadow: 0 1px 0 var(--sheen);
+  /* the plate is width-capped by .home-head .brand-mark; the h1 must not add a
+     line box under it or the "gap: .55em" to the sub becomes .55em + leading */
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+.brand-sub {
+  margin: 0;
+  max-width: 44em;
+  font-size: var(--t-small);
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--fg-mute);
+}
+
+/* ── lobby: the plate, and a seat ─────────────────────────────────────── */
+
+.lobby-title {
+  margin: 0;
+  font-size: var(--t-title);
+  color: var(--fg-mute);
+  font-weight: 700;
+}
+/* The room code is the one thing on this screen a player reads OUT LOUD to
+   someone else, so it is set like a figure and not like a heading: mono,
+   tabular, and the only --fg-weight ink in the plate. */
+.lobby-code {
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 1.35em;
+  letter-spacing: .06em;
+}
+.lobby-players { display: flex; flex-direction: column; gap: .3em; }
+/* a seat in the lobby is the same recess a seat at the table is */
+.lobby-row {
+  display: flex;
+  align-items: center;
+  gap: .5em;
+  padding: .3em .5em .3em .7em;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--deboss);
+  min-height: var(--tap);
+}
+.lobby-seat-name { flex: 0 1 auto; min-width: 0; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lobby-seat-tag { margin-left: auto; white-space: nowrap; }
+/* Wraps because a long call sign plus a tag plus Remove is more than one line
+   at 342px, and the NAME is the thing that must never be the part that gives:
+   measured on lobby@desktop when a per-seat paragraph shared this row,
+   "Bolt"/"Cobra"/"Jester"/"Shadow" all rendered as one letter and an ellipsis.
+   (The `.lobby-seat-why` rule that paragraph needed is deleted with it — the
+   owner's directive removed the per-seat personality line, and CSS for markup
+   nothing builds is a rule the next reader has to disprove.) */
+.lobby-row { flex-wrap: wrap; }
+.lobby-host { display: flex; flex-direction: column; gap: .5em; }
+.lobby-host .row .field-label { flex: 0 0 auto; margin-bottom: 0; }
+
+/* ── P10: the phone lobby fits its port ───────────────────────────────────
+   With the picker folded (ui/lobby.js .ruleset-fold) the phone body's last
+   ~60px of shortfall is density, not structure: five 52px seat recesses, a 1em
+   block gap and two body-sized teaching notes. MEASURED at 390×844, host + 4
+   bots: these three trims plus the fold take .lobby-body from 1022px of
+   content in a 618px port to everything inside it — the cold frame slices no
+   seat row and parks no select off-viewport. The notes stay whole (§3.9 —
+   deleting them was costed and refused in the DECISION LEADS note); they set
+   at the micro size the rest of the app's captions already use. */
+@media (max-width: 719px) {
+  .lobby-row { padding-top: .1em; padding-bottom: .1em; }
+  .lobby-body { gap: .6em; }
+  #lobby-host .hint { font-size: var(--t-micro); line-height: 1.35; }
+}
+
+/* ══ THE CHROME GLYPH SET ══════════════════════════════════════════════════
+   ROUND-4 REVIEW, and it is the fair hit: the cards carry 21 bespoke glyphs and
+   the corner of every single shot carried ☰ ? ✕ ☺ ⚑ — Unicode dingbats in
+   bordered squares. Two icon languages in one product.
+
+   These are drawn to the same rules as the card glyphs (public/src/table/
+   cardart.js §SET GLYPHS): SOLID silhouettes on a 48×48 grid, knockouts by
+   fill-rule, no strokes — a 2px stroke on a 48 box disappears at the 22px these
+   render at. Authored as text (§0.3) and painted as MASKS, so one declaration
+   colours every state the button system already defines, and so this reaches
+   the three icon buttons this agent does not own (ui/hud.js's settings dial,
+   ui/discard.js's and ui/journal.js's closers) without editing their files. */
+
+.btn-icon {
+  /* the character a foreign file may still be passing in; the mask replaces it */
+  font-size: 0;
+  --icon: var(--ico-close);
+}
+.btn-icon::before {
+  content: "";
+  width: calc(var(--tap) * .5);
+  height: calc(var(--tap) * .5);
+  background-color: currentColor;
+  -webkit-mask: var(--icon) center / contain no-repeat;
+  mask: var(--icon) center / contain no-repeat;
+}
+
+:root {
+  /* mission log — a strip board: leading tabs, ragged last line. Not a
+     hamburger: three equal bars is the mark this block exists to remove. */
+  --ico-log: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cg fill='%23000'%3E%3Crect x='4' y='9' width='7.5' height='7.5'/%3E%3Crect x='15.5' y='10.6' width='28.5' height='4.2'/%3E%3Crect x='4' y='20.2' width='7.5' height='7.5'/%3E%3Crect x='15.5' y='21.9' width='28.5' height='4.2'/%3E%3Crect x='4' y='31.5' width='7.5' height='7.5'/%3E%3Crect x='15.5' y='33.2' width='18' height='4.2'/%3E%3C/g%3E%3C/svg%3E");
+  /* rules — an open field manual, two page lobes off a spine */
+  --ico-manual: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cg fill='%23000'%3E%3Cpath d='M3.5 9.5c6.5-2.6 13-2.3 19 2.2v27.6c-6-4.5-12.5-4.8-19-2.2z'/%3E%3Cpath d='M44.5 9.5c-6.5-2.6-13-2.3-19 2.2v27.6c6-4.5 12.5-4.8 19-2.2z'/%3E%3C/g%3E%3C/svg%3E");
+  /* leave — a hatch you walk out of, not another X */
+  --ico-exit: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cg fill='%23000'%3E%3Cpath d='M5 6h20v5.5H10.5v25H25V42H5z'/%3E%3Cpath d='M30 14 43.5 24 30 34v-6.6H19.5v-6.8H30z'/%3E%3C/g%3E%3C/svg%3E");
+  /* emote — a callout plate with the three dots knocked out */
+  --ico-callout: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cpath fill='%23000' fill-rule='evenodd' d='M4 7h40v26H23.5l-10.5 8.5V33H4Z M13 16.6a3.4 3.4 0 1 0 0 6.8 3.4 3.4 0 0 0 0-6.8Z M24 16.6a3.4 3.4 0 1 0 0 6.8 3.4 3.4 0 0 0 0-6.8Z M35 16.6a3.4 3.4 0 1 0 0 6.8 3.4 3.4 0 0 0 0-6.8Z'/%3E%3C/svg%3E");
+  /* scoop out — a parachute. The action is "get me out of this game", and it is
+     the one dock control that used to wear hazard stripes it had not earned. */
+  --ico-chute: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cg fill='%23000'%3E%3Cpath d='M24 4C12.4 4 3 12.9 3 24h42C45 12.9 35.6 4 24 4Z'/%3E%3Cpath d='M4.6 25 6.5 23.1 23.6 38.4 21.7 40.3Z'/%3E%3Cpath d='M43.4 25 41.5 23.1 24.4 38.4 26.3 40.3Z'/%3E%3Cpath d='M22.9 25h2.2v13.6h-2.2Z'/%3E%3Crect x='19' y='37.5' width='10' height='6.5' rx='1.4'/%3E%3C/g%3E%3C/svg%3E");
+  /* sound and settings — a knurled dial with a knocked-out pointer and four
+     index ticks. A gear says "config"; a dial says "the volume is here". */
+  --ico-dial: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cpath fill='%23000' fill-rule='evenodd' d='M24 10.5a13.5 13.5 0 1 0 0 27 13.5 13.5 0 0 0 0-27Z M22.6 15.2h2.8v9.6h-2.8Z M22.7 2h2.6v5.4h-2.6Z M22.7 40.6h2.6V46h-2.6Z M2 22.7h5.4v2.6H2Z M40.6 22.7H46v2.6h-5.4Z'/%3E%3C/svg%3E");
+  /* hazard — the mark that rides ahead of a refusal sentence (content.css).
+     A solid triangle with the bar and dot knocked out by fill-rule, so it is
+     one silhouette at 10px rather than three strokes that vanish. */
+  --ico-hazard: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cpath fill='%23000' fill-rule='evenodd' d='M24 3 47 43H1Z M21.6 16h4.8l-.7 14h-3.4Z M24 33.4a2.9 2.9 0 1 0 0 5.8 2.9 2.9 0 0 0 0-5.8Z'/%3E%3C/svg%3E");
+  /* close — the one mark that has to stay an X, drawn rather than typed */
+  --ico-close: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cpath fill='%23000' d='M11.6 7.4 24 19.8 36.4 7.4 40.6 11.6 28.2 24 40.6 36.4 36.4 40.6 24 28.2 11.6 40.6 7.4 36.4 19.8 24 7.4 11.6Z'/%3E%3C/svg%3E");
+}
+
+#btn-side { --icon: var(--ico-log); }
+.btn-icon[data-action="help"] { --icon: var(--ico-manual); }
+.btn-icon[data-action="leave-room"] { --icon: var(--ico-exit); }
+.btn-icon[data-action="emote"] { --icon: var(--ico-callout); }
+.btn-icon[data-action="scoop"] { --icon: var(--ico-chute); }
+.btn-icon[data-action="settings"] { --icon: var(--ico-dial); }
+/* every closer — index.html's two, plus the ones ui/discard.js and
+   ui/journal.js build at runtime — falls through to the default X */
+.btn-icon.is-close { --icon: var(--ico-close); }
+
+/* ── HUD — a raised strip of painted steel across the top ─────────────── */
+
+.hud {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: .4em;
+  padding: .3em .4em;
+  min-width: 0;
+  background: var(--surface);
+  box-shadow: var(--emboss), 0 2px 0 var(--shade);
+  z-index: 5;
+}
+.hud-left, .hud-right { display: flex; align-items: center; gap: .25em; flex: 0 0 auto; }
+.hud-mid { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; gap: .5em; min-width: 0; padding: 0 .35em; }
+.hud-turn {
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: var(--track-display);
+  font-size: 1.05em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg-mute);
+}
+/* "YOUR TURN" is the single most important piece of state in the game and it
+   was rendering as "YOU…". The cause was arithmetic: four 44px icon buttons
+   (176px) plus the room-code plate (70px) plus gaps left .hud-mid about 110px
+   of a 390px bar, and "YOUR TURN" plus the plays plate need ~150px. The four
+   buttons are a §0.9 floor and cannot shrink, so the room code goes — it is
+   static for the whole game and lives on the lobby screen and the side panel. */
+@media (max-width: 899px) {
+  #hud-room { display: none; }
+  .hud .conn-label { display: none; }
+  /* "MISSION ACCOMPLISHED" is the longest string this slot ever holds and it
+     needed 188px of the 160 a 390px bar can spare once the four 44px icon
+     buttons are paid. The four buttons are a §0.9 floor; the type is not. */
+  .hud-turn { font-size: .88em; }
+}
+@media (min-width: 900px) {
+  .hud .conn-label.is-on { max-width: 12em; }
+}
+.hud-left { min-width: 0; }
+/* YOUR TURN — the cobalt ring's typographic twin: it goes to full --fg weight
+   and gains an underline rule in --accent. It never truncates. */
+.hud-turn.is-mine {
+  flex: 0 0 auto;
+  color: var(--fg);
+  box-shadow: inset 0 -3px 0 var(--accent);
+  padding-bottom: 1px;
+}
+/* A solid glowing dot reads as a recording light. Connected is a quiet filled
+   dot; offline is a HOLLOW ring — the shape difference a glance catches before
+   the colour does. */
+.conn {
+  width: .5em;
+  height: .5em;
+  border-radius: 50%;
+  background: var(--fg-mute);
+  flex: 0 0 auto;
+}
+.conn.is-off { background: transparent; box-shadow: inset 0 0 0 2px var(--danger); }
+
+/* the timer RING — conic sweep, hollow centre, urgency by MATERIAL: the ring
+   thickens and then goes to hazard stripes. Not three colours of the same
+   shape, which is what a colourblind player cannot read. */
+.timer {
+  --ring-col: var(--fg-mute);
+  position: relative;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.35em;
+  height: 2.35em;
+  border-radius: 50%;
+  background: conic-gradient(var(--ring-col) calc(var(--frac, 1) * 360deg), var(--shade) 0);
+}
+.timer::before {
+  content: "";
+  position: absolute;
+  inset: 18%;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: var(--deboss);
+}
+.timer-text { position: relative; font-size: .7em; font-weight: 700; color: var(--fg); letter-spacing: -.02em; }
+.timer.is-urgent { --ring-col: var(--fg); }
+.timer.is-urgent::before { inset: 24%; }
+/* ── CRITICAL (≤5s) IS HAZARD MATERIAL, NOT A COLOURED CHIP ────────────────
+   ROUND-2 LOOK #5 (timer-critical@desktop): the ≤5s ring was a plain vermillion
+   wedge — §1's named ban, in the one state a colourblind player most needs to
+   read, while every other danger in the app wears 45° stripes
+   (final-approach@desktop shows the correct form). The remaining-time wedge is
+   now a WINDOW onto the hazard material: the striped layer sits under the whole
+   ring and the elapsed portion is painted over in --shade, so the sweep
+   geometry is untouched and what drains away is caution stripe. The ring
+   thickens to 28% at the same moment (the base rule above), which is what keeps
+   a 5px/10px stripe legible on a 2.35em ring — measured ~10px of annulus at
+   the HUD size, ~12px on .prompt-timer's 2.9em, both of which this rule also
+   reaches. Text stays --danger-ink on the ::before's --surface disc: 4.69:1
+   light / 4.62:1 dark (variables.css's own figures). */
+.timer.is-critical {
+  --ring-col: var(--danger);
+  background:
+    conic-gradient(rgba(0, 0, 0, 0) calc(var(--frac, 1) * 360deg), var(--shade) 0),
+    var(--hazard-fine);
+}
+.timer.is-critical::before { inset: 28%; }
+.timer.is-critical .timer-text { color: var(--danger-ink); }
+
+/* ── prompt bar: the one contextual strip above the hand ──────────────── */
+
+.prompt {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .45em;
+  /* 6px off the vertical: this bar is up in most real states and every pixel of
+     it comes out of the apron above it (table.css's desktop budget). */
+  padding: .3em .5em;
+  min-width: 0;
+  background: var(--surface);
+  box-shadow: var(--emboss), 0 -2px 0 var(--shade);
+  z-index: 4;
+}
+.prompt .btn { --btn-drop: 3px; font-size: .88em; }
+.prompt-text { font-weight: 700; font-size: .92em; flex: 1 1 11em; min-width: 0; color: var(--fg); }
+/* `flex: 1 1 100%` forced EVERY reason onto its own full-width line, and a
+   final-approach payment shows two at once ("45s to answer, or the 2M is paid
+   for you" + "you are on FINAL APPROACH"). Measured by the layout agent: a
+   3-row bar at 175px, leaving a 155px board pane around 298px of board — the
+   bank sat 131px over the property grid and 7 of your 15 own cards rendered
+   46x8, while the bar itself said "tap your bank, property and Upgrade cards".
+   A basis lets two reasons share a row when the bar is wide enough and stack
+   when it is not; the pair only fits above ~46em, which is why this is a basis
+   and not a width. */
+.prompt-why {
+  font-size: var(--t-small); color: var(--danger-ink); font-weight: 700;
+  flex: 1 1 22em; min-width: 0;
+}
+/* payment bar: the running total is the thing you are watching */
+.chip.total { font-size: .84em; padding: .3em .7em; color: var(--fg); }
+.chip.total.is-enough { background: var(--act); color: var(--act-fg); box-shadow: none; }
+
+/* ══ COMMS — a drawer that opens on the RIGHT ══════════════════════════════
+   OWNER DIRECTIVE, 2026-08-06, verbatim: "layout wise I think it looked better
+   before — the other players at top, chat opening on the right etc."
+   §5 had docked this into a permanent LEFT rail beside the piles. It is a
+   drawer again, on the right, at every width: it is opened deliberately, it is
+   closed most of the time, and a permanent 220px column of chat was spending
+   table width on something nobody had asked to see. */
+
+.side {
+  position: absolute;
+  right: 0; top: 0; bottom: 0;
+  width: min(20em, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: .4em;
+  /* .screen already pads env(safe-area-inset-bottom) — base.css. Adding it
+     again here double-counted the indicator. */
+  padding: .6em;
+  background: var(--surface);
+  box-shadow: -12px 0 30px var(--scrim);
+  z-index: 60;
+}
+/* iOS does not shrink the LAYOUT viewport for the software keyboard, so a panel
+   pinned to bottom:0 put #chat-input and SEND at y=835 on an 844 viewport —
+   327px under the keyboard. ui/comms.js publishes the occluded height from
+   visualViewport as --kb-inset. Measured and passing; do not simplify away. */
+.side { bottom: var(--kb-inset, 0px); }
+body.kb-open .side { transition: bottom .14s ease-out; }
+body.kb-open .log { flex: 0 1 22%; }
+body.kb-open .chat-row { position: sticky; bottom: 0; }
+.side-head { display: flex; align-items: center; justify-content: space-between; }
+.side-head .btn-icon { min-height: var(--tap); width: var(--tap); height: var(--tap); font-size: 1.1em; }
+.log {
+  flex: 1 1 40%;
+  overflow-y: auto;
+  font-size: var(--t-small);
+  line-height: 1.4;
+  padding: .3em .45em;
+  border-radius: var(--radius);
+  background: var(--ground);
+  box-shadow: var(--deboss);
+  scrollbar-width: thin;
+}
+.log-line {
+  padding: .22em 0 .22em .6em;
+  box-shadow: inset 0 -1px 0 var(--shade);
+  color: var(--fg-mute);
+  position: relative;
+}
+.log-line::before {
+  content: "";
+  position: absolute;
+  left: 0; top: .62em;
+  width: 3px; height: 3px;
+  background: var(--fg-mute);
+}
+.chat-tabs { display: flex; gap: .3em; }
+.chat-tab { flex: 1 1 0; font-size: .8em; min-height: var(--tap); --btn-drop: 2px; --btn-edge: var(--fg-mute); }
+.chat-tab.is-on { --btn-face: var(--act); --btn-ink: var(--act-fg); --btn-edge: transparent; }
+.chat-msgs {
+  flex: 1 1 40%;
+  overflow-y: auto;
+  font-size: var(--t-small);
+  padding: .3em .45em;
+  border-radius: var(--radius);
+  background: var(--ground);
+  box-shadow: var(--deboss);
+  scrollbar-width: thin;
+}
+.chat-msg { padding: .16em 0; word-break: break-word; color: var(--fg-mute); }
+.chat-who { color: var(--fg); font-weight: 700; }
+.chat-row { display: flex; gap: .3em; }
+.chat-row .field { flex: 1 1 auto; min-width: 0; }
+.chat-row .btn { flex: 0 0 auto; font-size: .82em; padding: 0 .7em; }
+
+/* ── bottom sheet ─────────────────────────────────────────────────────── */
+
+/* OWNER BUG, 2026-08-06: "pressing show full log doesn't open over the actual
+   end-game screen." The sheet was z 90 and #win-overlay is z 95, so every sheet
+   opened FROM the win screen — the full log, settings, help, a card's details —
+   rendered underneath it and the button read as dead at the exact moment a
+   player most wants to read what happened. */
+.sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: var(--scrim);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+.sheet-panel {
+  position: relative;
+  width: min(30em, 100%);
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  gap: .5em;
+  padding: 1.1em .9em calc(.9em + env(safe-area-inset-bottom));
+  background: var(--surface);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  box-shadow: var(--card-drop-air);
+}
+/* grab handle */
+.sheet-panel::before {
+  content: "";
+  position: absolute;
+  top: .4em;
+  left: 50%;
+  width: 2.6em;
+  height: 4px;
+  margin-left: -1.3em;
+  border-radius: 999px;
+  background: var(--fg-mute);
+  opacity: .5;
+}
+/* ── a sheet stops being a bottom sheet at 720px, not 900 ─────────────────
+   A bottom sheet is a phone gesture. At 1280 it was a 490px-wide phone drawer
+   glued to the bottom edge of an empty void and cut off at y=720
+   (help@desktop). That was already fixed — but inside the `min-width: 900px`
+   desktop block, alongside the comms drawer and the win box, which put the
+   boundary in the wrong place for two reasons.
+
+   720 is where this app's phone layout already ends: both rails (.home-rail
+   and .lobby-rail) fall back to two rows at `max-width: 719px`, so the sheet
+   now changes shape on the same line as everything else instead of on a line
+   of its own.
+
+   AND IT IS THE LANDSCAPE PHONE THAT GAINS MOST, which is the opposite of the
+   intuition. 844×390 is 844 WIDE, so it sat in the 720..900 band still getting
+   the phone treatment. Measured on the settings sheet at 844×390, same content,
+   the only difference being which of these two blocks applies:
+
+     bottom drawer   panel 360 × 320   body 246 / 279  →  33px past the fold
+     centred dialog  panel 528 × 335   body 255 / 265  →  10px past the fold
+
+   The height barely moves — 390px of viewport is 390px either way. The WIDTH is
+   the whole gain, +47%: content.css lays .settings out as two columns in short
+   landscape, and that is the axis two columns are spent on. A settings panel is
+   scanned, not glanced at.
+
+   The transient card read the drawer was designed for (ui/details.js) is
+   unharmed: it is three lines, and three lines centred is three lines. */
+@media (min-width: 720px) {
+  .sheet { align-items: center; padding: 2em 1em; }
+  .sheet-panel {
+    width: min(44em, 100%);
+    max-height: min(86vh, 44em);
+    border-radius: var(--radius-lg);
+    padding: 1.2em 1.4em 1.3em;
+    box-shadow: var(--card-drop-air);
+  }
+  /* the drag handle is a touch affordance and means nothing to a mouse */
+  .sheet-panel::before { display: none; }
+}
+.sheet-head { display: flex; align-items: center; justify-content: space-between; gap: .5em; }
+.sheet-head h3 { margin: 0; font-size: var(--t-title); }
+.sheet-body { overflow-y: auto; scrollbar-width: thin; }
+
+/* ══ THE SCROLL-EDGE TREATMENT — one device for every sheet scroller ═══════
+   P10 LOOK: six modal surfaces hard-cut text mid-glyph at their fold with no
+   cue that anything continues — win-recap sliced a row behind "Open the full
+   log", settings cut "Show first-game hints again", help-cards its last
+   sentence, flightlog a row above its footer, the discard browser its bottom
+   card row, the lobby's deck editor a stepper. The opponents strip already
+   carries the correct device (table.css ~112-134, with the measurements that
+   shaped it); this is that device as ONE shared rule-set instead of a fifth
+   hand copy.
+
+   Three layers, each already ratified somewhere:
+   • two `local` covers in the surface's own ground — they travel with the
+     content, so a shade can only appear at an end that has rows behind it
+     (the strip's ROUND-6 ruling: a cue that appears while resting at an edge
+     reads as a rendering fault);
+   • two static --shade-2 ramps — the "more below/above" signal, the same
+     material checkContrast has been green over on .lobby-body since LOOK #6;
+   • a short FEATHER mask at each end, so a line crossing the fold fades out
+     instead of slicing mid-glyph. .45em, not the .9em the strip rolled back:
+     ROUND-6 measured a full text row held at the ramp's alpha failing 4.5:1,
+     and at .45em the feather eats at most the descender half of a 1.4-line-
+     height row — the hosts below pad their resting content clear of it.
+     A mask, not an overlay node: screenshot's buried-text audit ignores paint,
+     and a DOM overlay would be an occluder (the jr-more note in content.css
+     records the same choice).
+
+   Hosts opt out of the BOTTOM feather when a sticky footer IS their bottom
+   edge (the flight log, the win recap) — masking that region would erase the
+   footer, and the footer's own shade ramp carries the cue there. */
+.scroll-edge {
+  --edge-ground: var(--surface);
+  --edge-feather-top: .45em;
+  --edge-feather-bot: .45em;
+  background:
+    linear-gradient(180deg, var(--edge-ground) 46%, rgba(0, 0, 0, 0)) 0 0 / 100% 1.2em no-repeat local,
+    linear-gradient(0deg, var(--edge-ground) 46%, rgba(0, 0, 0, 0)) 0 100% / 100% 1.2em no-repeat local,
+    linear-gradient(180deg, var(--shade-2), rgba(0, 0, 0, 0)) 0 0 / 100% .9em no-repeat,
+    linear-gradient(0deg, var(--shade-2), rgba(0, 0, 0, 0)) 0 100% / 100% .9em no-repeat;
+  -webkit-mask-image: linear-gradient(transparent,
+    #000 var(--edge-feather-top),
+    #000 calc(100% - var(--edge-feather-bot)), transparent);
+  mask-image: linear-gradient(transparent,
+    #000 var(--edge-feather-top),
+    #000 calc(100% - var(--edge-feather-bot)), transparent);
+}
+/* Resting content sits clear of the feather; only scrolled-under text fades. */
+.sheet-body.scroll-edge { padding-top: .45em; padding-bottom: .45em; }
+/* The flight log's footer rides the scroller's bottom (content.css .fl-footer,
+   sticky): the bottom edge is the footer's, and its ramp is the cue. */
+.sheet-body.scroll-edge:has(.fl-footer) { --edge-feather-bot: 0em; }
+.sheet-confirm { display: flex; flex-direction: column; gap: .55em; }
+.emote-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: .45em; }
+.emote-grid .btn { padding: 0 .3em; font-size: .85em; }
+/* a help sheet is twenty headings long; in foil it was twenty gold marks */
+.help h4 {
+  margin: 1.1em 0 .3em;
+  color: var(--fg);
+  font-size: var(--t-lede);
+  letter-spacing: var(--track-display);
+  text-transform: none;
+  padding-bottom: .2em;
+  box-shadow: inset 0 -2px 0 var(--shade);
+}
+.help li { font-size: var(--t-small); color: var(--fg-mute); }
+.details-kind { }
+.details p { color: var(--fg-mute); }
+
+/* ══ VICTORY — the ONE place foil is allowed to flood (§1) ═════════════════ */
+
+.win-overlay {
+  /* ── THE CEREMONY IS ALWAYS AT NIGHT ──────────────────────────────────────
+     The gold display type the owner ruling restores is 1.57:1 on the daylight
+     plate (#E3C079 on #B1AB9B, measured) — brass and warm concrete are the same
+     value, which is why the daylight win screen had to be flat to be legible.
+     There is no palette in which "gold type on the light theme's surface"
+     works, so the room changes instead of the medal: the whole overlay adopts
+     the NIGHT tokens in both themes, which is the same physics as the backdrop
+     above it (the house lights go down for the ceremony) and the same rule §0
+     already applies to card stock — some objects do not change with the room.
+     Every ratio inside the modal is therefore the dark theme's, and the dark
+     theme is the one checkContrast has always passed here.
+     Copied from variables.css :root[data-theme="dark"]; if that block moves,
+     this moves with it. */
+  color-scheme: dark;
+  --ground: #15171C; --ground-deep: #0B0D10; --surface: #404753;
+  --fg: #F2EEE4; --fg-mute: #ACB7C5;
+  --act: #F2EEE4; --act-fg: #14161A;
+  --accent: #84B9FF; --danger: #FF8C53; --danger-ink: #FF9F5E;
+  --foil: #C9A253; --foil-ink: #DAB05B;
+  --shade: rgba(0, 0, 0, .45); --shade-2: rgba(0, 0, 0, .68);
+  --sheen: rgba(255, 255, 255, .07); --press-ink: #000000;
+  --stencil: rgba(242, 238, 228, .11); --stencil-hi: rgba(242, 238, 228, .22);
+
+  position: fixed;
+  inset: 0;
+  z-index: 95;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1em;
+  /* ── THE HOUSE LIGHTS GO DOWN (OWNER RULING 2026-08-07) ──────────────────
+     ROUND-5 deleted the gold rays on a critic's word ("the most AI-generated-
+     looking element in the build") and took the atmosphere with them. The owner
+     compared the two screens: "yesterday just looked so much better, higher res
+     etc — it's almost too bland now." ART §1 now carries the ruling in full:
+     restraint outside the modal, CEREMONY inside it.
+
+     What comes back is not the rays. Rays were a glow pretending to be a light
+     source. This is the light source: one soft key from above the modal, a deep
+     near-black floor under it, and a vignette. Both themes go dark here, in both
+     themes, because the ceremony is the one moment the room dims — daylight on
+     the apron is the TABLE's rule, and this is not the table.
+     It restores the thing the owner actually named ("higher res"): tonal range.
+     The flat mid-grey frame had ~25 L* of excursion; this has the full stop. */
+  background:
+    radial-gradient(120% 78% at 50% -12%, color-mix(in oklab, var(--foil) 26%, transparent), rgba(0, 0, 0, 0) 62%),
+    radial-gradient(150% 120% at 50% 34%, rgba(16, 18, 22, .82), rgba(4, 5, 7, .96) 68%),
+    rgba(6, 7, 9, .9);
+  /* dimmed but not blurred left a full ACTION card perfectly legible behind
+     the ceremony, so the table competed with the win */
+  backdrop-filter: blur(7px) saturate(.85);
+  -webkit-backdrop-filter: blur(7px) saturate(.85);
+}
+/* MEASURED (checkContrast, win@desktop-light): #btn-rematch's rect was
+   y 701 → 745 in a 720px viewport — the ceremony's primary action was below
+   the fold, reachable only by scrolling a box nobody knows scrolls. The recap
+   the content agent added made a 24em column ~790px tall. A wider column sets
+   the same content in fewer lines; on desktop it is 34em and the title fits on
+   one line, which is 3 lines and ~120px recovered. */
+/* ROUND-4 REVIEW (win@desktop, win-recap@desktop): the modal did not fit 720px
+   and the previous fix scrolled the WHOLE box, so one end was always cut — the
+   roundel at the top or "Leave room" at the bottom. The box is now a fixed
+   three-part frame: ceremony pinned at the top, the two controls pinned at the
+   bottom, and the RECAP is the only thing that scrolls (content.css). */
+.win-box {
+  position: relative;
+  width: min(24em, 94%);
+  max-height: 100%;
+  overflow: hidden;
+  padding: 1.4em 1.2em 1.3em;
+  display: flex;
+  flex-direction: column;
+  gap: .5em;
+  text-align: center;
+  /* the panel is lit from the same key as the roundel: a warm wash at the top
+     falling to the plate. Without it the box was one flat mid-grey, which is
+     what "lower res" was describing — a frame with no tonal range in it. */
+  background:
+    radial-gradient(120% 60% at 50% 0%, color-mix(in oklab, var(--foil) 13%, transparent), rgba(0, 0, 0, 0) 70%),
+    var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow:
+    inset 0 0 0 3px var(--foil),
+    inset 0 1px 0 1px color-mix(in oklab, var(--foil) 30%, transparent),
+    var(--card-drop-air),
+    0 0 80px rgba(201, 162, 83, .16);
+}
+.win-box > .win-star,
+.win-box > #win-title,
+.win-box > #win-reason,
+.win-box > .btn { flex: 0 0 auto; }
+/* THE ROUNDEL IS LIT. §3.5's "no glow anywhere" governs the table, where a glow
+   is decoration competing with the cards; here the medal is struck brass under
+   a light and the light is the point. Two rings of brass, a warm key inside the
+   disc, and one soft halo — one light source, not a bloom filter. */
+.win-star {
+  position: relative;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.1em;
+  height: 2.1em;
+  font-size: 2.3em;
+  line-height: 1;
+  border-radius: 50%;
+  color: #E9CE8C;
+  background:
+    radial-gradient(circle at 50% 20%, rgba(233, 206, 140, .42), rgba(0, 0, 0, 0) 64%),
+    #0B0D10;
+  box-shadow:
+    inset 0 3px 6px rgba(0, 0, 0, .7),
+    inset 0 0 14px rgba(233, 206, 140, .22),
+    0 0 0 3px var(--surface),
+    0 0 0 5px var(--foil),
+    0 0 26px rgba(201, 162, 83, .5);
+}
+.win-star svg { width: 58%; height: 58%; fill: currentColor; }
+/* Gold display type, 800, with the same one-light logic: a warm lift along the
+   top of the letterforms and a shadow under them, so the word is struck rather
+   than filled. This is the single biggest thing the flattening cost. */
+#win-title {
+  font-family: var(--font-display);
+  font-size: 2.2em;
+  font-weight: 800;
+  line-height: 1.02;
+  letter-spacing: var(--track-display);
+  margin: .12em 0 0;
+  color: #E3C079;
+  text-shadow: 0 1px 0 rgba(255, 240, 205, .28), 0 2px 6px rgba(0, 0, 0, .55);
+}
+/* the boards sit in a well cut into the panel, not on it */
+.win-summary {
+  display: flex;
+  flex-direction: column;
+  gap: .18em;
+  font-size: var(--t-small);
+  margin-top: .4em;
+  /* no BOTTOM padding: content.css sticks "Open the full log" to bottom:0 of
+     this scroller, and 5px of padding under it is 5px in which the next recap
+     row shows through beneath an opaque footer — measured on win@desktop, it
+     reads as the z-index accident the footer was added to remove. */
+  padding: .3em .3em 0;
+  border-radius: var(--radius);
+  background: var(--ground-deep);
+  box-shadow: var(--deboss-deep);
+}
+.win-row {
+  display: flex;
+  justify-content: space-between;
+  gap: .5em;
+  padding: .3em .55em;
+  border-radius: 2px;
+  background: var(--surface);
+  color: var(--fg-mute);
+  box-shadow: var(--deboss);
+}
+.win-name { font-weight: 700; }
+.win-stats { color: var(--fg-mute); margin-top: .5em; font-size: .95em; }
+
+/* ── THE PRIMARY ACTION IS BRASS (OWNER RULING) ───────────────────────────
+   §3.4's "flat ink slab, no gradients" is a rule for the table's chrome, and
+   the reason it exists is that a metallic button there is a web app pretending
+   to be a game. In the victory modal the hierarchy inverted without it: REMATCH
+   became a bone slab identical to LEAVE ROOM, so the secondary action read as
+   loud as the primary.
+   The brass is LITERAL, not tokenised: --foil is #8A6320 in daylight and
+   #C9A253 at night, and the medal on this screen is one object that does not
+   change with the room (the same argument §0 makes for card stock). Measured
+   ink-on-brass at the three stops: 12.0 : 8.4 : 5.6, so the label clears §0.9
+   anywhere the gate samples it. The §4 press mechanic is untouched — hard
+   offset, zero blur, collapses to 0 on :active — because that is what makes it
+   a pressable rather than a picture of one. */
+#btn-rematch {
+  --btn-ink: #14161A;
+  --btn-edge: transparent;
+  /* longhands, not the `background` shorthand: with only a gradient the CSS
+     background-COLOR stays transparent and checkContrast falls through to the
+     panel behind it (measured: it read ink on --surface, 1.94:1, and reported
+     the button as illegal while the frame showed 8.4:1). The mid stop is
+     declared as the colour so the stylesheet states the same thing the pixels
+     do. */
+  background-color: #D9AE5C;
+  background-image: linear-gradient(180deg, #F0D89B 0%, #D9AE5C 42%, #B98B33 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 250, 235, .72),
+    inset 0 0 0 1px rgba(90, 62, 16, .45),
+    var(--btn-drop) var(--btn-drop) 0 var(--press-ink);
+}
+#btn-rematch:active:not(:disabled) {
+  transform: translate(var(--btn-drop), var(--btn-drop));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 250, 235, .5),
+    inset 0 0 0 1px rgba(90, 62, 16, .45),
+    0 0 0 var(--press-ink);
+}
+@media (hover: hover) {
+  #btn-rematch:hover:not(:disabled) {
+    background-color: #E2BA6A;
+    background-image: linear-gradient(180deg, #F6E3B0 0%, #E2BA6A 42%, #C4963A 100%);
+  }
+}
+
+/* ── toast + emotes ───────────────────────────────────────────────────── */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  /* NOT the bottom. #toast is a sibling of .screen, so a bottom-anchored toast
+     lands squarely on the hand — the cards the player is touching while the
+     toast is telling them something about them. 7em clears a two-row HUD
+     (measured 96px at 390×844, 93px at 1280×720). Still the desktop answer and
+     still the fallback everywhere; the phone answer is the anchored block
+     below. */
+  top: calc(7em + env(safe-area-inset-top));
+  transform: translateX(-50%) translateY(-1em);
+  max-width: 88vw;
+  padding: .5em 1em;
+  border-radius: var(--radius);
+  background: var(--act);
+  color: var(--act-fg);
+  font-size: var(--t-small);
+  font-weight: 700;
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+  box-shadow: var(--card-drop-air);
+  transition: opacity .18s ease, transform .22s cubic-bezier(.18, 1.5, .4, 1);
+  /* above the sheet, which is now above the win overlay */
+  z-index: 130;
+}
+.toast.is-on { opacity: 1; transform: translateX(-50%) translateY(0); }
+/* #toast and #sheet/#win-overlay are #app-level siblings of .screen, so
+   .screen's env() padding never reaches them — their own insets are required
+   and must not be "de-duplicated". */
+
+/* ══ THE TOAST RIDES THE TABLE, NOT THE TOP OF THE SCREEN (ROUND-8) ════════
+   `top: 7em` was measured against the HUD and it is still right about the HUD.
+   It was never a statement about what is UNDER the HUD, and that is what moved.
+   MEASURED at 390×844 after bfe8b42: #opponents starts at y59 and a collapsed
+   seat is 44px, so a toast at y85 lands 18px into the first seat — 41% of it,
+   55% of the first seat in landscape, and 28% of the seat tools/touchtest.mjs
+   happened to stage. The overlap did not change when the seats did. The seat
+   got shorter, so the measurement got honest: a 240px seat hid the same
+   collision under §D's 25% threshold.
+
+   THE MECHANISM IS THE FIX, NOT THE NUMBER. A distance from the top of the
+   screen is a claim about everything above it, and nothing tells the toast when
+   that claim expires — which is precisely how this bug arrived. So on a phone
+   the toast stops counting from the top and anchors to the FOOT OF THE SHARED
+   TABLE: `#table-center`'s bottom edge, the seam where the deck and discard end
+   and your own board begins. That edge is a real box in the same flex column as
+   everything that moved, so it tracks a fifth seat joining (y256 → y354
+   measured), the strip reserving its row (+29px), and any future re-partition
+   of the felt, with no offset to re-derive.
+
+   MEASURED, toast forced up over nine staged surfaces × three viewports, worst
+   coverage of any single §D CTA (>25% is the defect):
+     top: 7em                       first collapsed seat 41% / 55% landscape
+     centred on .table-center       discard pile 47%  ← the obvious move, and it
+                                    only changes which CTA is buried
+     anchored to the seam           discard pile 5%, every other CTA 0%
+   The row the toast does land on in portrait is `.board-self .board-head`,
+   which table.css already names as the first chrome to give ground because the
+   HUD repeats it. In landscape the felt is two columns and the seam sits just
+   above `#prompt`, so the cost there is the prompt's narration line for 2.6s —
+   message over message, which is the cheapest thing on that viewport to cover
+   and a great deal cheaper than the 55% of an opponent's seat it was covering.
+
+   DESKTOP IS DELIBERATELY UNTOUCHED. At 1280×720 the toast at y99 measures 0%
+   over every CTA on every one of those surfaces, and the seam there is y536 —
+   the felt is a different shape and there is nothing to fix. A change that
+   exists only where the failure is, is the whole change.
+
+   WHY `anchor-name` IS DECLARED IN THIS FILE: it belongs beside the box it
+   names, in table.css, and that is a standing request. Here it is inert to
+   everything except the two rules that reference it (this one and content.css's
+   `.hud-strip`, which anchors to the same box's TOP edge for the same reason).
+   If `#table-center` is ever renamed or unmounted the `anchor()` fallback
+   returns the toast to 7em rather than to `auto` — which is also the correct
+   answer on the home and lobby screens, where #table-center is inside a hidden
+   .screen and generates no box at all. That path is exercised on every "Invite
+   link copied": MEASURED on the home screen at 390×844, #table-center's box is
+   0px and the toast's computed `top` is 85.38px, i.e. exactly the declaration
+   above it. */
+@media (max-width: 1023px) {
+  #table-center { anchor-name: --table-centre; }
+  .toast {
+    position-anchor: --table-centre;
+    top: anchor(bottom, calc(7em + env(safe-area-inset-top)));
+  }
+}
+
+/* ══ SHORT LANDSCAPE — the two overlays that had no route out ══════════════
+   MOBILE REVIEW, round 4, measured at 844×390: .win-box was 366px tall with
+   scrollHeight 640, so "Open the full log" (y471), Rematch (y542) and Leave
+   room (y592) were all past innerHeight 390 — the end of a game showed a recap
+   and not one control. #screen-lobby had scrollHeight 822, putting Launch
+   Mission at y680. Both are a portrait column poured into a landscape box, and
+   both get the same fix: lay the content ACROSS, and pin the actions. */
+@media (orientation: landscape) and (max-height: 560px) {
+  .win-overlay { padding: .5em; }
+  .win-box {
+    width: min(38em, 96%);
+    padding: .7em 1.1em .8em;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    gap: .35em .6em;
+    align-content: start;
+    text-align: center;
+  }
+  /* the roundel is ceremony, and ceremony gives way when the two buttons the
+     player needs are the thing off screen */
+  .win-star { display: none; }
+  #win-title { grid-column: 1 / -1; font-size: 1.55em; margin: 0; }
+  #win-reason { grid-column: 1 / -1; margin: 0; }
+  .win-summary { grid-column: 1 / -1; margin-top: 0; }
+  #btn-rematch { grid-column: 1; }
+  #btn-win-leave { grid-column: 2; }
+
+  /* THE LOBBY NEEDS NO LANDSCAPE SPECIAL CASE ANY MORE, and that is the point
+     of the three registers: head and rail are `auto` rows, the body is the 1fr
+     between them, so 390px of height simply gives the body less to scroll in.
+     The previous block here was a bespoke five-area grid that existed only
+     because Launch Mission had no fixed home; it is deleted rather than ported.
+
+     Two things do change, and both are height, not arrangement. The two-column
+     body is worth having at 844 wide even though the min-width query is 1024 —
+     that query is about READING WIDTH on a tall screen, and here the scarce
+     axis is the other one. And the head loses its vertical air. */
+  .lobby { padding-top: .3em; }
+  .lobby-head { padding-bottom: .35em; }
+  .lobby-body {
+    /* Rules first, room second, the same order the phone stack uses — see THE
+       DECISION LEADS. The wider track is still the rules track. */
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+    gap: .5em 1.2em;
+    padding-block: .5em;
+  }
+  .lobby-col-room { box-shadow: inset 1px 0 0 var(--stencil); padding-left: 1.2em; }
+  /* .35em was 5.6px against .lobby-go's 6px drop shadow, and the slab came out
+     2px clipped by the frame at 844×390 (button bottom 386 + 6 = 392 in a 390
+     viewport). The bottom inset on this rail is sized by the SHADOW at every
+     width, not by the text. */
+  .lobby-rail { padding-top: .6em; padding-bottom: .8em; }
+  .lobby-actions { flex-direction: row; align-items: center; gap: .6em; width: min(32em, 100%); }
+  .lobby-go { width: auto; flex: 0 0 auto; }
+  #lobby-hint { flex: 1 1 auto; text-align: left; }
+}
+
+.emotes { position: fixed; inset: 0; pointer-events: none; z-index: 80; }
+.emote-bubble {
+  position: absolute;
+  transform: translate(-50%, 0);
+  padding: .3em .7em;
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--fg);
+  font-size: var(--t-small);
+  font-weight: 700;
+  white-space: nowrap;
+  box-shadow: var(--card-drop);
+}
+.emote-bubble::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -5px;
+  margin-left: -4px;
+  border: 4px solid transparent;
+  border-top-color: var(--surface);
+}
+
+/* ── desktop ──────────────────────────────────────────────────────────── */
+
+@media (min-width: 900px) {
+  /* .screen-game keeps base.css's flex column at every width now — the grid
+     that used to live here existed only to dock the comms rail on the left. */
+  .side {
+    width: min(24em, 42%);
+    padding: .7em .6em;
+    /* a drawer over the table, not a wall built into it */
+    box-shadow: -14px 0 34px var(--scrim), -1px 0 0 var(--shade-2);
+  }
+  .panel { width: min(26em, 100%); }
+
+  .win-box { width: min(34em, 88%); padding: 1.2em 1.6em 1.2em; gap: .4em; }
+  #win-title { font-size: 2.4em; }
+}

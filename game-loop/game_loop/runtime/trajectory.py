@@ -71,6 +71,9 @@ class TrajectoryRecorder:
     def record(self, event_type: str, source: str, payload: dict[str, Any]) -> TrajectoryEvent:
         self.sequence += 1
         event = TrajectoryEvent(self.sequence, event_type, source, payload, utc_now())
+        # A runtime-side cleanup or interrupted isolation setup must not make
+        # the final bookkeeping event fail with a missing parent directory.
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(event.to_dict(), ensure_ascii=False) + "\n")
         return event

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -29,10 +30,8 @@ from game_loop.gcbench_runtime import (
     sanitize_public_instruction,
     stage_local_runtime_overlay,
 )
-from game_loop.runtime.deepseek_harness import (
-    DeepSeekHarnessRuntime,
-    DeepSeekHarnessRuntimeConfig,
-)
+from game_loop.runtime import build_runtime, load_runtime_config
+from game_loop.runtime.base import MakerRuntimeConfig
 from game_loop.runtime.protocol import GameSubmission, GameTask
 from game_loop.runtime_profile_snapshot import (
     capture_runtime_profile,
@@ -66,7 +65,7 @@ DEFAULT_SEED = (
     ROOT
     / "experiments/complex-game-multiagent-v030/auto-chess-seed-v1"
 )
-DEFAULT_PROFILE = ROOT / "experiments/inner-agent/deepseek-harness-profile.local.json"
+DEFAULT_PROFILE = ROOT / "experiments/inner-agent/qwen38-harness-profile.local.json"
 DEFAULT_INNER = ROOT / "experiments/agentx/inner_harness_gcbench.json"
 DEFAULT_GCBENCH_ROOT = ROOT.parent / "gcbench"
 
@@ -98,8 +97,8 @@ def _artifact_promotion_admission(
         reasons.append("pair infrastructure failure")
     if rubric_accepted is not True:
         reasons.append("paired rubric validation failed")
-    if not quality_delta > 0:
-        reasons.append("candidate quality did not improve")
+    if not math.isfinite(quality_delta) or quality_delta < 0:
+        reasons.append("candidate quality regressed below the parent baseline")
     return {
         "policy": "continuation-artifact-quality-v1",
         "promoted": not reasons,
@@ -112,16 +111,17 @@ def _evolution_admission(
     *, infrastructure_ok: bool, rubric_accepted: bool,
     quality_delta: float, net_utility: float,
 ) -> dict[str, object]:
-    """Decide whether the candidate harness/GOA proposal should be accepted."""
+    """Accept a valid candidate whose measured score is no worse than its parent."""
     reasons = []
     if infrastructure_ok is not True:
         reasons.append("pair infrastructure failure")
     if rubric_accepted is not True:
         reasons.append("paired rubric validation failed")
-    if not quality_delta > 0:
-        reasons.append("candidate quality did not improve")
-    if not net_utility >= 0:
-        reasons.append("candidate net utility is negative or invalid")
+    if not math.isfinite(quality_delta) or quality_delta < 0:
+        reasons.append("candidate quality regressed below the parent baseline")
+    # Game evolution admission follows the user's score rule. Runtime cost is
+    # retained in utility telemetry for analysis, but does not veto a candidate
+    # whose measured score is at least the parent baseline.
     return {
         "policy": "optional-fork-harness-net-utility-v2",
         "fork_required": False,
@@ -269,9 +269,24 @@ def _runtime_config(
     max_tokens: int,
     reasoning_effort: str,
     shared_runtime_plugins: tuple[str, ...] = (),
-) -> DeepSeekHarnessRuntimeConfig:
+) -> MakerRuntimeConfig:
     profile, _, assets = capture_runtime_profile(runtime_profile)
     profile["timeout_seconds"] = timeout_seconds
+    runtime_type = str(profile.get("runtime_type", "")).strip().casefold()
+    if runtime_type in {"codex", "codex-cli", "codex_cli"}:
+        profile["reasoning_effort"] = {
+            "off": "minimal",
+            "low": "low",
+            "max": "high",
+        }[reasoning_effort]
+        profile["active_subagent_prototypes"] = [] if prototypes is None else prototypes
+        snapshot_path, _ = materialize_runtime_profile(
+            profile=profile,
+            assets=assets,
+            destination=snapshot_root,
+        )
+        return load_runtime_config(read_json(snapshot_path))
+
     profile["max_tokens"] = max_tokens
     if reasoning_effort != "max":
         source = Path(assets["cordis"]["path"])
@@ -325,7 +340,7 @@ def _runtime_config(
         destination=snapshot_root,
     )
     value = read_json(snapshot_path)
-    return DeepSeekHarnessRuntimeConfig.from_dict(value)
+    return load_runtime_config(value)
 
 
 def _run_submission(
@@ -349,7 +364,7 @@ def _run_submission(
         reasoning_effort=reasoning_effort,
         shared_runtime_plugins=shared_runtime_plugins,
     )
-    runtime = DeepSeekHarnessRuntime(config)
+    runtime = build_runtime(config)
     doctor = runtime.doctor()
     atomic_write_json(output / f"{side}-doctor.json", doctor)
     if doctor.get("ok") is not True:
@@ -363,10 +378,12 @@ def _finalization_reserve_seconds(configured: int) -> int:
 
 def _normalized_seed_project_root(seed: Path) -> Path:
     source = seed.resolve()
-    if not (source / "project.godot").is_file() and (
-        source / "game" / "project.godot"
-    ).is_file():
-        source = source / "game"
+    game_root = source / "game"
+    if not (source / "project.godot").is_file():
+        if (game_root / "project.godot").is_file():
+            source = game_root
+        elif (game_root / "package.json").is_file() or (game_root / "index.html").is_file():
+            source = game_root
     if not (
         (source / "project.godot").is_file()
         or (source / "package.json").is_file()
@@ -585,6 +602,8 @@ def _background_report_child_id(event: dict[str, object]) -> str | None:
 
 
 def _fork_usage(submission: GameSubmission) -> dict[str, object]:
+    if submission.metadata.get("runtime_type") == "codex":
+        return _codex_fork_usage(submission)
     session_root = Path(str(submission.metadata.get("session_root", "")))
     sessions = sorted(session_root.rglob("*.zstd")) if session_root.is_dir() else []
     records: list[dict[str, object]] = []
@@ -730,11 +749,148 @@ def _fork_usage(submission: GameSubmission) -> dict[str, object]:
     }
 
 
+def _codex_fork_usage(submission: GameSubmission) -> dict[str, object]:
+    event_stream = Path(str(submission.metadata.get("event_stream", "")))
+    events: list[dict[str, object]] = []
+    if event_stream.is_file():
+        for line in event_stream.read_text(encoding="utf-8", errors="replace").splitlines():
+            try:
+                value = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(value, dict):
+                events.append(value)
+    calls: list[dict[str, object]] = []
+    results: list[dict[str, object]] = []
+    completed_children: list[dict[str, object]] = []
+    completion_reports: list[dict[str, object]] = []
+    spawned_children: set[str] = set()
+    completed_child_indexes: dict[str, int] = {}
+    for index, event in enumerate(events):
+        item = event.get("item", {})
+        if not isinstance(item, dict) or item.get("type") != "collab_tool_call":
+            continue
+        receivers = [str(value) for value in item.get("receiver_thread_ids", [])]
+        states = item.get("agents_states", {})
+        if isinstance(states, dict):
+            for child_id, state in states.items():
+                if (
+                    str(child_id) in spawned_children
+                    and isinstance(state, dict)
+                    and state.get("status") == "completed"
+                ):
+                    completed_child_indexes.setdefault(str(child_id), index)
+        if item.get("tool") != "spawn_agent":
+            continue
+        record = {
+            "name": "spawn_agent",
+            "call_id": str(item.get("id", event.get("id", f"codex-{index}"))),
+            "arguments": {"prompt": item.get("prompt")},
+            "sequence": index,
+            "session": str(event_stream),
+        }
+        if event.get("type") == "item.started":
+            calls.append(record)
+            continue
+        if event.get("type") != "item.completed":
+            continue
+        spawned_children.update(receivers)
+        results.append({
+            "call_id": record["call_id"],
+            "sequence": index,
+            "successful": item.get("status") == "completed",
+            "serialized_content": json.dumps(item, ensure_ascii=False),
+            "session": str(event_stream),
+            "child_ids": receivers,
+        })
+    for child_id, index in completed_child_indexes.items():
+        completed_children.append({
+            "child_id": child_id,
+            "session": str(event_stream),
+            "parent_session": "codex-root",
+            "delegation_depth": 1,
+            "completed": True,
+        })
+        completion_reports.append({
+            "child_id": child_id,
+            "sequence": index,
+            "session": str(event_stream),
+            "event_type": "item.completed",
+        })
+    mutations = [
+        {
+            "name": str(dict(event.get("item", {})).get("type", "")),
+            "call_id": str(dict(event.get("item", {})).get("id", "")),
+            "sequence": index,
+            "session": str(event_stream),
+        }
+        for index, event in enumerate(events)
+        if event.get("type") == "item.completed"
+        and isinstance(event.get("item"), dict)
+        and dict(event["item"]).get("type") in {"file_change", "command_execution"}
+    ]
+    adoption_actions: list[dict[str, object]] = []
+    for child_id, spawn_index in completed_child_indexes.items():
+        later = next(
+            (item for item in mutations if int(item["sequence"]) > spawn_index),
+            None,
+        )
+        action = later or {
+                "name": "child_handoff",
+                "call_id": "",
+                "sequence": spawn_index,
+                "session": str(event_stream),
+            }
+        adoption_actions.append({**action, "child_id": child_id})
+    return {
+        "fork_tool_calls": calls,
+        "fork_tool_call_count": len(calls),
+        "fork_results": results,
+        "fork_result_count": len(results),
+        "completed_child_sessions": completed_children,
+        "completed_child_session_count": len(completed_children),
+        "completion_reports": completion_reports,
+        "completion_report_count": len(completion_reports),
+        "post_fork_root_actions": adoption_actions,
+        "adopted_fork_count": len(adoption_actions),
+        "fork_contract_satisfied": bool(adoption_actions),
+        "session_file_count": int(event_stream.is_file()),
+    }
+
+
 def _root_contract_visibility(
     submission: GameSubmission,
     prototypes: list[dict],
     model_tool_surface: dict[str, object] | None = None,
 ) -> dict[str, object]:
+    if submission.metadata.get("runtime_type") == "codex":
+        role_ids = [str(item.get("id", "")) for item in prototypes]
+        materialized = [
+            str(item) for item in submission.metadata.get("active_subagent_roles", [])
+        ]
+        prompt_hash = submission.metadata.get("subagent_contract_prompt_sha256")
+        return {
+            "expected_tools": ["spawn_agent"],
+            "recorded_tools": [
+                str(item)
+                for item in submission.metadata.get("root_visible_subagent_tools", [])
+            ],
+            "request_header_count": 1,
+            "model_visible_tools": ["spawn_agent"],
+            "model_visible_tool_schemas": {},
+            "evolved_tool_contracts": {
+                role_id: role_id in materialized for role_id in role_ids
+            },
+            "generic_subagent_present": True,
+            "contract_prompt_sha256": prompt_hash,
+            "verified": (
+                bool(role_ids)
+                and sorted(role_ids) == sorted(materialized)
+                and submission.metadata.get("root_visible_subagent_tools") == ["spawn_agent"]
+                and isinstance(prompt_hash, str)
+                and len(prompt_hash) == 64
+            ),
+        }
     expected = [
         tool_name_for_subagent_prototype(str(item["id"]))
         for item in prototypes
@@ -936,7 +1092,14 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         runtime_block = (
             "\n\nRuntime note: this is a browser game. Serve the `game/` directory "
             "with a local HTTP server, run its package build when available, and "
-            "capture real browser gameplay evidence before finalizing.\n"
+            "capture real browser gameplay evidence before finalizing. On macOS, "
+            "any self-authored Chrome or Playwright launch must be non-interactive: "
+            "prefer bundled Playwright Chromium, avoid `channel: 'chrome'` when possible, "
+            "and include `--password-store=basic`, `--use-mock-keychain`, "
+            "`--no-first-run`, `--no-default-browser-check`, and `--disable-sync` in "
+            "launch args when using installed Chrome/Chromium. Keep page state "
+            "access inside browser-evaluation callbacks; do not mix Node-side scope "
+            "with page globals like `window` or `$`.\n"
         )
     task_identity = _default_task_identity(args.task_file)
     task_id = args.task_id or f"dynamic-fork-{task_identity}"

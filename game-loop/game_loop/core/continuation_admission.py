@@ -35,10 +35,10 @@ def decide_paired_admission(
         except (TypeError, ValueError):
             delta = None
             reasons.append("paired parent/candidate score is invalid")
-    if delta is not None and delta <= float(minimum_delta):
+    if delta is not None and delta < float(minimum_delta):
         reasons.append(
-            f"candidate did not strictly improve score: delta={delta:.6f}, "
-            f"required>{float(minimum_delta):.6f}"
+            f"candidate score fell below the acceptance floor: delta={delta:.6f}, "
+            f"required>={float(minimum_delta):.6f}"
         )
     if hard_regression:
         reasons.append("candidate has a hard gameplay, charter, visual, or reliability regression")

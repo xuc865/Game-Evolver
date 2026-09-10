@@ -25,7 +25,7 @@ from game_loop.utils import atomic_write_json, read_json
 DEFAULT_INNER_CONFIG = (
     ROOT / "game_loop/product_assets/experiments/agentx/inner_harness_gcbench.json"
 )
-DEFAULT_RUNTIME_PROFILE = ROOT / "experiments/inner-agent/deepseek-harness-profile.local.json"
+DEFAULT_RUNTIME_PROFILE = ROOT / "experiments/inner-agent/qwen38-harness-profile.local.json"
 DEFAULT_SEED = ROOT / "experiments/seed_artifacts/puzzle-sokoban-scaffold"
 
 

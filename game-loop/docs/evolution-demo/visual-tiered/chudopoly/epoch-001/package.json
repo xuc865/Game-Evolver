@@ -1,0 +1,69 @@
+{
+  "name": "chudopoly",
+  "version": "1.0.0",
+  "description": "Real-time multiplayer card game for 2-5 players: an Air Force themed Monopoly Deal variant that ships with no build step and draws every card in code.",
+  "keywords": [
+    "card-game",
+    "monopoly-deal",
+    "multiplayer",
+    "multiplayer-game",
+    "websocket",
+    "realtime",
+    "browser-game",
+    "no-build",
+    "vanilla-js",
+    "es-modules",
+    "game-ai",
+    "nodejs"
+  ],
+  "homepage": "https://chudopoly.deal",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/8tp/chudopoly.git"
+  },
+  "bugs": {
+    "url": "https://github.com/8tp/chudopoly/issues"
+  },
+  "license": "MIT",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "check": "node scripts/check-syntax.js",
+    "test": "node --test",
+    "verify": "node tools/verify.mjs",
+    "serve": "node tools/serve.mjs",
+    "verify:fast": "node tools/verify.mjs --fast",
+    "tool:assets": "node tools/checkAssets.mjs",
+    "tool:client": "node tools/checkClient.mjs",
+    "tool:server": "node tools/checkServer.mjs",
+    "tool:statsfuzz": "node tools/statsfuzz.mjs --game --size",
+    "tool:record": "node tools/record.mjs",
+    "tool:recordlog": "node tools/recordlog.mjs",
+    "tool:simbalance": "node tools/simbalance.mjs",
+    "tool:simhuman": "node tools/simhuman.mjs",
+    "tool:playtest": "node tools/playtest.mjs",
+    "tool:touchtest": "node tools/touchtest.mjs",
+    "tool:dragtest": "node tools/dragtest.mjs",
+    "tool:tabaway": "node tools/tabaway.mjs",
+    "tool:handoff": "node tools/handoff.mjs",
+    "tool:screenshot": "node tools/screenshot.mjs",
+    "tool:audiotest": "node tools/audiotest.mjs",
+    "tool:contrast": "node tools/checkContrast.mjs",
+    "tool:grayscale": "node tools/grayscale.mjs",
+    "tool:prove": "node tools/checkContrast.mjs --prove; node tools/grayscale.mjs --prove; node tools/touchtest.mjs --prove; node tools/screenshot.mjs --prove-theme && node tools/touchtest.mjs --prove-surfaces",
+    "tool:coverage": "node tools/coverage.mjs"
+  },
+  "engines": {
+    "node": ">=20 <25"
+  },
+  "dependencies": {
+    "express": "^4.22.2",
+    "ws": "^8.21.2"
+  },
+  "devDependencies": {
+    "playwright": "^1.56.0",
+    "pngjs": "^7.0.0"
+  }
+}

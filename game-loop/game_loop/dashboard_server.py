@@ -26,7 +26,7 @@ DASHBOARD_DIR = ROOT / "dashboard"
 RUNS_ROOT = ROOT / "experiments" / "dashboard-runs"
 ACTIVE_META = RUNS_ROOT / "active_run.json"
 
-MODELS = ("kimi", "qwen3.6-27b", "glm5.2", "claude", "gpt55", "deepseek_v4")
+MODELS = ("kimi", "qwen3.6-27b", "glm5.2", "claude", "gpt55")
 
 PRESETS: dict[str, dict[str, Path]] = {
     "gcbench": {

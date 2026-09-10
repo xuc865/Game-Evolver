@@ -82,7 +82,9 @@ def materialize_runtime_profile(
         snapshot[field] = str(target)
     active_rows = _validated_cordis_plugins(snapshot)
     prototypes = _validated_subagent_prototypes(snapshot)
-    prototype_rows = cordis_rows_for_subagent_prototypes(prototypes)
+    runtime_type = str(snapshot.get("runtime_type", "")).strip().casefold()
+    is_codex = runtime_type in {"codex", "codex-cli", "codex_cli"}
+    prototype_rows = () if is_codex else cordis_rows_for_subagent_prototypes(prototypes)
     if prototype_rows and "fork_context_subagent" not in set(
         snapshot.get("active_cordis_plugins", [])
     ):

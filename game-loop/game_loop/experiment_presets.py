@@ -574,7 +574,7 @@ def _harness_evolution(
         "require_rubric_validation": require_rubric_validation,
         "dynamic_rubric_generation": True,
         "enable_usage_driven_mutation": element_catalog is not None,
-        "rubric_provider": "deepseek",
+        "rubric_provider": "glm",
         "element_mutation_policy": {
             "removal_min_usage": 5,
             "removal_min_usage_share": 0.25,

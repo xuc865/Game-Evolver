@@ -28,8 +28,8 @@
     "cwd": ".",
     "timeout_seconds": 180,
     "env": {
-      "CODEX_API_BASE": "http://29.163.228.59:8080/v1",
-      "CODEX_MODEL": "Qwen3.6-27B",
+      "CODEX_API_BASE": "http://29.116.237.141:8080/v1",
+      "CODEX_MODEL": "Qwen3.8-27B-node1",
       "GAME_LOOP_BACKBONE_PROVIDER": "qwen"
     },
     "inactivity_timeout_seconds": 90
@@ -205,7 +205,7 @@
       "require_rubric_validation": true,
       "dynamic_rubric_generation": true,
       "enable_usage_driven_mutation": true,
-      "rubric_provider": "deepseek",
+      "rubric_provider": "glm",
       "element_mutation_policy": {
         "removal_min_usage": 5,
         "removal_min_usage_share": 0.25,

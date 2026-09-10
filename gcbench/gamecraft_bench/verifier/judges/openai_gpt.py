@@ -85,12 +85,11 @@ class OpenAIJudge(MultimodalJudge):
             from openai import OpenAI
         except ImportError as e:
             raise JudgeError(f"openai SDK not installed: {e}") from e
-        try:
-            api_key = _common.require_env(
-                "GAMECRAFT_BENCH_JUDGE_OPENAI_API_KEY", "OPENAI_API_KEY"
-            )
-        except KeyError as e:
-            raise JudgeError(str(e)) from e
+        api_key = (
+            _common.get_env("GAMECRAFT_BENCH_JUDGE_OPENAI_API_KEY")
+            or os.environ.get("OPENAI_API_KEY")
+            or ""
+        )
 
         input_mode = request.input_mode.strip().lower()
         if input_mode not in {"vision", "text"}:
@@ -110,6 +109,7 @@ class OpenAIJudge(MultimodalJudge):
             # minutes. score_project owns the deliberate retry policy.
             "timeout": 120.0,
             "max_retries": 0,
+            "_enforce_credentials": False,
         }
         base_url = (
             _common.get_env("GAMECRAFT_BENCH_JUDGE_OPENAI_BASE_URL")

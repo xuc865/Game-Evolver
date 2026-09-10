@@ -27,11 +27,10 @@ ABL_DIR = ROOT / "experiments" / "configs-ablation"
 MODELS = {
     "kimi": {"CODEX_API_BASE": "http://29.116.237.135:8080/v1", "CODEX_MODEL": "Kimi-K2.7-Code"},
     "qwen3.6-27b": {
-        "CODEX_API_BASE": "http://29.163.228.59:8080/v1",
-        "CODEX_MODEL": "Qwen3.6-27B",
+        "CODEX_API_BASE": "http://29.116.237.141:8080/v1",
+        "CODEX_MODEL": "Qwen3.8-27B-node1",
     },
-    "glm5.2": {"CODEX_API_BASE": "http://29.116.237.75:8080/v1", "CODEX_MODEL": "GLM-5.2-W4AFP8-node1"},
-    "deepseek_v4": {"CODEX_API_BASE": "https://api.deepseek.com", "CODEX_MODEL": "deepseek-v4-flash"},
+    "glm5.2": {"CODEX_API_BASE": "http://11.213.4.72:80/v1", "CODEX_MODEL": "GLM-5.3-Flash-node1"},
     "claude": {
         "CODEX_API_BASE": "https://xmcode.shop/v1",
         "CODEX_MODEL": "claude-sonnet-4-6",
@@ -262,7 +261,6 @@ def make_config(
             "kimi": "kimi",
             "qwen3.6-27b": "qwen",
             "glm5.2": "glm",
-            "deepseek_v4": "deepseek",
             "claude": "claude",
             "gpt55": "gpt55",
         }[model_key]
@@ -344,7 +342,7 @@ def main() -> None:
     )
     args = parser.parse_args()
     written: list[Path] = []
-    model_keys = ["kimi", "qwen3.6-27b", "glm5.2", "deepseek_v4", "claude", "gpt55"]
+    model_keys = ["kimi", "qwen3.6-27b", "glm5.2", "claude", "gpt55"]
 
     if not args.ablation_only:
         for mk in model_keys:

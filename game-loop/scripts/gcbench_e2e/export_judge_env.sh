@@ -13,24 +13,22 @@ export GAMECRAFT_BENCH_JUDGE="${GAMECRAFT_BENCH_JUDGE:-openai}"
 
 judge_key="${GAMECRAFT_BENCH_JUDGE_OPENAI_API_KEY:-}"
 if [[ -z "$judge_key" ]]; then
-  judge_key="${DEEPSEEK_API_KEY:-${CODEX_API_KEY:-${OPENAI_API_KEY:-}}}"
+  judge_key="${OPENAI_API_KEY:-}"
 fi
-if [[ -z "$judge_key" && "${GAMECRAFT_BENCH_JUDGE_ALLOW_KEYLESS:-0}" == "1" ]]; then
+if [[ -z "$judge_key" ]]; then
   judge_key="EMPTY"
 fi
-if [[ -n "$judge_key" ]]; then
-  export OPENAI_API_KEY="$judge_key"
-  export GAMECRAFT_BENCH_JUDGE_OPENAI_API_KEY="${GAMECRAFT_BENCH_JUDGE_OPENAI_API_KEY:-$judge_key}"
-fi
+export OPENAI_API_KEY="$judge_key"
+export GAMECRAFT_BENCH_JUDGE_OPENAI_API_KEY="${GAMECRAFT_BENCH_JUDGE_OPENAI_API_KEY:-$judge_key}"
 
 # Keep the public rubric judge independent from whichever backbone launched the
-# verifier. The local GLM deployment is OpenAI-compatible and keyless; callers
-# can still override it explicitly for another healthy judge service.
-judge_base="${GAMECRAFT_BENCH_JUDGE_OPENAI_BASE_URL:-${GLM_BASE_URL:-http://29.116.237.75:8080/v1}}"
+# verifier. Prefer the current GLM deployment and only fall back to a caller
+# override when one is explicitly supplied.
+judge_base="${GAMECRAFT_BENCH_JUDGE_OPENAI_BASE_URL:-${GLM_BASE_URL:-http://11.213.4.72:80/v1}}"
 export OPENAI_BASE_URL="$judge_base"
 export GAMECRAFT_BENCH_JUDGE_OPENAI_BASE_URL="${GAMECRAFT_BENCH_JUDGE_OPENAI_BASE_URL:-$judge_base}"
 
-export GAMECRAFT_BENCH_JUDGE_MODEL="${GAMECRAFT_BENCH_JUDGE_MODEL:-GLM-5.2-W4AFP8-node1}"
+export GAMECRAFT_BENCH_JUDGE_MODEL="${GAMECRAFT_BENCH_JUDGE_MODEL:-GLM-5.3-Flash-node1}"
 export GAMECRAFT_BENCH_JUDGE_CONCURRENCY="${GAMECRAFT_BENCH_JUDGE_CONCURRENCY:-6}"
 
 if [[ "${GAME_LOOP_TEXT_ONLY:-0}" == "1" ]]; then
@@ -38,19 +36,15 @@ if [[ "${GAME_LOOP_TEXT_ONLY:-0}" == "1" ]]; then
 elif [[ -z "${GAMECRAFT_BENCH_JUDGE_INPUT_MODE:-}" ]]; then
   judge_model_lower="$(printf '%s' "$GAMECRAFT_BENCH_JUDGE_MODEL" | tr '[:upper:]' '[:lower:]')"
   case "$judge_model_lower" in
-    deepseek-v4-flash|glm-5.2-w4afp8-node1) export GAMECRAFT_BENCH_JUDGE_INPUT_MODE="text" ;;
+    deepseek-v4-flash|glm-5.2-w4afp8-node1|glm-5.3-flash-node1) export GAMECRAFT_BENCH_JUDGE_INPUT_MODE="text" ;;
     *) export GAMECRAFT_BENCH_JUDGE_INPUT_MODE="vision" ;;
   esac
   unset judge_model_lower
 fi
 
-if [[ -z "${OPENAI_API_KEY:-}" && "$judge_base" == "http://29.116.237.75:8080/v1" ]]; then
+# The GLM/Qwen judge path is intentionally keyless. Keep EMPTY in place so the
+# OpenAI-compatible SDK has a credential-shaped value without forcing secrets.
+if [[ -z "${OPENAI_API_KEY:-}" ]]; then
   export OPENAI_API_KEY="EMPTY"
   export GAMECRAFT_BENCH_JUDGE_OPENAI_API_KEY="EMPTY"
-fi
-
-if [[ -z "${OPENAI_API_KEY:-}" ]]; then
-  echo "[gcbench_judge] ERROR: real judge (${GAMECRAFT_BENCH_JUDGE}) requires OPENAI_API_KEY, DEEPSEEK_API_KEY, or CODEX_API_KEY" >&2
-  echo "[gcbench_judge] Set GAMECRAFT_BENCH_JUDGE=stub only for offline pipeline smoke tests." >&2
-  return 1 2>/dev/null || exit 1
 fi

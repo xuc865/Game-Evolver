@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>钢铁突围：三维枪战</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="css/game.css">
+<link rel="stylesheet" href="/demo-visual-tier.css?v=showcase-v5-1"><script>document.documentElement.dataset.demoTier="1";document.documentElement.dataset.demoGame="iron-breakout-fps";</script></head>
+<body>
+  <button id="audioToggle" type="button" title="切换音效（M）">
+    <span class="audio-bars"><i></i><i></i><i></i></span>
+    <span id="audioToggleLabel">音效 开</span>
+    <span class="audio-key">M</span>
+  </button>
+
+  <div id="hud">
+    <div id="healthPanel" class="hud-box">
+      <div id="healthHeader">
+        <span>生命值</span>
+        <span id="healthText">100</span>
+      </div>
+      <div id="healthTrack"><div id="healthFill"></div></div>
+    </div>
+
+    <div id="minimapPanel" class="hud-box">
+      <div id="minimapHeader">
+        <span>战术地图</span>
+        <small>北 ↑</small>
+      </div>
+      <canvas id="minimap" width="396" height="396"></canvas>
+      <div class="minimap-legend">
+        <span><i class="legend-player"></i>玩家</span>
+        <span><i class="legend-enemy"></i>敌人</span>
+        <span><i class="legend-supply"></i>物资</span>
+      </div>
+    </div>
+
+    <div id="gameInfo" class="hud-box">
+      <div>模式：<span id="modeText">尚未选择</span></div>
+      <div>地图：<span id="mapText">待命区</span></div>
+      <div>累计分数：<span id="scoreText">0</span></div>
+      <div>存活时间：<span id="survivalTimeText">0:00</span></div>
+      <div>威胁等级：<span id="difficultyText">1</span></div>
+      <div>存活敌人：<span id="enemyCountText">0</span></div>
+      <div>当前武器：<span id="weaponText">机枪</span></div>
+      <div>弹匣 / 备弹：<span id="ammoText">45 / 180</span></div>
+      <div>连杀加成：<span id="streakText">x1.0</span></div>
+      <div id="streakTrack" class="hidden">
+        <div id="streakTrackFill"></div>
+        <span id="streakTrackLabel"></span>
+      </div>
+      <div>爆头伤害：<span id="headshotText">0</span></div>
+      <div>命中率：<span id="accuracyText">--</span>（发射 <span id="shotsText">0</span>）</div>
+      <div>最佳分数：<span id="bestScoreText">0</span></div>
+      <div>音效事件：<span id="sfxCountText">0</span></div>
+    </div>
+
+    <div id="combatLog"></div>
+
+    <div id="objective" class="objective-with-bar">
+      <div id="objectiveText">请选择游戏模式</div>
+      <div id="missionTrack" class="hidden">
+        <div id="missionTrackFill"></div>
+        <span id="missionTrackLabel">0 / 25</span>
+      </div>
+      <div id="threatTrack" class="hidden">
+        <div id="threatTrackFill"></div>
+        <span id="threatTrackLabel">威胁等级 1</span>
+      </div>
+      <div id="recordTrack" class="hidden">
+        <div id="recordTrackFill"></div>
+        <span id="recordTrackLabel">最佳纪录</span>
+      </div>
+    <div id="intakeReadout" class="hidden">
+      <span class="intake-pulse"></span>
+      <span id="intakeReadoutText">下一名敌兵 0.0 秒后抵达</span>
+    </div>
+    <div id="supplyReadout" class="hidden">
+      <span class="supply-pulse"></span>
+      <span id="supplyReadoutText">下一补给 0.0 秒后抵达</span>
+    </div>
+  </div>
+  <div id="damageNumbers"></div>
+    <div id="climbHint">靠近梯子：按 W 或空格向上攀爬，按 S 向下</div>
+    <div id="pickupNotice">已拾取物资</div>
+    <div id="reloadIndicator">
+      <span id="reloadIndicatorText">正在换弹</span>
+      <div id="reloadBar"><div id="reloadBarFill"></div></div>
+    </div>
+
+    <div id="reloadPrompt"></div>
+
+    <div id="scopeOverlay">
+      <div class="scope-ring"></div>
+      <div class="scope-line-x"></div>
+      <div class="scope-line-y"></div>
+      <div class="scope-center"></div>
+    </div>
+
+    <div id="crosshair">
+      <span class="top"></span>
+      <span class="bottom"></span>
+      <span class="left"></span>
+      <span class="right"></span>
+      <span id="hitZoneLabel"></span>
+    </div>
+
+  <div id="threatMarkersPanel"></div>
+
+  <!-- 受击方向指示：任意血量下沿屏幕边缘指向伤害来源（与低血量威胁标记区分）。 -->
+  <div id="damageDirection"><i class="damage-arc"></i></div>
+
+  <div id="hitMarker"></div>
+    <div id="damageVignette"></div>
+    <div id="dangerVignette"></div>
+    <div id="lowHealthWarning" class="hidden">
+      <div class="danger-banner">⚠ 生命值危急 — 立即撤退寻找医疗包</div>
+      <div class="danger-direction"><span id="dangerArrow">▲</span> <span id="dangerTarget">最近威胁</span></div>
+    </div>
+  </div>
+
+  <div id="loadingScreen" class="screen">
+    <div class="panel">
+      <div class="subtitle">正在加载三维引擎……</div>
+    </div>
+  </div>
+
+  <div id="modeScreen" class="screen hidden">
+    <div class="panel main-menu-panel">
+      <div class="menu-kicker">IRON BREAKOUT // 战区指挥终端</div>
+      <h1 class="main-title">钢铁<span>突围</span></h1>
+      <div class="menu-subtitle-row">选择作战协议，进入废弃工业战区</div>
+
+      <div class="mode-grid">
+        <button id="endlessModeButton" class="mode-button mode-card">
+          <i class="mode-card-number">01</i>
+          <span class="mode-card-tag">无限增援 · 动态威胁</span>
+          <strong>无尽模式</strong>
+          <span>敌人会不断复活。累计分数越高，敌人生命、速度、伤害和同时出现数量都会提升。</span>
+        </button>
+
+        <button id="levelModeButton" class="mode-button mode-card">
+          <i class="mode-card-number">02</i>
+          <span class="mode-card-tag">五区战役 · 逐级肃清</span>
+          <strong>关卡模式</strong>
+          <span>连续挑战五张不同地图。每关共有二十五名敌人，全部消灭即可进入下一关。</span>
+        </button>
+      </div>
+
+      <div class="menu-status-strip">
+        <span>● 五座无尽战区</span>
+        <span>● 五个战役关卡</span>
+        <span>● 动态补给与敌情</span>
+      </div>
+
+      <div class="controls">
+        <b>W A S D</b> 移动　·　<b>鼠标</b> 瞄准<br>
+        <b>左键</b> 射击　·　<b>1-5</b> 切换武器　·　<b>按住 Q</b> 狙击瞄准<br>
+        <b>R / E</b> 换弹　·　<b>空格</b> 跳跃或攀爬　·　<b>Shift</b> 奔跑　·　<b>Esc</b> 暂停
+      </div>
+    </div>
+  </div>
+
+  <div id="pauseScreen" class="screen hidden">
+    <div class="panel">
+      <h2>游戏已暂停</h2>
+      <p class="subtitle">鼠标控制已释放</p>
+      <div class="prompt">点击任意位置继续战斗</div>
+    </div>
+  </div>
+
+  <div id="endlessMapScreen" class="screen hidden">
+    <div class="panel">
+      <h1 class="title">选择无尽地图</h1>
+      <p class="subtitle">五座工业战区均支持无尽复活与动态难度</p>
+
+      <div class="map-grid">
+        <button class="mode-button endless-map-button" data-map-index="0">
+          <strong>废弃联合厂区</strong>
+          <canvas class="endless-map-preview" data-preview-index="0" width="560" height="300"></canvas>
+          <span class="map-layout-label">放射式四翼厂区</span>
+          <span>中央装配大厅连接四座独立生产翼，外围堆料场可以绕行。</span>
+        </button>
+        <button class="mode-button endless-map-button" data-map-index="1">
+          <strong>地下转运站</strong>
+          <canvas class="endless-map-preview" data-preview-index="1" width="560" height="300"></canvas>
+          <span class="map-layout-label">纵向双轨站场</span>
+          <span>两条贯穿南北的轨道、分段站台、侧厅与横跨轨道的天桥。</span>
+        </button>
+        <button class="mode-button endless-map-button" data-map-index="2">
+          <strong>坍塌钢铁厂</strong>
+          <canvas class="endless-map-preview" data-preview-index="2" width="560" height="300"></canvas>
+          <span class="map-layout-label">非对称熔炉废墟</span>
+          <span>熔炉群、斜向残垣、露天浇铸坑和互不对称的破损厂房。</span>
+        </button>
+        <button class="mode-button endless-map-button" data-map-index="3">
+          <strong>双环冷却厂</strong>
+          <canvas class="endless-map-preview" data-preview-index="3" width="560" height="300"></canvas>
+          <span class="map-layout-label">双环交叉拓扑</span>
+          <span>两座冷却大厅各自形成环线，并由中央通道、外侧绕行道和高架捷径交叉连接。</span>
+        </button>
+        <button class="mode-button endless-map-button" data-map-index="4">
+          <strong>蛇形后勤堡垒</strong>
+          <canvas class="endless-map-preview" data-preview-index="4" width="560" height="300"></canvas>
+          <span class="map-layout-label">交替折返迷宫</span>
+          <span>多道长墙交替开口，组成连续蛇形路线；侧仓、维修室与二层捷径提供迂回选择。</span>
+        </button>
+      </div>
+
+      <button id="backFromMapButton" class="action-button">返回模式选择</button>
+    </div>
+  </div>
+
+  <div id="resultScreen" class="screen hidden">
+    <div class="panel">
+      <h1 id="resultTitle" class="title fail">任务失败</h1>
+      <p id="resultSummary" class="subtitle">累计分数：0</p>
+      <p id="resultStreakSummary" class="subtitle result-streak-summary hidden"></p>
+      <p id="resultRecordSummary" class="subtitle result-streak-summary hidden"></p>
+      <div id="resultPrompt" class="prompt">按 R 键重新开始</div>
+      <button id="resultActionButton" class="action-button hidden">继续</button>
+      <button id="returnMenuButton" class="action-button">返回模式选择</button>
+    </div>
+  </div>
+
+  <!-- 唯一的外部依赖；地图、武器、角色和纹理全部由代码生成。 -->
+  <script src="js/vendor/three.min.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/core.js"></script>
+  <script src="js/maps.js"></script>
+  <script src="js/weapons.js"></script>
+  <script src="js/enemies.js"></script>
+  <script src="js/combat.js"></script>
+  <script src="js/main.js?v=iron-presentation-r4-tier-1"></script>
+<script src="/demo-visual-tier.js?v=showcase-v5-1"></script></body>
+</html>

@@ -1,0 +1,29 @@
+node_modules/
+
+# Secrets. .env.example IS tracked and is the documentation for these.
+.env
+.env.*
+!.env.example
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/
+
+# Logs and coverage
+*.log
+npm-debug.log*
+coverage/
+
+# Harness output (tools/) — regenerate with `npm run tool:screenshot` / `tool:record`
+tools/shots/
+tools/out/
+tools/fixtures/session-*.json
+
+# Agent worktrees (a second full checkout; never part of a commit)
+.claude/
+
+# Durable per-game records (server/gamelog.js)
+logs/

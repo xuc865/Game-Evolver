@@ -22,7 +22,7 @@
     "inactivity_timeout_seconds": 180,
     "env": {
       "CODEX_API_BASE": "http://11.213.4.72:80/v1",
-      "CODEX_MODEL": "GLM-5.2-W4AFP8",
+      "CODEX_MODEL": "GLM-5.3-Flash-node1",
       "CODEX_CACHE_KEY_HEADER": "X-Cache-Key",
       "CODEX_CACHE_KEY_MODE": "random",
       "GAME_LOOP_BACKBONE_PROVIDER": "glm",
