@@ -3077,6 +3077,7 @@
         let detailRefreshTimers = [];
         let detailPollTimer = null;
         const renderedMessageCounts = new Map();
+        const detailMessageCache = new Map();
         let currentView = 'chats';
         let reviewSidebarOpen = false;
         let reviewPayload = null;
@@ -3713,7 +3714,16 @@
             try {
                 const res = await fetch(`/sessions/${encodeURIComponent(id)}`);
                 if (!res.ok) return null;
-                return await res.json();
+                const session = await res.json();
+                const messages = Array.isArray(session.messages) ? session.messages : [];
+                if (messages.length) {
+                    detailMessageCache.set(id, messages);
+                } else if (detailMessageCache.has(id)) {
+                    // A Codex interrupt can race transcript registration. Keep the
+                    // last rendered conversation instead of flashing an empty chat.
+                    session.messages = detailMessageCache.get(id);
+                }
+                return session;
             } catch { return null; }
         }
 
@@ -3757,9 +3767,13 @@
         function onSessionsUpdated() {
             // If selected session was deleted (e.g. pending merged), find replacement by name
             if (selectedId && !sessions.find(s => s.id === selectedId)) {
+                const previousId = selectedId;
                 const oldSession = sessions.find(s => s.name && s.name === selectedName);
                 if (oldSession) {
                     selectedId = oldSession.id;
+                    if (detailMessageCache.has(previousId) && !detailMessageCache.has(selectedId)) {
+                        detailMessageCache.set(selectedId, detailMessageCache.get(previousId));
+                    }
                 }
             }
             // Only update chats-specific UI; assets/nodes/play views manage their own sidebar
@@ -4774,6 +4788,16 @@
                 });
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.error || 'Failed');
+                const cachedMessages = [...(detailMessageCache.get(sessionId) || [])];
+                const interruptedTurn = cachedMessages.slice(interruptedPrompt.afterMessageIndex);
+                if (!interruptedTurn.some(m => m.role === 'user' && m.text?.includes(interruptedPrompt.text))) {
+                    cachedMessages.push({role:'user', text:interruptedPrompt.text, ts:Date.now()});
+                }
+                cachedMessages.push({
+                    role:'tool_use', tool:'interrupted', id:'',
+                    input:{summary:'User interrupted the turn'}, ts:Date.now(),
+                });
+                detailMessageCache.set(sessionId, cachedMessages);
                 pendingPrompt = null;
                 stopDetailPolling();
                 if (restoresInterruptedPrompt(session?.source_app)) {

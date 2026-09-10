@@ -1800,7 +1800,151 @@ def _dashboard_sessions(status: Optional[str] = None, limit: int = 50) -> list[d
     """Return sessions visible to the current Dashboard project."""
     if db is None:
         return []
-    return db.get_sessions(status, limit=limit, project_dir=PROJECT_DIR)
+    sessions = db.get_sessions(status, limit=limit, project_dir=PROJECT_DIR)
+    if _hydrate_pending_codex_sessions(sessions):
+        sessions = db.get_sessions(status, limit=limit, project_dir=PROJECT_DIR)
+    return sessions
+
+
+def _tmux_pane_process_ids(pane: str | None) -> set[int]:
+    """Return the tmux pane process and all descendants.
+
+    Codex is normally one child below the shell recorded by tmux.  Looking at
+    the process tree lets the dashboard recover from missing Codex hooks
+    without guessing which of several same-cwd agents owns a transcript.
+    """
+    if not pane:
+        return set()
+    try:
+        pane_result = subprocess.run(
+            ['tmux', 'display-message', '-p', '-t', pane, '#{pane_pid}'],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if pane_result.returncode != 0:
+            return set()
+        root_pid = int(pane_result.stdout.strip())
+        ps_result = subprocess.run(
+            ['ps', '-axo', 'pid=,ppid='],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if ps_result.returncode != 0:
+            return {root_pid}
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return set()
+
+    children: dict[int, list[int]] = {}
+    for line in ps_result.stdout.splitlines():
+        parts = line.split()
+        if len(parts) != 2:
+            continue
+        try:
+            pid, parent = map(int, parts)
+        except ValueError:
+            continue
+        children.setdefault(parent, []).append(pid)
+
+    result = {root_pid}
+    pending = [root_pid]
+    while pending:
+        parent = pending.pop()
+        for child in children.get(parent, []):
+            if child not in result:
+                result.add(child)
+                pending.append(child)
+    return result
+
+
+def _codex_rollout_identity(path: Path, working_dir: str | None) -> str | None:
+    """Return the top-level Codex session id for a matching rollout."""
+    if not working_dir or '.codex/sessions/' not in str(path):
+        return None
+    try:
+        with path.open(encoding='utf-8') as handle:
+            entry = json.loads(handle.readline())
+        payload = entry.get('payload') or {}
+        if entry.get('type') != 'session_meta' or payload.get('source') != 'cli':
+            return None
+        if Path(payload.get('cwd') or '').resolve() != Path(working_dir).resolve():
+            return None
+        session_id = str(payload.get('id') or '').strip()
+        return session_id or None
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def _discover_codex_transcript_for_pane(
+    pane: str | None,
+    working_dir: str | None,
+) -> tuple[str, str] | None:
+    """Find the top-level rollout currently opened by a pane's Codex process."""
+    candidates: dict[Path, tuple[int, str]] = {}
+    for pid in _tmux_pane_process_ids(pane):
+        try:
+            result = subprocess.run(
+                ['lsof', '-a', '-p', str(pid), '-Fn'],
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if result.returncode != 0:
+            continue
+        for line in result.stdout.splitlines():
+            if not line.startswith('n'):
+                continue
+            path = Path(line[1:])
+            if not path.name.startswith('rollout-') or path.suffix != '.jsonl':
+                continue
+            session_id = _codex_rollout_identity(path, working_dir)
+            if not session_id:
+                continue
+            try:
+                mtime = path.stat().st_mtime_ns
+            except OSError:
+                continue
+            candidates[path] = (mtime, session_id)
+    if not candidates:
+        return None
+    path, (_, session_id) = max(candidates.items(), key=lambda item: item[1][0])
+    return session_id, str(path)
+
+
+def _hydrate_pending_codex_sessions(sessions: list[dict]) -> bool:
+    """Replace hook-less Codex placeholders with their real transcript rows."""
+    if db is None:
+        return False
+    changed = False
+    for session in sessions:
+        if session.get('source_app') != 'codex-pending':
+            continue
+        discovered = _discover_codex_transcript_for_pane(
+            session.get('tmux_pane'),
+            session.get('working_dir'),
+        )
+        if not discovered:
+            continue
+        session_id, transcript_path = discovered
+        composite_id = db.upsert_session(
+            'codex',
+            session_id,
+            name=session.get('name'),
+            transcript_path=transcript_path,
+            working_dir=session.get('working_dir'),
+            tmux_pane=session.get('tmux_pane'),
+            model=session.get('model'),
+            status=session.get('status'),
+        )
+        logger.info(
+            '[SESSION] hydrated pending Codex role=%s pane=%s session=%s',
+            session.get('name'), session.get('tmux_pane'), composite_id,
+        )
+        changed = True
+    return changed
 
 
 def _should_backfill_session_metadata(session: dict) -> bool:
