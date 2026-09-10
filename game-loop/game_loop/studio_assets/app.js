@@ -286,7 +286,7 @@ async function openProject(id) {
   state.active = await api(`/api/projects/${id}`);
   state.runtime = state.active.runtime || "deepseek-harness";
   setRuntime(state.runtime); renderProjects(); renderActive();
-  if (state.active.running || state.active.status === "running") startPolling();
+  if (state.active.running || state.active.status === "running" || state.active.runtime === "vibegame") startPolling();
   document.body.classList.remove("rail-open");
 }
 
@@ -319,7 +319,7 @@ function startPolling() {
     if (!state.active) return;
     try {
       const prior = state.active.status; await openProject(state.active.id);
-      if (state.active.status !== "running") {
+      if (state.active.status !== "running" && state.active.runtime !== "vibegame") {
         clearInterval(state.poller);
         if (prior === "running") toast(state.active.status === "ready" ? "A new playable version is ready" : state.active.error || "Build paused");
         await loadProjects(false);
