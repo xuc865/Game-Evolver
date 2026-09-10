@@ -67,7 +67,11 @@ RUNTIME_PROFILES = {
     "deepseek-harness": ROOT / "experiments" / "inner-agent" / (
         "qwen38-harness-profile.local.json"
         if (ROOT / "experiments" / "inner-agent" / "qwen38-harness-profile.local.json").is_file()
-        else "glm53-harness-profile.local.json"
+        else (
+            "glm53-harness-profile.local.json"
+            if (ROOT / "experiments" / "inner-agent" / "glm53-harness-profile.local.json").is_file()
+            else "deepseek-harness-profile.example.json"
+        )
     ),
 }
 MAKER_RUNTIMES = frozenset({*RUNTIME_PROFILES, "vibegame"})

@@ -1,28 +1,28 @@
 {
   "agents": {
     "orchestrator": {
-      "cli": "claude",
-      "model": "opus[1m]"
+      "cli": "codex",
+      "model": "gpt-5.6-sol"
     },
     "artist": {
-      "cli": "claude",
-      "model": "opus[1m]"
+      "cli": "codex",
+      "model": "gpt-5.6-sol"
     },
     "designer": {
-      "cli": "claude",
-      "model": "opus[1m]"
+      "cli": "codex",
+      "model": "gpt-5.6-sol"
     },
     "reviewer": {
       "cli": "codex",
       "model": "gpt-5.6-sol"
     },
     "architect": {
-      "cli": "claude",
-      "model": "opus[1m]"
+      "cli": "codex",
+      "model": "gpt-5.6-sol"
     },
     "programmer": {
-      "cli": "claude",
-      "model": "opus[1m]"
+      "cli": "codex",
+      "model": "gpt-5.6-sol"
     },
     "auditor": {
       "cli": "codex",

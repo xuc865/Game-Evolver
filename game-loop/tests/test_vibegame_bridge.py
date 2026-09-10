@@ -35,3 +35,25 @@ def test_reviewer_alone_cannot_promote(tmp_path: Path) -> None:
     with patch("game_loop.vibegame_bridge.validate_vibegame_project", return_value={"ok": True}):
         with pytest.raises(RuntimeError, match="human approval"):
             promote_vibegame_baseline(tmp_path, accepted_by="reviewer")
+
+
+def test_auditable_unattended_experiment_can_promote_without_human_approval(tmp_path: Path) -> None:
+    (tmp_path / ".vibegame" / "review").mkdir(parents=True)
+    (tmp_path / ".vibegame" / "seed-request.json").write_text('{"prompt":"boss"}')
+    (tmp_path / ".vibegame" / "review" / "acceptance.json").write_text(
+        '{"reviewer":{"verdict":"accepted"},"human":{"approved":false}}'
+    )
+    (tmp_path / ".vibegame" / "review" / "play.png").write_bytes(b"png")
+    evidence = tmp_path / ".vibegame" / "review" / "unattended.json"
+    evidence.write_text(
+        '{"schema":"vibegame-unattended-acceptance.v1",'
+        '"automated_reviewer":"accepted","runtime_playtest":"passed",'
+        '"static_validation":"passed","screenshots":[".vibegame/review/play.png"],'
+        '"tests":["browser-smoke"]}'
+    )
+    with patch("game_loop.vibegame_bridge.validate_vibegame_project", return_value={"ok": True}):
+        manifest = promote_vibegame_baseline(
+            tmp_path, accepted_by="automated-reviewer", unattended_evidence=evidence
+        )
+    assert manifest.gate["mode"] == "unattended-experiment"
+    assert manifest.gate["human_approved"] is False

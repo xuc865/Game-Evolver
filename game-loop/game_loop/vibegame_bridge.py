@@ -29,6 +29,7 @@ class BaselineManifest:
     accepted_by: str
     accepted_at: str
     validation: dict[str, Any]
+    gate: dict[str, Any]
     evolution_seed: bool = True
 
 
@@ -150,6 +151,7 @@ def promote_vibegame_baseline(
     *,
     accepted_by: str,
     force: bool = False,
+    unattended_evidence: Path | None = None,
 ) -> BaselineManifest:
     project_dir = project_dir.resolve()
     seed_request_path = project_dir / ".vibegame" / "seed-request.json"
@@ -164,12 +166,57 @@ def promote_vibegame_baseline(
     review = json.loads(review_path.read_text(encoding="utf-8")) if review_path.is_file() else {}
     reviewer_accepted = review.get("reviewer", {}).get("verdict") == "accepted"
     human_accepted = review.get("human", {}).get("approved") is True
-    if not force and not (reviewer_accepted and human_accepted):
+    unattended_gate: dict[str, Any] | None = None
+    if unattended_evidence is not None:
+        evidence_path = unattended_evidence.resolve()
+        try:
+            evidence_path.relative_to(project_dir)
+        except ValueError as exc:
+            raise ValueError("unattended evidence must be stored inside the VibeGame project") from exc
+        unattended_gate = json.loads(evidence_path.read_text(encoding="utf-8"))
+        required = {
+            "schema": "vibegame-unattended-acceptance.v1",
+            "automated_reviewer": "accepted",
+            "runtime_playtest": "passed",
+            "static_validation": "passed",
+        }
+        mismatches = [
+            f"{key}={unattended_gate.get(key)!r}"
+            for key, expected in required.items()
+            if unattended_gate.get(key) != expected
+        ]
+        screenshots = unattended_gate.get("screenshots")
+        tests = unattended_gate.get("tests")
+        if not isinstance(screenshots, list) or not screenshots:
+            mismatches.append("screenshots must be a non-empty list")
+        if not isinstance(tests, list) or not tests:
+            mismatches.append("tests must be a non-empty list")
+        for relative in screenshots or []:
+            candidate = (project_dir / str(relative)).resolve()
+            try:
+                candidate.relative_to(project_dir)
+            except ValueError:
+                mismatches.append(f"screenshot escapes project: {relative}")
+                continue
+            if not candidate.is_file():
+                mismatches.append(f"screenshot missing: {relative}")
+        if mismatches:
+            raise RuntimeError("unattended acceptance evidence is incomplete: " + "; ".join(mismatches))
+    unattended_accepted = reviewer_accepted and unattended_gate is not None
+    if not force and not ((reviewer_accepted and human_accepted) or unattended_accepted):
         raise RuntimeError(
-            "reviewer verdict and human approval are both required; record them in "
-            ".vibegame/review/acceptance.json after Play review, or use --force for an "
-            "explicit manual override"
+            "reviewer acceptance plus human approval are required, unless an explicit "
+            "auditable unattended experiment acceptance evidence file is supplied"
         )
+    gate = {
+        "mode": "force" if force else ("human" if human_accepted else "unattended-experiment"),
+        "reviewer_accepted": reviewer_accepted,
+        "human_approved": human_accepted,
+        "unattended_evidence": (
+            unattended_evidence.resolve().relative_to(project_dir).as_posix()
+            if unattended_evidence is not None else None
+        ),
+    }
     manifest = BaselineManifest(
         schema_version=1,
         status="accepted",
@@ -180,6 +227,7 @@ def promote_vibegame_baseline(
         accepted_by=accepted_by,
         accepted_at=datetime.now(timezone.utc).isoformat(),
         validation=validation,
+        gate=gate,
     )
     (project_dir / BASELINE_FILENAME).write_text(
         json.dumps(asdict(manifest), ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
