@@ -727,6 +727,7 @@ def start(
     port: int | None = typer.Option(None, "--port", "-p", help="Exact dashboard server port. Omit to auto-select from 8080."),
     new: bool = typer.Option(False, "--new", help="Force fresh start, ignore previous session"),
     no_agents: bool = typer.Option(False, "--no-agents", help="Start dashboard only, no agent sessions"),
+    no_open_browser: bool = typer.Option(False, "--no-open-browser", help="Do not open the Dashboard in a separate browser window"),
     debug: bool = typer.Option(False, "--debug", help="Debug mode: remain-on-exit for all panes, verbose logging"),
 ):
     """Launch VibeGame Dashboard and agent tmux sessions."""
@@ -896,7 +897,7 @@ def start(
     # Open browser (best-effort; skip when the opener is absent, e.g. headless/container)
     url = f"http://{connect_host}:{port}"
     opener = "open" if sys.platform == "darwin" else "xdg-open"
-    if shutil.which(opener):
+    if not no_open_browser and shutil.which(opener):
         # Popen, not run: xdg-open may exec the browser in the foreground on
         # minimal Linux environments and would block startup until it exits.
         sp.Popen([opener, url], stdout=sp.DEVNULL, stderr=sp.DEVNULL)

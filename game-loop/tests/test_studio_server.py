@@ -111,6 +111,42 @@ class _DeterministicEvolutionStudio(StudioManager):
 
 
 class StudioManagerTests(unittest.TestCase):
+    def test_vibegame_runtime_initializes_production_workspace_and_reports_review_gates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            def initialize(workspace, **_kwargs):
+                (workspace / ".vibegame" / "review").mkdir(parents=True)
+                (workspace / ".vibegame" / "seed-request.json").write_text("{}")
+                (workspace / ".vibegame" / "settings.json").write_text('{"agents": {}}')
+
+            with patch("game_loop.studio_server.initialize_vibegame_project", side_effect=initialize):
+                manager = StudioManager(root)
+                project = manager.create_project(title="Visual Boss", runtime="vibegame")
+
+            self.assertEqual(project["runtime"], "vibegame")
+            self.assertEqual(project["production"]["engine"], "vibegame-phaser")
+            self.assertFalse(project["production"]["human_approved"])
+            self.assertFalse(project["production"]["promoted"])
+            self.assertFalse((root / project["id"] / "studio-config.json").exists())
+
+    def test_vibegame_promotion_keeps_dual_gate_in_bridge(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            def initialize(workspace, **_kwargs):
+                review = workspace / ".vibegame" / "review"
+                review.mkdir(parents=True)
+                (workspace / ".vibegame" / "seed-request.json").write_text("{}")
+                (workspace / ".vibegame" / "settings.json").write_text('{"agents": {}}')
+
+            with patch("game_loop.studio_server.initialize_vibegame_project", side_effect=initialize):
+                manager = StudioManager(root)
+                project = manager.create_project(title="Gated Boss", runtime="vibegame")
+            with patch("game_loop.studio_server.promote_vibegame_baseline", side_effect=RuntimeError("reviewer verdict and human approval are both required")):
+                with self.assertRaisesRegex(RuntimeError, "human approval"):
+                    manager.promote_vibegame(project["id"])
+
     def test_project_view_tolerates_in_progress_nested_state_publication(self):
         with tempfile.TemporaryDirectory() as tmp:
             manager = StudioManager(Path(tmp))

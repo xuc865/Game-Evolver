@@ -57,6 +57,7 @@
               <div id="runtimePicker" class="runtime-picker" title="Game maker runtime">
                 <button type="button" data-runtime="opengame">OpenGame</button>
                 <button type="button" data-runtime="deepseek-harness" class="selected">DeepSeek Harness <small>Recommended</small></button>
+                <button type="button" data-runtime="vibegame">VibeGame <small>Visual production</small></button>
               </div>
               <button id="sendButton" class="send-button" title="Build this version" disabled>↑</button>
             </div>
@@ -75,7 +76,7 @@
             <div><span>Current version</span><strong id="versionLabel">No build yet</strong></div>
             <div><span>Creative memory</span><strong id="memoryLabel">Ready</strong></div>
           </div>
-          <section class="engine-details" aria-label="HPA and GOA evolution circuit">
+          <section id="engineDetails" class="engine-details" aria-label="HPA and GOA evolution circuit">
             <div id="evolutionMap" class="evolution-map"></div>
             <div id="nodeTooltip" class="node-tooltip" hidden></div>
           </section>

@@ -33,7 +33,33 @@ class BaselineManifest:
 
 
 def _vibegame_command(*args: str) -> list[str]:
-    return [sys.executable, "-m", "cli.main", *args]
+    return [str(vibegame_python()), "-m", "cli.main", *args]
+
+
+def vibegame_python() -> Path:
+    """Select VibeGame's Python >=3.12 runtime without changing Game-Evolver's env."""
+    configured = os.environ.get("VIBEGAME_PYTHON")
+    candidates = [
+        Path(configured).expanduser() if configured else None,
+        VIBEGAME_ROOT.parent / ".venvs" / "vibegame" / "bin" / "python",
+        Path(sys.executable),
+    ]
+    for candidate in candidates:
+        if not candidate or not candidate.is_file():
+            continue
+        completed = subprocess.run(
+            [str(candidate), "-c", "import sys; raise SystemExit(sys.version_info < (3, 12))"],
+            capture_output=True,
+            check=False,
+        )
+        if completed.returncode == 0:
+            # Keep a venv launcher as a venv launcher. Resolving its symlink to
+            # the base interpreter loses the environment's installed packages.
+            return candidate.absolute()
+    raise RuntimeError(
+        "VibeGame requires Python 3.12+. Set VIBEGAME_PYTHON or create "
+        ".venvs/vibegame with `uv venv --python 3.12`."
+    )
 
 
 def _environment() -> dict[str, str]:

@@ -10,6 +10,7 @@ import re
 import shutil
 import shlex
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -24,6 +25,15 @@ from urllib.parse import parse_qs, urlparse
 
 from game_loop.core.agent_circuit import AgentRole
 from game_loop.utils import atomic_write_json, read_json
+from game_loop.vibegame_bridge import (
+    BASELINE_FILENAME,
+    VIBEGAME_ROOT,
+    VIBEGAME_SRC,
+    initialize_vibegame_project,
+    promote_vibegame_baseline,
+    validate_vibegame_project,
+    vibegame_python,
+)
 
 
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
@@ -60,6 +70,7 @@ RUNTIME_PROFILES = {
         else "glm53-harness-profile.local.json"
     ),
 }
+MAKER_RUNTIMES = frozenset({*RUNTIME_PROFILES, "vibegame"})
 STUDIO_OPENGAME_SYSTEM = ROOT / "experiments" / "inner-agent" / "opengame-studio-system.md"
 STUDIO_DSH_SYSTEM = ROOT / "experiments" / "inner-agent" / "deepseek-harness-studio-system.md"
 STUDIO_INNER_NAME = "studio-inner-harness.json"
@@ -71,6 +82,10 @@ ALLOWED_RUNTIME_ENV = frozenset({
     "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL",
     "GLM_BASE_URL", "GLM_MODEL",
     "QWEN_BASE_URL", "QWEN_MODEL",
+    "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL",
+    "GEMINI_API_KEY", "GEMINI_BASE_URL", "GEMINI_MODEL",
+    "DASHSCOPE_API_KEY", "DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL", "DEEPSEEK_MODEL",
+    "KREA2_BASE_URL", "IMAGE_PROVIDER", "IMAGE_MODEL", "IMAGE_BASE_URL",
     "OPENGAME_REASONING_API_KEY", "OPENGAME_REASONING_BASE_URL",
     "OPENGAME_REASONING_MODEL", "OPENGAME_REASONING_PROVIDER",
 })
@@ -237,7 +252,7 @@ class StudioManager:
         return sorted(projects, key=lambda item: item.get("updated_at", ""), reverse=True)
 
     def create_project(self, *, title: str, runtime: str = "deepseek-harness") -> dict[str, Any]:
-        runtime = runtime if runtime in RUNTIME_PROFILES else "deepseek-harness"
+        runtime = runtime if runtime in MAKER_RUNTIMES else "deepseek-harness"
         title = title.strip() or "Untitled game"
         project_id = f"{_slug(title)}-{uuid.uuid4().hex[:8]}"
         path = self._dir(project_id)
@@ -256,7 +271,16 @@ class StudioManager:
             "updated_at": _now(),
             "error": None,
         }
-        self._write_config(path, runtime)
+        if runtime == "vibegame":
+            workspace = path / "vibegame-project"
+            initialize_vibegame_project(
+                workspace,
+                prompt=f"Create a polished game titled {title}. Wait for the creator's detailed brief in Chat.",
+            )
+            self._configure_vibegame_team(workspace)
+            meta["vibegame_project_dir"] = str(workspace)
+        else:
+            self._write_config(path, runtime)
         self._save(project_id, meta)
         return self.get_project(project_id)
 
@@ -314,6 +338,16 @@ class StudioManager:
             if meta.get("status") != "running":
                 continue
             project_id = str(meta.get("id", ""))
+            if meta.get("runtime") == "vibegame":
+                port = meta.get("vibegame_dashboard_port")
+                alive = self._dashboard_alive(int(port)) if port else False
+                meta.update({
+                    "status": "ready" if alive else "error",
+                    "stage": "VibeGame is open — continue in Chat" if alive else "VibeGame startup was interrupted",
+                    "error": None if alive else "restart VibeGame by sending the brief again",
+                })
+                self._save(project_id, meta)
+                continue
             pending = max(
                 (int(item.get("turn", 0)) for item in _read_jsonl(self._dir(project_id) / "messages.jsonl") if item.get("role") == "user"),
                 default=0,
@@ -331,8 +365,13 @@ class StudioManager:
         meta = self._meta(project_id)
         meta["messages"] = _read_jsonl(self._dir(project_id) / "messages.jsonl")
         meta["turns"] = self._turns(project_id)
-        meta["engine"] = self._engine_summary(project_id)
-        meta["evolution_graph"] = self._evolution_graph(project_id)
+        if meta.get("runtime") == "vibegame":
+            meta["production"] = self._vibegame_summary(project_id, meta)
+            meta["engine"] = {"game": "VibeGame production", "maker": "Agent team"}
+            meta["evolution_graph"] = {"runtime": "vibegame", "hpa": [], "goa": [], "goa_edges": []}
+        else:
+            meta["engine"] = self._engine_summary(project_id)
+            meta["evolution_graph"] = self._evolution_graph(project_id)
         meta["snapshots"] = self.list_snapshots(project_id)
         meta["running"] = self._is_running(project_id)
         meta["preview_url"] = self._preview_url(project_id, meta)
@@ -508,14 +547,24 @@ class StudioManager:
             return self.get_project(project_id)
 
     def set_runtime(self, project_id: str, runtime: str) -> dict[str, Any]:
-        if runtime not in RUNTIME_PROFILES:
+        if runtime not in MAKER_RUNTIMES:
             raise ValueError("unsupported maker runtime")
         with self._lock:
             meta = self._meta(project_id)
             if int(meta.get("turn_count", 0)) or meta.get("status") == "running":
                 raise ValueError("maker runtime is fixed after the first build")
             meta["runtime"] = runtime
-            self._write_config(self._dir(project_id), runtime)
+            if runtime == "vibegame":
+                workspace = self._dir(project_id) / "vibegame-project"
+                if not (workspace / ".vibegame").is_dir():
+                    initialize_vibegame_project(
+                        workspace,
+                        prompt=f"Create a polished game titled {meta.get('title', 'Untitled game')}. Wait for the creator's detailed brief in Chat.",
+                    )
+                    self._configure_vibegame_team(workspace)
+                meta["vibegame_project_dir"] = str(workspace)
+            else:
+                self._write_config(self._dir(project_id), runtime)
             self._save(project_id, meta)
         return self.get_project(project_id)
 
@@ -538,6 +587,8 @@ class StudioManager:
             raise ValueError("message is required")
         with self._lock:
             meta = self._meta(project_id)
+            if meta.get("runtime") == "vibegame":
+                return self._start_vibegame(project_id, content, meta)
             if self._is_running(project_id) or meta.get("status") == "running":
                 raise RuntimeError("this project is already evolving")
             if meta.get("status") == "error":
@@ -559,6 +610,157 @@ class StudioManager:
                 daemon=True,
             )
             thread.start()
+        return self.get_project(project_id)
+
+    @staticmethod
+    def _free_loopback_port() -> int:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind(("127.0.0.1", 0))
+            return int(probe.getsockname()[1])
+
+    @staticmethod
+    def _configure_vibegame_team(workspace: Path) -> None:
+        """Use the installed interactive harness; this machine always has Codex."""
+        settings_path = workspace / ".vibegame" / "settings.json"
+        settings = read_json(settings_path)
+        if shutil.which("claude"):
+            return
+        if not shutil.which("codex"):
+            raise RuntimeError("VibeGame needs either the Codex or Claude CLI")
+        agents = settings.setdefault("agents", {})
+        for name in (
+            "orchestrator", "artist", "designer", "reviewer",
+            "architect", "programmer", "auditor", "player",
+        ):
+            agents[name] = {"cli": "codex", "model": "gpt-5.6-sol"}
+        atomic_write_json(settings_path, settings)
+
+    def _vibegame_workspace(self, project_id: str, meta: dict[str, Any] | None = None) -> Path:
+        value = (meta or self._meta(project_id)).get("vibegame_project_dir")
+        if not value:
+            raise ValueError("VibeGame workspace is not initialized")
+        path = Path(str(value)).resolve()
+        if not (path / ".vibegame").is_dir():
+            raise ValueError("VibeGame workspace is incomplete")
+        return path
+
+    @staticmethod
+    def _dashboard_alive(port: int | None) -> bool:
+        if not port:
+            return False
+        try:
+            with socket.create_connection(("127.0.0.1", int(port)), timeout=0.08):
+                return True
+        except OSError:
+            return False
+
+    def _vibegame_summary(self, project_id: str, meta: dict[str, Any] | None = None) -> dict[str, Any]:
+        meta = meta or self._meta(project_id)
+        workspace = self._vibegame_workspace(project_id, meta)
+        acceptance_path = workspace / ".vibegame" / "review" / "acceptance.json"
+        acceptance = _read_json_view(acceptance_path, {
+            "reviewer": {"verdict": "pending"}, "human": {"approved": False},
+        }) if acceptance_path.is_file() else {
+            "reviewer": {"verdict": "pending"}, "human": {"approved": False},
+        }
+        baseline_path = workspace / BASELINE_FILENAME
+        baseline = _read_json_view(baseline_path, {}) if baseline_path.is_file() else None
+        port = meta.get("vibegame_dashboard_port")
+        alive = self._dashboard_alive(int(port)) if port else False
+        return {
+            "engine": "vibegame-phaser",
+            "workspace": str(workspace),
+            "dashboard_url": f"http://127.0.0.1:{port}" if alive else None,
+            "dashboard_port": port,
+            "dashboard_running": alive,
+            "acceptance": acceptance,
+            "reviewer_accepted": acceptance.get("reviewer", {}).get("verdict") == "accepted",
+            "human_approved": acceptance.get("human", {}).get("approved") is True,
+            "promoted": bool(baseline and baseline.get("status") == "accepted"),
+            "baseline": baseline,
+            "phase": "evolve" if baseline else "review" if alive else "produce",
+        }
+
+    def _start_vibegame(self, project_id: str, content: str, meta: dict[str, Any]) -> dict[str, Any]:
+        if self._is_running(project_id) or meta.get("status") == "running":
+            raise RuntimeError("VibeGame is already starting")
+        existing = self._vibegame_summary(project_id, meta)
+        if existing["dashboard_running"]:
+            raise RuntimeError("VibeGame is already open; continue the conversation in its Chat tab")
+        turn = int(meta.get("turn_count", 0)) + 1
+        _append_jsonl(self._dir(project_id) / "messages.jsonl", {
+            "id": uuid.uuid4().hex, "role": "user", "content": content,
+            "turn": turn, "created_at": _now(),
+        })
+        port = self._free_loopback_port()
+        meta.update({
+            "status": "running", "stage": "Starting the VibeGame agent team",
+            "error": None, "vibegame_dashboard_port": port,
+        })
+        self._save(project_id, meta)
+        thread = threading.Thread(
+            target=self._launch_vibegame_team,
+            args=(project_id, turn, content, port),
+            name=f"studio-vibegame-{project_id}", daemon=True,
+        )
+        thread.start()
+        return self.get_project(project_id)
+
+    def _launch_vibegame_team(self, project_id: str, turn: int, content: str, port: int) -> None:
+        workspace = self._vibegame_workspace(project_id)
+        env = self._runtime_environment()
+        env["PYTHONPATH"] = str(VIBEGAME_SRC) + os.pathsep + env.get("PYTHONPATH", "")
+        env["PATH"] = str(vibegame_python().parent) + os.pathsep + env.get("PATH", "")
+        env.setdefault("IMAGE_PROVIDER", "Krea2")
+        env.setdefault("IMAGE_MODEL", "krea2")
+        env.setdefault("KREA2_BASE_URL", "http://29.116.237.141:80")
+        command = [
+            str(vibegame_python()), "-m", "cli.main", "start", content,
+            "--project", str(workspace), "--host", "127.0.0.1",
+            "--port", str(port), "--new", "--no-open-browser",
+        ]
+        log_path = self._dir(project_id) / "vibegame-start.log"
+        try:
+            completed = subprocess.run(
+                command, cwd=VIBEGAME_ROOT, env=env,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, timeout=240, check=False,
+            )
+            log_path.write_text(completed.stdout[-30000:], encoding="utf-8")
+            if completed.returncode:
+                raise RuntimeError(f"VibeGame team startup failed ({completed.returncode})")
+            meta = self._meta(project_id)
+            meta.update({
+                "status": "ready", "stage": "VibeGame is open — continue in Chat",
+                "turn_count": turn, "error": None,
+            })
+            self._save(project_id, meta)
+            _append_jsonl(self._dir(project_id) / "messages.jsonl", {
+                "id": uuid.uuid4().hex, "role": "assistant", "turn": turn,
+                "content": "The VibeGame agent team is live. Continue in the embedded Chat tab, inspect assets and objects, then Play and approve the baseline in Review.",
+                "created_at": _now(),
+            })
+        except Exception as exc:
+            meta = self._meta(project_id)
+            meta.update({"status": "error", "stage": "VibeGame needs attention", "error": str(exc)})
+            self._save(project_id, meta)
+
+    def validate_vibegame(self, project_id: str) -> dict[str, Any]:
+        result = validate_vibegame_project(self._vibegame_workspace(project_id))
+        meta = self._meta(project_id)
+        meta["vibegame_validation"] = result
+        meta["stage"] = "Validation passed" if result["ok"] else "Validation found issues"
+        self._save(project_id, meta)
+        return {"validation": result, "project": self.get_project(project_id)}
+
+    def promote_vibegame(self, project_id: str) -> dict[str, Any]:
+        manifest = promote_vibegame_baseline(
+            self._vibegame_workspace(project_id), accepted_by="human-via-studio"
+        )
+        meta = self._meta(project_id)
+        meta["stage"] = "Accepted as the Game-Evolver baseline"
+        meta["current_artifact"] = manifest.project_dir
+        self._save(project_id, meta)
         return self.get_project(project_id)
 
     def retry(self, project_id: str) -> dict[str, Any]:
@@ -1257,6 +1459,14 @@ class StudioRequestHandler(BaseHTTPRequestHandler):
                     ), HTTPStatus.CREATED)
                 self.manager.launch_game(project_id)
                 return self._json({"ok": True})
+            vibegame_action = re.fullmatch(r"/api/projects/([^/]+)/vibegame/(validate|promote)", parsed.path)
+            if vibegame_action:
+                project_id, operation = vibegame_action.groups()
+                if self.manager._meta(project_id).get("runtime") != "vibegame":
+                    raise ValueError("this is not a VibeGame project")
+                if operation == "validate":
+                    return self._json(self.manager.validate_vibegame(project_id))
+                return self._json(self.manager.promote_vibegame(project_id))
             load_snapshot = re.fullmatch(r"/api/projects/([^/]+)/snapshots/([^/]+)/load", parsed.path)
             if load_snapshot:
                 return self._json(self.manager.load_snapshot(*load_snapshot.groups()))

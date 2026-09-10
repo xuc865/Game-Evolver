@@ -1,6 +1,6 @@
 const state = { projects: [], active: null, runtime: "deepseek-harness", poller: null, snapshotKind: "goa" };
 const $ = (id) => document.getElementById(id);
-const els = Object.fromEntries(["newProject","projectList","projectTitle","projectStage","saveState","playGame","emptyState","messageList","composer","promptInput","runtimePicker","sendButton","previewStage","buildStatus","versionLabel","memoryLabel","evolutionMap","nodeTooltip","projectDialog","projectForm","projectName","snapshotDialog","snapshotForm","snapshotTitle","snapshotName","snapshotList","toast","mobileProjects","mobileCircuits"].map(id => [id, $(id)]));
+const els = Object.fromEntries(["newProject","projectList","projectTitle","projectStage","saveState","playGame","emptyState","messageList","composer","promptInput","runtimePicker","sendButton","previewStage","buildStatus","versionLabel","memoryLabel","evolutionMap","engineDetails","nodeTooltip","projectDialog","projectForm","projectName","snapshotDialog","snapshotForm","snapshotTitle","snapshotName","snapshotList","toast","mobileProjects","mobileCircuits"].map(id => [id, $(id)]));
 
 async function api(path, options = {}) {
   const response = await fetch(path, { headers: {"Content-Type":"application/json"}, ...options });
@@ -30,6 +30,8 @@ function renderProjects() {
 
 function renderActive() {
   const p = state.active;
+  els.engineDetails.hidden = p?.runtime === "vibegame";
+  document.body.classList.toggle("vibegame-mode", p?.runtime === "vibegame");
   els.projectTitle.textContent = p?.title || "A new game";
   els.projectStage.textContent = p?.stage || "Describe a world you want to play.";
   const messages = p?.messages || [];
@@ -47,11 +49,31 @@ function renderActive() {
   els.saveState.textContent = running ? "Saving progress" : "Saved locally";
   els.promptInput.disabled = running;
   els.playGame.disabled = !p?.current_artifact && !running;
+  if (p?.runtime === "vibegame") els.playGame.disabled = !p?.production?.dashboard_url;
   els.playGame.innerHTML = running ? `<span>■</span> Stop` : `<span>▶</span> Play`;
   els.versionLabel.textContent = p?.turn_count ? `Version ${p.turn_count}` : "No build yet";
   els.memoryLabel.textContent = p?.engine?.maker || "Ready";
   renderEvolutionMap(p?.evolution_graph);
-  if (p?.web_preview_url) {
+  if (p?.runtime === "vibegame" && p?.production?.dashboard_url) {
+    const production = p.production;
+    const accepted = production.reviewer_accepted && production.human_approved;
+    els.previewStage.innerHTML = `<div class="production-shell">
+      <div class="production-flow"><span class="active">1 Produce</span><span class="${production.phase === "review" ? "active" : ""}">2 Review</span><span class="${production.promoted ? "active" : ""}">3 Baseline</span><span>4 Evolve</span>
+      <div class="production-actions"><button id="validateVibeGame">Check project</button><button id="promoteVibeGame" ${accepted && !production.promoted ? "" : "disabled"}>${production.promoted ? "Baseline accepted" : "Accept baseline"}</button><button id="openVibeGame">Open full screen ↗</button></div></div>
+      <iframe src="${production.dashboard_url}" title="VibeGame production dashboard" allow="clipboard-read; clipboard-write; autoplay; fullscreen" tabindex="0"></iframe></div>`;
+    $("validateVibeGame")?.addEventListener("click", validateVibeGame);
+    $("promoteVibeGame")?.addEventListener("click", promoteVibeGame);
+    $("openVibeGame")?.addEventListener("click", () => window.open(production.dashboard_url, "_blank", "noopener"));
+    els.buildStatus.innerHTML = `<i></i> ${production.promoted ? "Baseline ready" : "Production live"}`;
+    els.versionLabel.textContent = production.promoted ? "Accepted baseline" : "VibeGame draft";
+    els.memoryLabel.textContent = production.human_approved ? "Human approved" : "Awaiting review";
+  } else if (p?.runtime === "vibegame") {
+    els.previewStage.innerHTML = running
+      ? `<div class="build-animation"><div class="build-orbit"><span></span><span></span><span></span></div><strong>Starting VibeGame agents</strong><p>The Chat, Assets, Objects, Scenes, Play and Review workspace will appear here.</p></div>`
+      : p?.status === "error"
+        ? `<div class="preview-empty error-build"><span>!</span><strong>VibeGame startup interrupted</strong><p>${escapeHtml(p.error || "See vibegame-start.log for details.")}</p></div>`
+        : `<div class="preview-empty"><span>VG</span><strong>Start VibeGame production</strong><p>Send your game brief. Game Evolver will initialize the workspace and open the complete VibeGame agent Dashboard here.</p></div>`;
+  } else if (p?.web_preview_url) {
     els.previewStage.innerHTML = `<iframe src="${p.web_preview_url}?v=${encodeURIComponent(p.updated_at)}" title="Playable game preview" allow="autoplay; fullscreen" sandbox="allow-scripts allow-same-origin allow-pointer-lock" tabindex="0"></iframe><div class="preview-shade"><button id="previewPlay">↗ Open in Godot</button></div>`;
     $("previewPlay")?.addEventListener("click", play);
   } else if (p?.preview_url) {
@@ -313,9 +335,30 @@ async function play() {
       state.active = await api(`/api/projects/${state.active.id}/stop`, {method:"POST", body:"{}"});
       renderActive(); toast("Build stopped safely"); return;
     }
+    if (state.active.runtime === "vibegame") {
+      window.open(state.active.production.dashboard_url, "_blank", "noopener");
+      return;
+    }
     await api(`/api/projects/${state.active.id}/play`, {method:"POST", body:"{}"}); toast("Opening in Godot");
   }
   catch (error) { toast(error.message); }
+}
+
+async function validateVibeGame() {
+  if (!state.active) return;
+  try {
+    const result = await api(`/api/projects/${state.active.id}/vibegame/validate`, {method:"POST", body:"{}"});
+    state.active = result.project; renderActive();
+    toast(result.validation.ok ? "VibeGame validation passed" : "Validation found issues");
+  } catch (error) { toast(error.message); }
+}
+
+async function promoteVibeGame() {
+  if (!state.active) return;
+  try {
+    state.active = await api(`/api/projects/${state.active.id}/vibegame/promote`, {method:"POST", body:"{}"});
+    renderActive(); toast("Accepted as the Game-Evolver baseline");
+  } catch (error) { toast(error.message); }
 }
 
 async function retryBuild() {
