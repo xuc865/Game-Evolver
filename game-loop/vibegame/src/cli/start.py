@@ -116,13 +116,14 @@ def _configure_logging(project_path: Path, debug: bool = False) -> Path:
 def _run_lead(project_path: Path, args: str, debug: bool = False) -> sp.CompletedProcess:
     """Run ``vibegame lead`` with the same interpreter as this process.
 
-    Invoking a bare ``vibegame`` executable fails for valid direct-entry-point
-    launches when the virtual environment's ``bin`` directory is not on PATH.
-    ``python -m cli.main`` keeps start/lead on the installed package and Python
-    environment that the user actually selected.
+    Re-enter through the current interpreter so editable installs and direct
+    module invocations do not require a separate ``vibegame`` executable on
+    PATH. Team runtime modules are found in the project's .vibegame/ via
+    VIBEGAME_TEAM_DIR.
     """
     team_dir = project_path / ".vibegame" / "team"
     env = os.environ.copy()
+    env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env.get("PATH", "")
     env["VIBEGAME_ROLE"] = "orchestrator"
     env["VIBEGAME_TEAM_DIR"] = str(team_dir)
     if debug:
@@ -1014,6 +1015,7 @@ def start(
             orch_env = {
                 "VIBEGAME_ROLE": "orchestrator",
                 "VIBEGAME_TEAM_DIR": str(team_dir),
+                "PATH": str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", ""),
             }
             for key, val in (orch_config.get("env") or {}).items():
                 orch_env[key] = resolve_env_value(val, orch_model, runtime_env)
