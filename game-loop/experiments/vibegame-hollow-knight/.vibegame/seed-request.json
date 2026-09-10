@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "prompt": "Build a Hollow Knight-style 1v1 boss fight. The player needs basic and charged attacks, dash, jump, and an aerial attack. Give the boss two melee skills and one ranged skill, and keep the character designs consistent with concept.png.",
+  "concept_image": "assets/concepts/concept.png",
+  "required_tabs": [
+    "chat",
+    "design",
+    "assets",
+    "objects",
+    "scenes",
+    "play",
+    "review",
+    "evolution",
+    "settings"
+  ],
+  "acceptance_required": true
+}

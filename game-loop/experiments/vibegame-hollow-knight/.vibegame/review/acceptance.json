@@ -1,0 +1,10 @@
+{
+  "reviewer": {
+    "verdict": "accepted",
+    "notes": "Static validation passed; runtime snapshot exposed player and boss combat state; generated assets loaded without browser console errors. Human must still play and approve."
+  },
+  "human": {
+    "approved": false,
+    "notes": "Awaiting explicit approval in the Review tab after Play inspection."
+  }
+}

@@ -1,0 +1,12 @@
+# vibegame
+/.env
+/.vibegame/settings.json
+/.vibegame/tasks/
+/.vibegame/dashboard/
+/.vibegame/team/pids/
+/assets/
+/skeletons/
+tests/**/evidence/
+**/node_modules/
+**/__pycache__/
+logs/

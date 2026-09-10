@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import replace
+from dataclasses import asdict, replace
 import json
 import os
 import shutil
@@ -258,6 +258,26 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--runtime", choices=("deepseek-harness", "opengame"), default="deepseek-harness")
     run.add_argument("--title", default=None)
     run.add_argument("--timeout", type=int, default=7200)
+
+    vg_init = sub.add_parser(
+        "vibegame-init",
+        help="initialize an AI-native VibeGame baseline project",
+    )
+    vg_init.add_argument("--project", type=Path, required=True)
+    vg_init.add_argument("--prompt", required=True)
+    vg_init.add_argument("--concept", type=Path)
+    vg_init.add_argument("--language", default="en")
+
+    vg_validate = sub.add_parser("vibegame-validate")
+    vg_validate.add_argument("--project", type=Path, required=True)
+
+    vg_promote = sub.add_parser(
+        "vibegame-promote",
+        help="promote a reviewed VibeGame project into an evolution seed",
+    )
+    vg_promote.add_argument("--project", type=Path, required=True)
+    vg_promote.add_argument("--accepted-by", default="human")
+    vg_promote.add_argument("--force", action="store_true")
 
     return parser
 
@@ -2234,6 +2254,37 @@ def cmd_product_run(args: argparse.Namespace) -> int:
     return 2
 
 
+def cmd_vibegame_init(args: argparse.Namespace) -> int:
+    from game_loop.vibegame_bridge import initialize_vibegame_project
+
+    result = initialize_vibegame_project(
+        args.project,
+        prompt=args.prompt,
+        concept_image=args.concept,
+        language=args.language,
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_vibegame_validate(args: argparse.Namespace) -> int:
+    from game_loop.vibegame_bridge import validate_vibegame_project
+
+    result = validate_vibegame_project(args.project)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0 if result["ok"] else 2
+
+
+def cmd_vibegame_promote(args: argparse.Namespace) -> int:
+    from game_loop.vibegame_bridge import promote_vibegame_baseline
+
+    manifest = promote_vibegame_baseline(
+        args.project, accepted_by=args.accepted_by, force=bool(args.force)
+    )
+    print(json.dumps(asdict(manifest), ensure_ascii=False, indent=2))
+    return 0
+
+
 # ── main ──────────────────────────────────────────────────────────────
 
 def main(argv: list[str] | None = None) -> int:
@@ -2256,6 +2307,9 @@ def main(argv: list[str] | None = None) -> int:
         "studio": cmd_studio,
         "doctor": cmd_doctor,
         "run": cmd_product_run,
+        "vibegame-init": cmd_vibegame_init,
+        "vibegame-validate": cmd_vibegame_validate,
+        "vibegame-promote": cmd_vibegame_promote,
     }
     try:
         return handlers[args.command](args)
